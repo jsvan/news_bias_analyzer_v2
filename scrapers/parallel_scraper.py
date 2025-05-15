@@ -35,8 +35,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Constants
-RSS_TIMEOUT = int(os.getenv('SCRAPER_TIMEOUT', 30))  # seconds
-ARTICLE_TIMEOUT = int(os.getenv('SCRAPER_TIMEOUT', 45))  # seconds
+RSS_TIMEOUT = int(os.getenv('SCRAPER_TIMEOUT', 20))  # seconds
+ARTICLE_TIMEOUT = int(os.getenv('SCRAPER_TIMEOUT', 30))  # seconds
 BATCH_SIZE = int(os.getenv('SCRAPER_BATCH_SIZE', 20))  # Process 20 feeds at a time
 MIN_DELAY = float(os.getenv('SCRAPER_MIN_DELAY', 1))  # Minimum delay between requests to same domain (seconds)
 MAX_DELAY = float(os.getenv('SCRAPER_MAX_DELAY', 3))  # Maximum delay between requests to same domain (seconds)
@@ -526,11 +526,30 @@ async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = 
                 processed_batch = await process_article_batch(current_batch)
                 
                 # Filter out articles that failed to extract
-                valid_articles = [a for a in processed_batch if a.get('text')]
+                valid_articles = []
+                skipped_articles = []
+                
+                # Check each article and provide detailed feedback
+                for a in processed_batch:
+                    if a.get('text'):
+                        text_length = len(a.get('text', ''))
+                        if text_length > 100:  # Only accept articles with meaningful content
+                            valid_articles.append(a)
+                            logger.info(f"Valid article: {a.get('title', '')[:40]}... ({text_length} chars)")
+                        else:
+                            skipped_articles.append(a)
+                            logger.warning(f"Skipping article with short text ({text_length} chars): {a.get('title', '')[:40]}...")
+                    else:
+                        skipped_articles.append(a)
+                        error = a.get('extraction_info', {}).get('error', 'Unknown error')
+                        logger.warning(f"Failed to extract article: {a.get('url', 'unknown')} - {error}")
                 
                 if valid_articles:
                     all_processed_articles.extend(valid_articles)
                     logger.info(f"Successfully processed {len(valid_articles)} articles in this batch")
+                    logger.info(f"Skipped {len(skipped_articles)} articles in this batch")
+                else:
+                    logger.warning(f"ALL {len(processed_batch)} ARTICLES SKIPPED in this batch!")
                 
                 # Brief pause between article batches
                 await asyncio.sleep(2)
