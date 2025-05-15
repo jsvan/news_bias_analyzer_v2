@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database.db import DatabaseManager
 from database.models import NewsArticle, NewsSource
 from scrapers.news_sources import get_news_sources
-from scrapers.parallel_scraper import scrape_feeds
+from scrapers.parallel_scraper import scrape_feeds, scrape_feeds_generator
 
 # Global database session that can be accessed by signal handlers
 db_manager = None
@@ -47,6 +47,8 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
     Returns:
         Number of articles successfully inserted
     """
+    print(f"\nINSERTING {len(articles)} ARTICLES TO DATABASE")
+    logger.info(f"INSERTION: Beginning process to insert {len(articles)} articles to database")
     if not articles:
         print("No articles to insert")
         return 0
@@ -75,32 +77,46 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
     source_cache = {}
     
     # Start transaction
+    print(f"\n{'-' * 80}")
+    print(f"BEGINNING VALIDATION OF {len(articles)} ARTICLES")
+    print(f"{'-' * 80}")
+    
     for i, article in enumerate(articles):
         # Critical validation checks with detailed logging
+        article_id = article.get('id', '[Unknown ID]')
+        article_url = article.get('url', '[Unknown URL]')
+        article_title = article.get('title', '[Unknown Title]')[:50]
+        
+        print(f"\nValidating article {i+1}/{len(articles)}: {article_title}")
+        print(f"  ID: {article_id}")
+        print(f"  URL: {article_url}")
+        
         if 'id' not in article:
-            print(f"SKIPPING ARTICLE {i}: Missing required field 'id'")
-            logger.warning(f"SKIPPING: Article missing ID field: {article.get('url', 'unknown')}")
+            print(f"  SKIPPING: Missing required field 'id'")
+            logger.warning(f"SKIPPING: Article missing ID field: {article_url}")
             skipped_count += 1
             continue
             
         if 'url' not in article:
-            print(f"SKIPPING ARTICLE {article.get('id', '[Unknown ID]')}: Missing required field 'url'")
-            logger.warning(f"SKIPPING: Article missing URL field: {article.get('id', '[Unknown ID]')}")
+            print(f"  SKIPPING: Missing required field 'url'")
+            logger.warning(f"SKIPPING: Article missing URL field: {article_id}")
             skipped_count += 1
             continue
             
         if 'source_name' not in article:
-            print(f"SKIPPING ARTICLE {article.get('id', '[Unknown ID]')}: Missing required field 'source_name'")
-            logger.warning(f"SKIPPING: Article missing source_name field: {article.get('url', 'unknown')}")
+            print(f"  SKIPPING: Missing required field 'source_name'")
+            logger.warning(f"SKIPPING: Article missing source_name field: {article_url}")
             skipped_count += 1
             continue
             
         # Skip articles without text
         if not article.get('text'):
-            print(f"SKIPPING ARTICLE {article.get('id', '[Unknown ID]')}: No text content")
-            logger.info(f"Skipping article without text: {article.get('url', 'unknown')}")
+            print(f"  SKIPPING: No text content")
+            logger.info(f"Skipping article without text: {article_url}")
             skipped_count += 1
             continue
+            
+        print(f"  ✓ Article passes basic validation")
             
         try:
             article_title = article.get('title', '[No Title]')
@@ -247,16 +263,15 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
     # Commit the transaction
     try:
         if inserted_count > 0:
-            print(f"\n{'=' * 80}")
+            print(f"\n{'#' * 80}")
             print(f"COMMITTING DATABASE TRANSACTION WITH {inserted_count} ARTICLES")
-            print(f"{'=' * 80}")
-            logger.info(f"Committing transaction with {inserted_count} articles")
+            print(f"{'#' * 80}")
+            logger.info(f"TRANSACTION: Committing {inserted_count} articles to database")
             
             # Get IDs of articles we're trying to insert for verification
             article_ids_to_insert = [a.get('id') for a in articles if a.get('id')]
-            print(f"Attempting to insert article IDs: {article_ids_to_insert[:5]}...")
-            if len(article_ids_to_insert) > 5:
-                print(f"...and {len(article_ids_to_insert) - 5} more")
+            print(f"Articles to insert: {article_ids_to_insert}")
+            logger.info(f"TRANSACTION: Inserting article IDs: {article_ids_to_insert}")
             
             # Try to get the database state before commit
             try:
@@ -265,78 +280,86 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
                 try:
                     count_before = verification_session.query(NewsArticle).count()
                     print(f"Current article count before commit: {count_before}")
+                    logger.info(f"TRANSACTION: Count before commit: {count_before}")
                 except Exception as query_error:
                     print(f"Error querying article count: {str(query_error)}")
+                    logger.error(f"TRANSACTION ERROR: Count query failed: {str(query_error)}")
                     count_before = -1
                 finally:
                     verification_session.close()
             except Exception as count_error:
                 print(f"Error creating verification session: {str(count_error)}")
+                logger.error(f"TRANSACTION ERROR: Verification session failed: {str(count_error)}")
                 count_before = -1
             
             # Force flush before commit to catch errors early
             try:
                 session.flush()
-                print("Session flushed successfully - no errors detected")
+                print("SESSION FLUSH SUCCESSFUL - No errors detected")
+                logger.info("TRANSACTION: Session flush successful")
             except Exception as flush_error:
                 print(f"FLUSH ERROR: {str(flush_error)}")
-                logger.error(f"Database flush error: {str(flush_error)}")
+                logger.error(f"TRANSACTION ERROR: Flush failed: {str(flush_error)}")
+                logger.error(traceback.format_exc())
                 session.rollback()
                 raise
             
             # Actual commit with explicit error handling
             commit_start = time.time()
             try:
+                print("STARTING COMMIT...")
+                logger.info("TRANSACTION: Starting commit operation")
                 session.commit()
                 commit_time = time.time() - commit_start
                 print(f"COMMIT SUCCESSFUL! (took {commit_time:.2f}s)")
                 print(f"Successfully inserted {inserted_count} articles (skipped {skipped_count})")
-                logger.info(f"Successfully inserted {inserted_count} articles (skipped {skipped_count})")
+                logger.info(f"TRANSACTION SUCCESS: Inserted {inserted_count} articles in {commit_time:.2f}s")
             except Exception as commit_error:
                 print(f"COMMIT FAILED: {str(commit_error)}")
-                logger.error(f"Database commit error: {str(commit_error)}")
+                logger.error(f"TRANSACTION ERROR: Commit failed: {str(commit_error)}")
+                logger.error(traceback.format_exc())
                 session.rollback()
                 raise
             
-            # Verify the articles were actually inserted by checking a few random ones
+            # Verify the articles were actually inserted by checking them all
             print(f"\nVERIFYING INSERTION OF ARTICLES:")
-            verification_count = min(inserted_count, 5)  # Check up to 5 random articles
+            logger.info("VERIFICATION: Checking all inserted articles")
+            verification_count = inserted_count
             success_count = 0
             
-            # Create a list of indexes to verify, starting with the first one
-            article_indexes = [0]
-            # Add more indexes if we have more articles
-            if inserted_count > 1:
-                import random
-                additional_indexes = random.sample(range(1, len(articles)), min(4, inserted_count-1))
-                article_indexes.extend(additional_indexes)
-            
-            for idx in article_indexes:
-                article = articles[idx]
+            # Check every inserted article
+            for article in articles:
                 if 'id' not in article:
-                    print(f"  - Cannot verify article {idx+1} (missing ID)")
+                    print(f"  - Cannot verify article (missing ID): {article.get('url', 'unknown')}")
                     continue
                     
-                check = session.query(NewsArticle).filter_by(id=article['id']).first()
+                article_id = article['id']
+                check = session.query(NewsArticle).filter_by(id=article_id).first()
                 if check:
-                    print(f"  ✓ VERIFIED: Article found: {article.get('title', '')[:30]}...")
+                    print(f"  ✓ VERIFIED: Article found: {article.get('title', '')[:30]}... (ID: {article_id})")
                     success_count += 1
                 else:
-                    print(f"  ✗ FAILED: Could not find article {article['id']}")
+                    print(f"  ✗ FAILED: Could not find article ID: {article_id} - {article.get('title', '')[:30]}...")
+                    logger.warning(f"VERIFICATION FAILED: Article not found after commit: {article_id}")
             
             # Get final count after commit
             try:
                 count_after = session.query(NewsArticle).count()
                 print(f"\nFinal article count: {count_after} (Change: {count_after - count_before})")
+                logger.info(f"VERIFICATION: Final count: {count_after} (Change: {count_after - count_before})")
                 
                 if count_after - count_before != inserted_count:
                     print(f"⚠️ WARNING: Expected +{inserted_count} articles, but count shows +{count_after - count_before}")
+                    logger.warning(f"COUNT MISMATCH: Expected +{inserted_count}, got +{count_after - count_before}")
             except Exception as count_error:
                 print(f"Error getting count after commit: {str(count_error)}")
+                logger.error(f"VERIFICATION ERROR: Count query failed: {str(count_error)}")
                 
             print(f"Verification summary: {success_count}/{verification_count} articles verified")
+            logger.info(f"VERIFICATION SUMMARY: {success_count}/{verification_count} articles verified")
         else:
             print("No articles to commit - skipping transaction")
+            logger.info("TRANSACTION: No articles to commit - skipping transaction")
                 
     except Exception as commit_error:
         # But still catch commit errors to prevent the whole batch from failing
@@ -417,6 +440,7 @@ def handle_keyboard_interrupt(sig, frame):
 def run_scraper_with_db() -> int:
     """
     Run the scraper and save results to the database.
+    Uses a streaming approach to save articles in batches as they are processed.
     
     Returns:
         Total number of articles inserted
@@ -497,18 +521,6 @@ def run_scraper_with_db() -> int:
                 'language': source.get('language', None)
             })
             
-    # Run the scraper
-    logger.info(f"Starting scraper with {len(feed_configs)} feeds (limit: {limit_per_feed} articles per feed)")
-    logger.info("NOTE: You can press Ctrl+C at any time to safely exit and commit pending changes")
-    
-    articles = scrape_feeds(feed_configs, limit_per_feed)
-    
-    if not articles:
-        logger.warning("No articles retrieved from scraper")
-        return 0
-        
-    logger.info(f"Scraper returned {len(articles)} articles")
-    
     # Get baseline article count to verify progress
     count_session = db_manager.get_session()
     try:
@@ -520,22 +532,67 @@ def run_scraper_with_db() -> int:
     finally:
         count_session.close()
     
-    # Insert articles in batches of 20
-    total_inserted = 0
-    batch_size = int(os.getenv('SCRAPER_BATCH_SIZE', 20))
+    # Run the scraper with streaming approach
+    logger.info(f"Starting scraper with {len(feed_configs)} feeds (limit: {limit_per_feed} articles per feed)")
+    logger.info("NOTE: You can press Ctrl+C at any time to safely exit and commit pending changes")
     
-    for i in range(0, len(articles), batch_size):
-        batch = articles[i:i+batch_size]
-        logger.info(f"Inserting batch {i//batch_size + 1}/{(len(articles) + batch_size - 1)//batch_size} ({len(batch)} articles)")
-        
-        # Remove try/except to expose any batch insertion errors
-        batch_inserted = insert_articles_batch(db_manager, batch)
-        total_inserted += batch_inserted
-        logger.info(f"Batch result: {batch_inserted} articles inserted successfully")
-        
-        # Brief pause between batches to avoid database contention
-        if i + batch_size < len(articles):
+    # Use the generator version that yields batches as they're processed
+    total_inserted = 0
+    batch_counter = 0
+    
+    try:
+        for article_batch in scrape_feeds_generator(feed_configs, limit_per_feed):
+            batch_counter += 1
+            if not article_batch:
+                logger.warning(f"Received empty batch {batch_counter}, skipping")
+                continue
+                
+            logger.info(f"Processing batch {batch_counter} with {len(article_batch)} articles")
+            
+            # Insert this batch immediately
+            logger.info(f"BATCH {batch_counter}: Starting database insertion of {len(article_batch)} articles...")
+            print(f"\n{'*' * 80}")
+            print(f"INSERTING BATCH {batch_counter}: {len(article_batch)} ARTICLES")
+            print(f"{'*' * 80}")
+            
+            # Log article IDs to track what we're about to insert
+            article_ids = [a.get('id') for a in article_batch]
+            logger.info(f"BATCH {batch_counter}: Article IDs: {article_ids}")
+            
+            try:
+                batch_inserted = insert_articles_batch(db_manager, article_batch)
+                total_inserted += batch_inserted
+                
+                logger.info(f"BATCH {batch_counter} COMPLETED: {batch_inserted}/{len(article_batch)} articles inserted successfully")
+                print(f"\n{'=' * 80}")
+                print(f"BATCH {batch_counter} COMPLETED: {batch_inserted}/{len(article_batch)} articles inserted successfully")
+                print(f"Running total: {total_inserted} articles")
+                print(f"{'=' * 80}\n")
+                
+                # Check article count after each batch
+                check_session = db_manager.get_session()
+                try:
+                    current_count = check_session.query(NewsArticle).count()
+                    logger.info(f"VERIFICATION: Current database count: {current_count} articles")
+                    print(f"Current database count: {current_count} articles")
+                except Exception as e:
+                    logger.error(f"Error checking article count: {str(e)}")
+                finally:
+                    check_session.close()
+            except Exception as batch_error:
+                logger.error(f"CRITICAL ERROR IN BATCH {batch_counter}: {str(batch_error)}")
+                logger.error(traceback.format_exc())
+                print(f"\n{'!' * 80}")
+                print(f"CRITICAL ERROR IN BATCH {batch_counter}: {str(batch_error)}")
+                print(f"{'!' * 80}\n")
+            
+            # Brief pause between batches to avoid database contention
             time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Scraping interrupted by user - articles processed so far have been saved")
+    except Exception as e:
+        logger.error(f"Error during scraping: {str(e)}")
+        logger.error(traceback.format_exc())
     
     # Verify final article count to confirm inserts worked
     count_session = db_manager.get_session()

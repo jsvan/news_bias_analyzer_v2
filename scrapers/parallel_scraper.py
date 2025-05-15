@@ -470,7 +470,7 @@ async def process_article_batch(articles_batch: List[Dict[str, Any]]) -> List[Di
     # Process all articles in the batch concurrently using asyncio.gather
     return await asyncio.gather(*[process_article(article) for article in articles_batch])
 
-async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None) -> List[Dict[str, Any]]:
+async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None):
     """
     Run the two-stage scraper process.
     
@@ -478,14 +478,12 @@ async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = 
         feed_configs: List of feed configuration dictionaries
         limit_per_feed: Maximum number of articles to process per feed
         
-    Returns:
-        List of processed articles
+    Yields:
+        Batches of processed articles as they are completed
     """
     # Use default limit from environment variable if not specified
     if limit_per_feed is None:
         limit_per_feed = DEFAULT_LIMIT_PER_FEED
-    
-    all_processed_articles = []
     
     # Process feeds in batches of BATCH_SIZE
     for i in range(0, len(feed_configs), BATCH_SIZE):
@@ -545,20 +543,54 @@ async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = 
                         logger.warning(f"Failed to extract article: {a.get('url', 'unknown')} - {error}")
                 
                 if valid_articles:
-                    all_processed_articles.extend(valid_articles)
-                    logger.info(f"Successfully processed {len(valid_articles)} articles in this batch")
+                    # Yield the batch immediately instead of accumulating
+                    yield valid_articles
+                    logger.info(f"Successfully processed and yielded {len(valid_articles)} articles in this batch")
                     logger.info(f"Skipped {len(skipped_articles)} articles in this batch")
                 else:
                     logger.warning(f"ALL {len(processed_batch)} ARTICLES SKIPPED in this batch!")
                 
                 # Brief pause between article batches
                 await asyncio.sleep(2)
-    
-    return all_processed_articles
 
+def scrape_feeds_generator(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None):
+    """
+    Main entry point for the scraper that yields article batches as they are processed.
+    
+    Args:
+        feed_configs: List of feed configurations with 'url' and 'source_name'
+        limit_per_feed: Maximum number of articles to process per feed
+        
+    Yields:
+        Batches of processed articles as they are completed
+    """
+    try:
+        # We need to materialize async generator results one by one
+        event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(event_loop)
+        try:
+            generator = run_scraper(feed_configs, limit_per_feed)
+            while True:
+                try:
+                    # Get the next batch from the async generator
+                    batch = event_loop.run_until_complete(generator.__anext__())
+                    yield batch
+                except StopAsyncIteration:
+                    break
+        finally:
+            event_loop.close()
+    except KeyboardInterrupt:
+        logger.info("Scraping interrupted by user")
+        return
+    except Exception as e:
+        logger.error(f"Scraper error: {str(e)}")
+        logger.error(traceback.format_exc())
+        return
+        
 def scrape_feeds(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None) -> List[Dict[str, Any]]:
     """
-    Main entry point for the scraper.
+    Legacy entry point for the scraper that returns all articles at once.
+    Use scrape_feeds_generator for more efficient streaming approach.
     
     Args:
         feed_configs: List of feed configurations with 'url' and 'source_name'
@@ -567,8 +599,15 @@ def scrape_feeds(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None)
     Returns:
         List of processed articles
     """
+    logger.warning(
+        "Using legacy scrape_feeds() function that accumulates all articles in memory. "
+        "Consider using scrape_feeds_generator() instead for streaming efficiency."
+    )
     try:
-        return asyncio.run(run_scraper(feed_configs, limit_per_feed))
+        all_articles = []
+        for batch in scrape_feeds_generator(feed_configs, limit_per_feed):
+            all_articles.extend(batch)
+        return all_articles
     except KeyboardInterrupt:
         logger.info("Scraping interrupted by user")
         return []
