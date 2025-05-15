@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>News Bias Analyzer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>News Bias Analyzer</h1>
+    </header>
+    
+    <div class="main-content">
+      <!-- API Status Warning -->
+      <div id="api-status-warning" style="display: none; background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid #ffeeba;">
+        <p><strong>Warning:</strong> API server is not responding. Make sure the API is running with:</p>
+        <code>./run.sh api</code>
+      </div>
+
+      <!-- Initial analysis state -->
+      <div id="initial-state">
+        <p>Analyze the current news article for bias and compare it to global sentiment patterns.</p>
+        <button id="analyze-btn" class="primary-btn">Analyze Article</button>
+      </div>
+      
+      <!-- Loading state -->
+      <div id="loading-state" class="hidden">
+        <div class="loader"></div>
+        <p>Analyzing article content...</p>
+      </div>
+      
+      <!-- Results state -->
+      <div id="results-state" class="hidden">
+        <div class="source-info">
+          <h2 id="article-source">Source: <span>...</span></h2>
+          <p id="article-title">...</p>
+        </div>
+        
+        <!-- Composite score section -->
+        <div class="composite-score">
+          <h3>Composite Bias Score <span class="info-link" id="methodology-link" title="Learn how this is calculated">ⓘ</span></h3>
+          <div class="score-container">
+            <div class="score-meter">
+              <div id="composite-indicator" class="indicator"></div>
+              <div class="labels">
+                <span>Very Unique</span>
+                <span>Average</span>
+                <span>Very Common</span>
+              </div>
+            </div>
+            <p>
+              This article's bias pattern is <span id="composite-percentile">...</span> compared to global news sources.
+              <span id="cache-indicator" style="display: none; font-size: 0.7em; padding: 1px 4px; border-radius: 3px; margin-left: 5px; color: white; background-color: #4a90e2;"></span>
+            </p>
+          </div>
+        </div>
+        
+        <!-- Entities list -->
+        <div class="entities-section">
+          <h3>Entity Analysis</h3>
+          <div id="entities-list">
+            <!-- Entity items will be inserted here -->
+          </div>
+        </div>
+        
+        <button id="view-details-btn" class="secondary-btn">View Detailed Analysis</button>
+        <button id="analyze-again-btn" class="primary-btn">Analyze Again</button>
+      </div>
+      
+      <!-- No article state -->
+      <div id="no-article-state" class="hidden">
+        <p>This doesn't appear to be a news article.</p>
+        <p>Try analyzing a page from a news website.</p>
+        <button id="force-analyze-btn" class="secondary-btn">Analyze Anyway</button>
+      </div>
+      
+      <!-- Error state -->
+      <div id="error-state" class="hidden">
+        <p>An error occurred while analyzing this article.</p>
+        <button id="retry-btn" class="primary-btn">Try Again</button>
+      </div>
+    </div>
+    
+    <!-- Detailed view (hidden by default) -->
+    <div id="detailed-view" class="hidden">
+      <button id="back-btn" class="back-btn">← Back</button>
+      
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="entity-tab">Entities</button>
+        <button class="tab-btn" data-tab="distribution-tab">Distributions</button>
+        <button class="tab-btn" data-tab="similarity-tab">Similar Articles</button>
+        <button class="tab-btn" data-tab="entity-tracking-tab">Entity Tracking</button>
+        <button class="tab-btn" data-tab="topic-cluster-tab">Topic Clusters</button>
+        <button class="tab-btn" data-tab="methodology-tab">Methodology</button>
+      </div>
+      
+      <div id="entity-tab" class="tab-content active">
+        <div class="entity-details-container">
+          <!-- Entity details will be inserted here -->
+        </div>
+      </div>
+      
+      <div id="distribution-tab" class="tab-content">
+        <h3>Sentiment Distribution Comparison</h3>
+        
+        <div class="chart-controls">
+          <div class="control-group">
+            <label for="entity-selector">Entity:</label>
+            <select id="entity-selector"></select>
+          </div>
+          <div class="control-group">
+            <label for="dimension-selector">Dimension:</label>
+            <select id="dimension-selector">
+              <option value="power">Power</option>
+              <option value="moral">Moral</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="country-selector">Country:</label>
+            <select id="country-selector">
+              <option value="">Global</option>
+              <option value="United States">United States</option>
+              <option value="United Kingdom">United Kingdom</option>
+              <option value="Canada">Canada</option>
+              <option value="Australia">Australia</option>
+              <option value="Germany">Germany</option>
+              <option value="France">France</option>
+              <option value="Japan">Japan</option>
+              <option value="Russia">Russia</option>
+              <option value="China">China</option>
+              <option value="India">India</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="chart-container">
+          <canvas id="distribution-chart" width="320" height="200"></canvas>
+        </div>
+        
+        <div class="distribution-description">
+          <p>This histogram shows how the selected entity's sentiment score compares to the global distribution of scores for similar entities across thousands of news articles.</p>
+          <p>The highlighted bar shows where this article's sentiment falls in the distribution, helping identify unusual portrayals.</p>
+          <p id="sample-size-info" class="sample-size-info">Loading sample size information...</p>
+        </div>
+        
+        <div class="distribution-legend">
+          <div class="legend-item">
+            <span class="color-box current"></span>
+            <span>Current Article</span>
+          </div>
+          <div class="legend-item">
+            <span class="color-box standard"></span>
+            <span>Other Articles</span>
+          </div>
+        </div>
+      </div>
+      
+      <div id="similarity-tab" class="tab-content">
+        <h3>Similar Articles</h3>
+        <div class="similarity-controls">
+          <div class="filter-container">
+            <label for="similarity-threshold">Minimum Similarity:</label>
+            <select id="similarity-threshold">
+              <option value="0.6">60%</option>
+              <option value="0.7" selected>70%</option>
+              <option value="0.8">80%</option>
+              <option value="0.9">90%</option>
+            </select>
+          </div>
+          <div class="filter-container">
+            <label for="max-results">Max Results:</label>
+            <select id="max-results">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="similarity-results" class="similarity-results">
+          <div class="loading">
+            <div class="loader"></div>
+            <p>Finding similar articles...</p>
+          </div>
+        </div>
+
+        <div id="similarity-cluster-view" class="similarity-cluster-view">
+          <h4>Article Similarity Map</h4>
+          <div class="canvas-container">
+            <canvas id="similarity-canvas" width="350" height="250"></canvas>
+          </div>
+          <p class="similarity-description">This visualization shows how the current article (highlighted in red) relates to similar articles in the content space. Articles that cover similar topics and perspectives are positioned closer together.</p>
+        </div>
+      </div>
+
+      <div id="entity-tracking-tab" class="tab-content">
+        <h3>Entity Sentiment Tracking</h3>
+
+        <div class="tracking-controls">
+          <div class="control-group">
+            <label for="tracking-entity-selector">Entity:</label>
+            <select id="tracking-entity-selector"></select>
+          </div>
+          <div class="control-group">
+            <label for="tracking-time-range">Time Range:</label>
+            <select id="tracking-time-range">
+              <option value="7">Last Week</option>
+              <option value="30" selected>Last Month</option>
+              <option value="90">Last 3 Months</option>
+              <option value="180">Last 6 Months</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="entity-tracking-chart" width="350" height="230"></canvas>
+        </div>
+
+        <div class="tracking-description">
+          <p>This chart shows how sentiment toward this entity has evolved over time across news sources, helping identify shifts in portrayal.</p>
+          <p id="tracking-insight" class="insight-box">
+            Select an entity to view its sentiment tracking data over time.
+          </p>
+        </div>
+      </div>
+
+      <div id="topic-cluster-tab" class="tab-content">
+        <h3>Topic & Entity Relationships</h3>
+
+        <div class="cluster-controls">
+          <div class="control-group">
+            <label for="cluster-view-type">View:</label>
+            <select id="cluster-view-type">
+              <option value="topics">Topics</option>
+              <option value="entities">Entities</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="cluster-threshold">Relationship Strength:</label>
+            <select id="cluster-threshold">
+              <option value="weak">Include Weak</option>
+              <option value="medium" selected>Medium</option>
+              <option value="strong">Strong Only</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="cluster-visualization">
+          <canvas id="topic-cluster-canvas" width="350" height="250"></canvas>
+        </div>
+
+        <div class="cluster-description">
+          <p>This visualization shows how topics and entities group together based on co-occurrence and sentiment patterns.</p>
+          <p>Topics that appear closer together are more related, either by shared entities or similar sentiment patterns.</p>
+          <p><strong>Tip:</strong> Click on a topic or entity to see details and related items.</p>
+        </div>
+
+        <div id="cluster-details" class="cluster-details hidden">
+          <h4 id="selected-item-title">Selected Topic</h4>
+          <div id="selected-item-details"></div>
+        </div>
+      </div>
+
+      <div id="methodology-tab" class="tab-content">
+        <h3>Analysis Methodology</h3>
+        <div class="methodology-content">
+          <h4>Sentiment Analysis</h4>
+          <p>Articles are analyzed using OpenAI's language models to identify entities (people, countries, organizations) and assess sentiment on two dimensions:</p>
+          <ul>
+            <li><strong>Power Dimension:</strong> How strong/powerful vs. weak/vulnerable an entity is portrayed (-2 to +2 scale)</li>
+            <li><strong>Moral Dimension:</strong> How virtuous/good vs. malevolent/evil an entity is portrayed (-2 to +2 scale)</li>
+          </ul>
+
+          <div class="methodology-example">
+            <p><strong>Example:</strong> An article that portrays the United States as very powerful (+2) and morally good (+1.5) while depicting Russia as moderately powerful (+1) but morally questionable (-1) has a specific sentiment pattern that can be compared to typical patterns across news sources.</p>
+          </div>
+
+          <h4>Statistical Comparison</h4>
+          <p>For each entity mentioned in the article, we compare the sentiment to:</p>
+          <ul>
+            <li>The distribution of sentiment in the source's national news ecosystem</li>
+            <li>The global distribution across all monitored news sources</li>
+          </ul>
+
+          <div class="methodology-insight">
+            <p>Our database contains over 100,000 entity mentions from thousands of articles across dozens of news sources, providing robust baselines for comparison.</p>
+          </div>
+
+          <h4>Composite Score Calculation</h4>
+          <p>The composite score represents how typical or unusual the article's overall sentiment pattern is, based on:</p>
+          <ol>
+            <li>Converting each entity's power and moral scores to percentiles based on global distributions</li>
+            <li>Calculating statistical deviation from expected values for this news source</li>
+            <li>Combining individual entity scores using weighted averaging (entities with more mentions have higher weight)</li>
+            <li>Normalizing the final score to a 0-100 percentile</li>
+          </ol>
+
+          <div class="percentile-explanation">
+            <p><strong>Interpreting the Percentile:</strong></p>
+            <ul>
+              <li><strong>Below 10%:</strong> Highly unusual sentiment pattern compared to typical coverage</li>
+              <li><strong>10-25%:</strong> Unusual sentiment pattern</li>
+              <li><strong>25-75%:</strong> Average or typical sentiment pattern</li>
+              <li><strong>75-90%:</strong> Notably conventional sentiment pattern</li>
+              <li><strong>Above 90%:</strong> Extremely conventional sentiment pattern</li>
+            </ul>
+          </div>
+
+          <h4>Entity Tracking & Topic Analysis</h4>
+          <p>In addition to analyzing individual articles, we track entity sentiment over time to identify trends and shifts in portrayals.</p>
+          <ul>
+            <li><strong>Entity Tracking:</strong> We monitor how sentiment toward specific entities changes over time, helping to identify narrative shifts</li>
+            <li><strong>Topic Clustering:</strong> We identify related entities and topics through co-occurrence patterns and sentiment similarity</li>
+          </ul>
+
+          <div class="methodology-insight">
+            <p>These temporal and relationship analyses provide additional context beyond single-article sentiment, revealing how narratives develop and interconnect over time.</p>
+          </div>
+
+          <div class="methodology-note">
+            <p><strong>Note:</strong> This analysis does not determine if an article is "biased" in the traditional sense, but rather how its sentiment patterns compare statistically to patterns observed across many news sources. Unusual sentiment patterns may indicate unique perspectives, specialized coverage, or sentiment that differs from mainstream portrayals.</p>
+          </div>
+
+          <div id="current-article-data" class="article-data-summary">
+            <!-- This section will be populated with current article data when viewing methodology -->
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      <p>News Bias Analyzer v0.1.0</p>
+    </footer>
+  </div>
+  
+  <script src="chart.min.js"></script>
+  <script src="sentiment_histogram.js"></script>
+  <script src="similarity_cluster.js"></script>
+  <script src="entity_tracking.js"></script>
+  <script src="topic_cluster.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

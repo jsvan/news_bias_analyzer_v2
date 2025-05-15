@@ -1,0 +1,83 @@
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "root"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/lib/docker/containers/**/*.log",
+            "log_group_name": "news-bias-analyzer-containers",
+            "log_stream_name": "{instance_id}-{container_name}",
+            "timezone": "Local",
+            "retention_in_days": 7
+          },
+          {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "news-bias-analyzer-system",
+            "log_stream_name": "{instance_id}-syslog",
+            "timezone": "Local",
+            "retention_in_days": 7
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "namespace": "NewsBiasAnalyzer",
+    "metrics_collected": {
+      "cpu": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "usage_active",
+          "usage_system",
+          "usage_user"
+        ]
+      },
+      "mem": {
+        "measurement": [
+          "used_percent",
+          "available",
+          "used"
+        ]
+      },
+      "disk": {
+        "resources": [
+          "/"
+        ],
+        "measurement": [
+          "used_percent",
+          "free",
+          "total"
+        ]
+      },
+      "diskio": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "reads",
+          "writes",
+          "read_time",
+          "write_time"
+        ]
+      },
+      "netstat": {
+        "measurement": [
+          "tcp_established",
+          "tcp_time_wait"
+        ]
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "aggregation_dimensions": [
+      ["InstanceId"]
+    ]
+  }
+}

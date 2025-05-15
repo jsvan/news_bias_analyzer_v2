@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analysis History - News Bias Analyzer</title>
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Analysis History</h1>
+      <div class="header-actions">
+        <button id="export-btn" class="secondary-btn">Export History</button>
+        <button id="clear-btn" class="danger-btn">Clear History</button>
+      </div>
+    </header>
+    
+    <main>
+      <div class="filter-bar">
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="Search by title or source...">
+        </div>
+        <div class="filter-options">
+          <select id="source-filter">
+            <option value="">All Sources</option>
+            <!-- Sources will be populated from history -->
+          </select>
+          
+          <select id="time-filter">
+            <option value="all">All Time</option>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+          </select>
+          
+          <select id="sort-filter">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="unusual">Most Unusual</option>
+          </select>
+        </div>
+      </div>
+      
+      <div id="history-items">
+        <div class="loading-message">Loading analysis history...</div>
+        <!-- History items will be inserted here -->
+      </div>
+      
+      <div id="empty-state" class="hidden">
+        <p>No analysis history found.</p>
+        <p>Analyze some news articles to see them here.</p>
+      </div>
+    </main>
+    
+    <!-- Detail view (shown when an item is clicked) -->
+    <div id="detail-view" class="hidden">
+      <div class="detail-header">
+        <button id="back-btn" class="back-btn">← Back to History</button>
+        <a id="open-article-btn" class="secondary-btn" target="_blank">Open Article</a>
+      </div>
+      
+      <div class="detail-content">
+        <h2 id="detail-title"></h2>
+        <div class="detail-meta">
+          <span id="detail-source"></span>
+          <span id="detail-date"></span>
+        </div>
+        
+        <div class="score-container">
+          <h3>Composite Bias Score</h3>
+          <div class="score-meter">
+            <div id="detail-indicator" class="indicator"></div>
+            <div class="labels">
+              <span>Very Unusual</span>
+              <span>Average</span>
+              <span>Very Common</span>
+            </div>
+          </div>
+          <p id="detail-percentile"></p>
+        </div>
+        
+        <h3>Analyzed Entities</h3>
+        <div id="detail-entities">
+          <!-- Entity items will be inserted here -->
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="history.js"></script>
+</body>
+</html>

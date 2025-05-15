@@ -1,0 +1,1 @@
+Could we update the .gitignore to ignore the inappropriate for git database files, batches/ folder, docker stuff, and __pycaches__, and anything im forgetting?  

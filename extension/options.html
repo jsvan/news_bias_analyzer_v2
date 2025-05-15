@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>News Bias Analyzer Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>News Bias Analyzer Settings</h1>
+    </header>
+    
+    <main>
+      <form id="settings-form">
+        <div class="settings-section">
+          <h2>API Configuration</h2>
+          
+          <div class="form-group">
+            <label for="api-endpoint">API Endpoint</label>
+            <input type="url" id="api-endpoint" name="apiEndpoint" placeholder="http://localhost:8000">
+            <p class="help-text">The URL of the News Bias Analyzer API server.</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="analysis-mode">Analysis Mode</label>
+            <select id="analysis-mode" name="analysisMode">
+              <option value="demo">Demo Mode (Simulated Results)</option>
+              <option value="live">Live Mode (Real API)</option>
+            </select>
+            <p class="help-text">Use demo mode for testing without API calls.</p>
+          </div>
+        </div>
+        
+        <div class="settings-section">
+          <h2>Behavior</h2>
+          
+          <div class="form-group checkbox">
+            <input type="checkbox" id="auto-analyze" name="autoAnalyze">
+            <label for="auto-analyze">Auto-analyze news articles</label>
+            <p class="help-text">Automatically analyze articles when visiting news sites.</p>
+          </div>
+          
+          <div class="form-group checkbox">
+            <input type="checkbox" id="save-history" name="saveHistory">
+            <label for="save-history">Save analysis history</label>
+            <p class="help-text">Store recent analysis results for later reference.</p>
+          </div>
+          
+          <div class="form-group">
+            <label for="max-history">Max History Items</label>
+            <input type="number" id="max-history" name="maxHistoryItems" min="5" max="100">
+            <p class="help-text">Maximum number of history items to keep (5-100).</p>
+          </div>
+          
+          <div class="form-group checkbox">
+            <input type="checkbox" id="force-reanalysis" name="forceReanalysis">
+            <label for="force-reanalysis">Force Reanalysis</label>
+            <p class="help-text">Always reanalyze articles even if they exist in the database. Turn this on only when you need fresh analysis.</p>
+          </div>
+        </div>
+        
+        <div class="settings-section">
+          <h2>Display</h2>
+          
+          <div class="form-group">
+            <label for="theme">Theme</label>
+            <select id="theme" name="theme">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System Default</option>
+            </select>
+            <p class="help-text">Choose the extension's visual theme.</p>
+          </div>
+        </div>
+        
+        <div class="form-actions">
+          <button type="button" id="reset-btn">Reset to Defaults</button>
+          <button type="submit" id="save-btn">Save Settings</button>
+        </div>
+      </form>
+      
+      <div class="history-section">
+        <div class="history-header">
+          <h2>Analysis History</h2>
+          <button type="button" id="clear-history-btn">Clear History</button>
+        </div>
+        
+        <div id="history-stats">
+          <p><span id="history-count">0</span> analyses stored</p>
+        </div>
+      </div>
+      
+    </main>
+    
+    <div id="status-message" class="hidden"></div>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

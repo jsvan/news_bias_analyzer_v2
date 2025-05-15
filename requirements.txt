@@ -1,0 +1,15 @@
+sqlalchemy>=2.0.23
+psycopg2-binary
+python-dotenv
+requests
+beautifulsoup4
+feedparser
+fastapi
+uvicorn
+openai>=1.0.0
+trafilatura
+lxml
+python-multipart
+pyjwt
+aiohttp
+asyncio
