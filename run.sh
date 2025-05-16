@@ -58,18 +58,20 @@ show_help() {
   echo "Usage: ./run.sh COMMAND [OPTIONS]"
   echo ""
   echo "Commands:"
-  echo "  scraper          Run the news scraper (uses SCRAPER_LIMIT_PER_FEED from .env)"
-  echo "  analyzer [LIMIT] Analyze articles with OpenAI (optional: limit articles to analyze)"
-  echo "  analyze          Run the batch analyzer for efficient batch processing"
-  echo "  analyze daemon   Run the batch analyzer in daemon mode (continuous polling)"
-  echo "  batch            Run the batch analyzer"
-  echo "  api              Start the API server"
-  echo "  dashboard        Start the web dashboard"
-  echo "  extension        Build the browser extension"
-  echo "  setup            Set up the environment and database"
-  echo "  status           Show database statistics"
-  echo "  custom <FILE>    Run a custom Python script file"
-  echo "  help             Show this help message"
+  echo "  scraper                Run the news scraper (uses SCRAPER_LIMIT_PER_FEED from .env)"
+  echo "  analyzer [LIMIT]       Analyze articles with OpenAI (optional: limit articles to analyze)"
+  echo "  analyze                Run the batch analyzer for efficient batch processing"
+  echo "  analyze daemon         Run the batch analyzer in daemon mode (continuous polling)"
+  echo "  batch                  Run the batch analyzer"
+  echo "  api                    Start the API server"
+  echo "  dashboard              Start the web dashboard"
+  echo "  extension              Build the browser extension"
+  echo "  server [TYPE]          Start the API servers (TYPE: extension, dashboard, or both [default])"
+  echo "                         Automatically cleans up any existing server processes"
+  echo "  setup                  Set up the environment and database"
+  echo "  status                 Show database statistics"
+  echo "  custom <FILE>          Run a custom Python script file"
+  echo "  help                   Show this help message"
   echo ""
 }
 
@@ -186,6 +188,22 @@ run_batch_analyzer() {
   fi
 }
 
+# Start server(s)
+start_servers() {
+  setup_python_env
+  cd "$PROJECT_ROOT"
+  
+  # Set server type (default to "both" if not specified)
+  SERVER_TYPE=${1:-"both"}
+  
+  echo -e "${GREEN}Starting News Bias Analyzer server(s)...${NC}"
+  echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+  echo -e "${BLUE}Any existing server processes will be automatically cleaned up${NC}"
+  
+  # Start the servers (automatic cleanup is now built in)
+  python -m server.server_manager --type "$SERVER_TYPE"
+}
+
 # Parse command
 case "$1" in
   scraper)
@@ -208,6 +226,10 @@ case "$1" in
     ;;
   extension)
     build_extension
+    ;;
+  server)
+    shift  # Remove the 'server' command, leaving any arguments
+    start_servers "$@"
     ;;
   setup)
     setup_environment

@@ -401,6 +401,14 @@ def get_news_sources() -> List[Dict[str, Any]]:
                 "https://abcnews.go.com/abcnews/internationalheadlines",  # Valid
             ]
         },
+        {
+            "name": "Foreign Affairs",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.foreignaffairs.com/rss.xml",  # Valid
+            ]
+        },
     ]
     
     # Try to load custom news sources from a JSON file if it exists

@@ -181,6 +181,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'clearAnalysisHistory':
       clearAnalysisHistory().then(() => sendResponse({status: 'History cleared'}));
       return true; // Keep channel open for async response
+      
   }
   
   return true; // Keep the message channel open for async responses
