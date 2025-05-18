@@ -1,7 +1,12 @@
 #!/bin/bash
-# Database setup script for News Bias Analyzer
+# [DEPRECATED] Database setup script for News Bias Analyzer
+# This script is deprecated in favor of the Docker-based setup.
+# Please use './run.sh docker init' instead.
 
 set -e  # Exit on any error
+
+# Get the directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Load environment variables from .env file if it exists
 if [ -f ../.env ]; then
@@ -62,8 +67,8 @@ if ! command -v alembic &> /dev/null; then
   fi
 fi
 
-# Create directory structure if not exists
-mkdir -p database/migrations database/seed_data
+# Create directory structure if not exists (use absolute paths to avoid nested directories)
+mkdir -p "$SCRIPT_DIR/migrations" "$SCRIPT_DIR/seed_data"
 
 # Create database if it doesn't exist
 DB_NAME=$(echo $DATABASE_URL | sed -E 's/.*\/([^?]+).*/\1/')
@@ -98,9 +103,9 @@ fi
 # Run migrations
 if command -v alembic &> /dev/null; then
   echo "Running database migrations..."
-  cd database/migrations
+  cd "$SCRIPT_DIR/migrations"
   alembic upgrade head
-  cd ../..
+  cd "$SCRIPT_DIR/.."
   echo "Migrations completed."
 fi
 

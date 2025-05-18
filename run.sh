@@ -69,7 +69,11 @@ show_help() {
   echo "  server [TYPE]          Start the API servers (TYPE: extension, dashboard, or both [default])"
   echo "                         Automatically cleans up any existing server processes"
   echo "  setup                  Set up the environment and database"
-  echo "  status                 Show database statistics"
+  echo "  docker [COMMAND]       Manage Docker database container (up, down, status, init, backup, restore, shell)"
+  echo "  status [TYPE]          Show database statistics"
+  echo "                         Types: sources - Show detailed source statistics"
+  echo "  restore_openai [ARGS]  Restore OpenAI batch data to database with source detection"
+  echo "                         Run without args for more information"
   echo "  custom <FILE>          Run a custom Python script file"
   echo "  help                   Show this help message"
   echo ""
@@ -128,21 +132,20 @@ build_extension() {
   echo -e "${BLUE}Load the unpacked extension in Chrome from this directory${NC}"
 }
 
-# Setup the environment
-setup_environment() {
-  setup_python_env
-  cd "$PROJECT_ROOT"
-  echo -e "${GREEN}Setting up database...${NC}"
-  cd database
-  bash setup_db.sh
-}
+# Function previously used for local environment setup (now removed in favor of docker)
 
 # Show database statistics
 show_status() {
   setup_python_env
   cd "$PROJECT_ROOT"
   echo -e "${GREEN}Fetching database statistics...${NC}"
-  python -m database.db_stats
+  if [ -n "$1" ]; then
+    # Pass the argument to db_stats.py
+    python -m database.db_stats "$1"
+  else
+    # No argument, show general stats
+    python -m database.db_stats
+  fi
 }
 
 # Run a custom Python script
@@ -188,6 +191,33 @@ run_batch_analyzer() {
   fi
 }
 
+# Manage Docker database
+manage_docker_db() {
+  # Use the db-docker.sh script from the database folder
+  DB_DOCKER_SCRIPT="$PROJECT_ROOT/database/db-docker.sh"
+  
+  # Check if the script exists
+  if [ ! -f "$DB_DOCKER_SCRIPT" ]; then
+    echo -e "${RED}Error: Docker database script not found at $DB_DOCKER_SCRIPT${NC}"
+    echo -e "${BLUE}Make sure you have set up the Docker database correctly${NC}"
+    exit 1
+  fi
+  
+  # Make the script executable if it's not already
+  if [ ! -x "$DB_DOCKER_SCRIPT" ]; then
+    chmod +x "$DB_DOCKER_SCRIPT"
+  fi
+  
+  # Default to showing help if no command is provided
+  DOCKER_COMMAND=${1:-"help"}
+  
+  echo -e "${GREEN}Managing Docker database: $DOCKER_COMMAND${NC}"
+  
+  # Execute the database Docker management script
+  shift # Remove the first argument (the command)
+  "$DB_DOCKER_SCRIPT" "$DOCKER_COMMAND" "$@"
+}
+
 # Start server(s)
 start_servers() {
   setup_python_env
@@ -202,6 +232,32 @@ start_servers() {
   
   # Start the servers (automatic cleanup is now built in)
   python -m server.server_manager --type "$SERVER_TYPE"
+}
+
+# Restore OpenAI data to database
+restore_openai_data() {
+  setup_python_env
+  cd "$PROJECT_ROOT"
+  echo -e "${GREEN}Restoring OpenAI data to database...${NC}"
+  
+  # Check if any additional arguments were passed
+  if [ -n "$1" ]; then
+    python -m database.hard_openai_extraction.restore_openai_data "$@"
+  else
+    # Default arguments
+    echo -e "${BLUE}Using default settings. Add arguments to customize:${NC}"
+    echo "  --batch-dir DIR            Directory with batch files (default: temporary directory)"
+    echo "  --disable-source-detection Disable automatic source detection"
+    echo "  --disable-web-search       Disable web search for source detection (use only pattern matching)"
+    echo "  --web-search-limit NUM     Limit the number of web searches performed in a batch (default: 10)"
+    echo "  --cache-size NUM           Maximum size of source detection cache (default: 1000)"
+    echo "  --parallel-workers NUM     Number of parallel workers for source detection (default: 5)"
+    echo "  --dry-run                  Don't modify database, just show what would happen"
+    echo "  --source-id ID             Custom default news source ID (default: 1)"
+    echo "  --year YEAR                Year to filter batches (default: 2025)"
+    echo ""
+    python -m database.hard_openai_extraction.restore_openai_data
+  fi
 }
 
 # Parse command
@@ -232,10 +288,22 @@ case "$1" in
     start_servers "$@"
     ;;
   setup)
-    setup_environment
+    echo -e "${YELLOW}The setup command has been deprecated. Please use './run.sh docker init' instead${NC}"
+    echo -e "${BLUE}For a full setup, run:${NC}"
+    echo "  ./run.sh docker up    # Start the database container"
+    echo "  ./run.sh docker init  # Initialize the database"
+    ;;
+  docker)
+    shift  # Remove the 'docker' command, leaving any arguments
+    manage_docker_db "$@"
     ;;
   status)
-    show_status
+    shift  # Remove the 'status' command, leaving any arguments
+    show_status "$@"
+    ;;
+  restore_openai)
+    shift  # Remove the 'restore_openai' command, leaving any arguments
+    restore_openai_data "$@"
     ;;
   custom)
     run_custom_script "$2"

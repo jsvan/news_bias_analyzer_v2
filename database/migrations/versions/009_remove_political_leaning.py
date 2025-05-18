@@ -1,6 +1,6 @@
 """Remove political_leaning field from news_sources
 
-Revision ID: 009_remove_political_leaning
+Revision ID: 009a_remove_political_leaning
 Revises: 008_add_metadata_column
 Create Date: 2025-05-12 00:00:00.000000
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '009_remove_political_leaning'
+revision = '009a_remove_political_leaning'
 down_revision = '008_add_metadata_column'
 branch_labels = None
 depends_on = None

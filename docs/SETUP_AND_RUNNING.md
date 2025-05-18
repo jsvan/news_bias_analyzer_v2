@@ -74,54 +74,38 @@ set DATABASE_URL=postgresql://newsbias:newsbias@localhost:5432/news_bias
 
 ## Database Setup
 
-### 1. Create PostgreSQL Database
+### 1. Using Docker (Recommended)
+
+The easiest way to set up the database is to use the Docker commands:
 
 ```bash
-# Connect to PostgreSQL
-psql -U postgres
+# Start the PostgreSQL database in Docker
+./run.sh docker up
 
-# Create database and user
-CREATE DATABASE news_bias;
-CREATE USER newsbias WITH PASSWORD 'newsbias';
-GRANT ALL PRIVILEGES ON DATABASE news_bias TO newsbias;
+# Initialize the database schema (creates tables and runs migrations)
+./run.sh docker init
 ```
 
-### 2. Install TimescaleDB (Optional)
+The Docker setup automatically:
+- Creates a PostgreSQL container with the correct configuration
+- Sets up the necessary user accounts
+- Installs the TimescaleDB extension
+- Creates tables and runs all migrations
 
-If you want optimized time-series capabilities:
-
-```bash
-# For Ubuntu/Debian
-sudo apt install timescaledb-postgresql-12
-
-# For macOS with Homebrew
-brew tap timescale/tap
-brew install timescaledb
-```
-
-Follow the post-installation instructions to enable the extension.
-
-### 3. Initialize Database Schema
+### 2. Database Management Commands
 
 ```bash
-# Make setup script executable
-chmod +x database/setup_db.sh
+# View database status
+./run.sh docker status
 
-# Run database setup
-./database/setup_db.sh
-```
+# Stop the database container
+./run.sh docker down
 
-Options for database setup:
+# Connect to database with psql shell
+./run.sh docker shell
 
-```bash
-# Full setup with sample data
-./database/setup_db.sh --seed-data
-
-# Drop existing tables and recreate
-./database/setup_db.sh --drop-existing
-
-# Use TimescaleDB for time-series optimization
-./database/setup_db.sh --use-timescaledb
+# Create a database backup
+./run.sh docker backup
 ```
 
 ## Running the Dashboard
@@ -265,10 +249,13 @@ cat logs/frontend.log
 ### 3. Database Maintenance
 
 ```bash
-# Backup database
-pg_dump -U newsbias news_bias > backup_$(date +%Y%m%d).sql
+# Backup database using Docker helper
+./run.sh docker backup
 
-# Database migrations
+# Database migrations are handled automatically by:
+./run.sh docker init
+
+# To run migrations manually:
 cd database/migrations
 alembic upgrade head
 ```

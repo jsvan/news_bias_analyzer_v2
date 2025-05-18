@@ -30,14 +30,17 @@ pre-commit install
 
 ### 3. Set Up a Development Database
 
-For development, you can use a local database:
+For development, use Docker for the database:
 
 ```bash
-# Create a development database
-createdb news_bias_dev
+# Start the database container
+./run.sh docker up
 
-# Set environment variable to use development database
-export DATABASE_URL=postgresql://username:password@localhost:5432/news_bias_dev
+# Initialize the database schema
+./run.sh docker init
+
+# The database is accessible at:
+# postgresql://postgres:postgres@localhost:5432/news_bias
 ```
 
 ## Project Structure
@@ -325,7 +328,11 @@ docker-compose logs -f api
 cd database/migrations
 alembic revision --autogenerate -m "Description"
 
-# Apply migration
+# Apply migration through Docker helper
+./run.sh docker init
+
+# Or apply manually
+cd database/migrations
 alembic upgrade head
 
 # Rollback migration

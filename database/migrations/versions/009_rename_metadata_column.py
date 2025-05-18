@@ -1,7 +1,7 @@
 """Rename metadata column to extraction_info
 
-Revision ID: 009_rename_metadata
-Revises: 008_add_metadata_column
+Revision ID: 009b_rename_metadata
+Revises: 009a_remove_political_leaning
 Create Date: 2025-05-11
 
 """
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
-revision = '009_rename_metadata'
-down_revision = '008_add_metadata_column'
+revision = '009b_rename_metadata'
+down_revision = '009a_remove_political_leaning'
 branch_labels = None
 depends_on = None
 

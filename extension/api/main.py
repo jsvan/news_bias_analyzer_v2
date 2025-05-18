@@ -16,9 +16,29 @@ from database.db import DatabaseManager
 from database.models import NewsArticle, Entity, EntityMention, NewsSource, Topic, Quote, QuoteTopic, PublicFigure
 
 # Import routers
-from api.statistical_endpoints import router as stats_router
-from api.article_endpoints import router as article_router
-from api.similarity_endpoints import router as similarity_router
+try:
+    from extension.api.statistical_endpoints import router as stats_router
+    has_stats_router = True
+except ImportError:
+    from fastapi import APIRouter
+    stats_router = APIRouter()
+    has_stats_router = False
+
+try:
+    from extension.api.article_endpoints import router as article_router
+    has_article_router = True
+except ImportError:
+    from fastapi import APIRouter
+    article_router = APIRouter()
+    has_article_router = False
+
+try:
+    from extension.api.similarity_endpoints import router as similarity_router
+    has_similarity_router = True
+except ImportError:
+    from fastapi import APIRouter
+    similarity_router = APIRouter()
+    has_similarity_router = False
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -227,10 +247,13 @@ def get_sentiment_trends(
     return {"trends": list(trends.values())}
 
 
-# Include routers
-app.include_router(stats_router)
-app.include_router(article_router)
-app.include_router(similarity_router)
+# Include routers if available
+if has_stats_router:
+    app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
+if has_article_router:
+    app.include_router(article_router, prefix="/articles", tags=["Articles"])
+if has_similarity_router:
+    app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
 
 # Enable CORS
 from fastapi.middleware.cors import CORSMiddleware

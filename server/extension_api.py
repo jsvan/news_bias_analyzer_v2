@@ -46,6 +46,24 @@ except ImportError:
     article_router = APIRouter()
     has_article_router = False
 
+try:
+    from extension.api.statistical_endpoints import router as stats_router
+    has_stats_router = True
+except ImportError:
+    # If the stats router is not available, create a dummy router
+    from fastapi import APIRouter
+    stats_router = APIRouter()
+    has_stats_router = False
+
+try:
+    from extension.api.similarity_endpoints import router as similarity_router
+    has_similarity_router = True
+except ImportError:
+    # If the similarity router is not available, create a dummy router
+    from fastapi import APIRouter
+    similarity_router = APIRouter()
+    has_similarity_router = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer Extension API",
@@ -595,9 +613,13 @@ async def analyze_article(request: ArticleAnalysisRequest):
         logger.error(f"Error analyzing article: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
-# Include the article router if available
+# Include routers if available
 if has_article_router:
-    app.include_router(article_router)
+    app.include_router(article_router, prefix="/articles", tags=["Articles"])
+if has_stats_router:
+    app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
+if has_similarity_router:
+    app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
 
 # Add request logging middleware
 @app.middleware("http")

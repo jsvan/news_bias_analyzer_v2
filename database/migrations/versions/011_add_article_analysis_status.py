@@ -1,7 +1,7 @@
 """Add article analysis status fields
 
 Revision ID: 011_add_article_analysis_status
-Revises: 010_add_similarity_tables
+Revises: 010
 Create Date: 2025-05-14 23:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '011_add_article_analysis_status'
-down_revision = '010_add_similarity_tables'
+down_revision = '010'
 branch_labels = None
 depends_on = None
 

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg13
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-news_bias}
+    volumes:
+      # Named volume for database persistence
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  # Define a named volume for PostgreSQL data
+  postgres_data:
+    # Using a named volume ensures data persistence across container restarts

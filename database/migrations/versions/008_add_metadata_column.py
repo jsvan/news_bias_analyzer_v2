@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = '008_add_metadata_column'
-down_revision: str = '007_add_political_leaning_to_sources'
+down_revision: str = '007_add_political_leaning'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

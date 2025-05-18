@@ -1,19 +1,19 @@
 """Add similarity tables
 
 Revision ID: 010
-Revises: 009_rename_metadata
+Revises: 009b_rename_metadata
 Create Date: 2025-05-12
 
 """
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, Text
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 # revision identifiers, used by Alembic.
 revision = '010'
-down_revision = '009_rename_metadata'
+down_revision = '009b_rename_metadata'
 branch_labels = None
 depends_on = None
 

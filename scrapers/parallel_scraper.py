@@ -41,7 +41,7 @@ BATCH_SIZE = int(os.getenv('SCRAPER_BATCH_SIZE', 20))  # Process 20 feeds at a t
 MIN_DELAY = float(os.getenv('SCRAPER_MIN_DELAY', 1))  # Minimum delay between requests to same domain (seconds)
 MAX_DELAY = float(os.getenv('SCRAPER_MAX_DELAY', 3))  # Maximum delay between requests to same domain (seconds)
 MAX_RETRIES = 2  # Maximum retry attempts for failed requests
-DEFAULT_LIMIT_PER_FEED = int(os.getenv('SCRAPER_LIMIT_PER_FEED', 5))  # Default limit of articles per feed
+SCRAPER_LIMIT_PER_FEED = int(os.getenv('SCRAPER_LIMIT_PER_FEED', 5))  # Default limit of articles per feed
 USER_AGENT = os.getenv('SCRAPER_USER_AGENT', 'News Bias Analyzer Bot/1.0')
 
 # Track last request time per domain to respect rate limits
@@ -470,6 +470,53 @@ async def process_article_batch(articles_batch: List[Dict[str, Any]]) -> List[Di
     # Process all articles in the batch concurrently using asyncio.gather
     return await asyncio.gather(*[process_article(article) for article in articles_batch])
 
+async def check_urls_in_database(urls: List[str]) -> Dict[str, bool]:
+    """
+    Check if URLs already exist in the database.
+    
+    Args:
+        urls: List of URLs to check
+        
+    Returns:
+        Dictionary mapping URLs to boolean (True if exists, False if not)
+    """
+    # Import here to avoid circular imports
+    from database.db import DatabaseManager
+    from database.models import NewsArticle
+    
+    # Initialize result dictionary
+    results = {url: False for url in urls}
+    
+    # Create a new database session
+    db_manager = DatabaseManager()
+    session = db_manager.get_session()
+    
+    try:
+        # Check URLs in chunks to avoid excessive memory usage
+        chunk_size = 100
+        for i in range(0, len(urls), chunk_size):
+            chunk = urls[i:i+chunk_size]
+            
+            # Query for URLs that exist in the database
+            query_result = session.query(NewsArticle.url).filter(
+                NewsArticle.url.in_(chunk)
+            ).all()
+            
+            # Mark existing URLs
+            for (url,) in query_result:
+                results[url] = True
+                
+        logger.info(f"URL database check: {sum(results.values())} of {len(urls)} URLs already exist in database")
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error checking URLs in database: {e}")
+        # In case of error, assume none exist to be safe
+        return {url: False for url in urls}
+        
+    finally:
+        session.close()
+
 async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = None):
     """
     Run the two-stage scraper process.
@@ -483,7 +530,7 @@ async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = 
     """
     # Use default limit from environment variable if not specified
     if limit_per_feed is None:
-        limit_per_feed = DEFAULT_LIMIT_PER_FEED
+        limit_per_feed = SCRAPER_LIMIT_PER_FEED
     
     # Process feeds in batches of BATCH_SIZE
     for i in range(0, len(feed_configs), BATCH_SIZE):
@@ -501,6 +548,35 @@ async def run_scraper(feed_configs: List[Dict[str, Any]], limit_per_feed: int = 
             
             # Count total articles in this batch of feeds
             total_articles = sum(len(feed_articles) for feed_articles in feeds_articles)
+            
+            # Collect all URLs from all feeds to check against database
+            all_urls = []
+            for feed_articles in feeds_articles:
+                for article in feed_articles:
+                    if 'url' in article:
+                        all_urls.append(article['url'])
+            
+            # Check which URLs already exist in the database
+            if all_urls:
+                logger.info(f"Checking {len(all_urls)} URLs against database...")
+                existing_urls = await check_urls_in_database(all_urls)
+                
+                # Filter out articles that already exist in the database
+                for i, feed_articles in enumerate(feeds_articles):
+                    filtered_articles = []
+                    for article in feed_articles:
+                        if 'url' in article and existing_urls.get(article['url'], False):
+                            logger.info(f"Skipping existing article: {article.get('title', 'Unknown')[:50]}... ({article['url']})")
+                        else:
+                            filtered_articles.append(article)
+                    
+                    # Replace with filtered list
+                    feeds_articles[i] = filtered_articles
+                
+                # Recalculate total after filtering
+                filtered_total = sum(len(feed_articles) for feed_articles in feeds_articles)
+                logger.info(f"Filtered out {total_articles - filtered_total} existing articles, processing {filtered_total} new articles")
+                total_articles = filtered_total
             logger.info(f"Found {total_articles} articles across {len(feeds_articles)} feeds")
             
             # Find the maximum number of articles in any feed
@@ -633,7 +709,7 @@ if __name__ == "__main__":
             })
     
     # Get limit from environment or command line
-    limit = DEFAULT_LIMIT_PER_FEED
+    limit = SCRAPER_LIMIT_PER_FEED
     if len(sys.argv) > 1:
         try:
             limit = int(sys.argv[1])
