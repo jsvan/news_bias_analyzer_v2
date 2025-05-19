@@ -1,12 +1,13 @@
-# Frontend Dashboard Component
+# Cultural Orientation Dashboard
 
-The frontend component provides visualizations of news sentiment and bias analysis.
+The frontend dashboard visualizes how news sources implicitly establish moral direction through entity portrayal. It reveals the narratives, archetypes, and shifting positions that shape our perception of world events.
 
 ## Features
-- Sentiment visualization charts
-- News comparison interface
-- Statistical analysis displays
-- Backend API for data access
+- Power/Moral positioning quadrant visualization (Hero, Villain, Victim, Threat archetypes)
+- Temporal tracking of entity positioning shifts across sources
+- Statistical comparison of entity portrayals between sources and countries
+- Entity distribution visualization showing unusual vs. typical portrayals
+- Comparative analysis of how different information environments frame the same events
 
 ## Key Files
 ### Frontend

@@ -4,14 +4,22 @@ Welcome to the News Bias Analyzer documentation. This index will help you naviga
 
 ## Overview
 
-The News Bias Analyzer is a system for tracking sentiment patterns in global news articles across different sources. It analyzes how entities (people, countries, organizations) are portrayed along two sentiment dimensions:
+The News Bias Analyzer is a system for tracking how news sources implicitly establish moral direction through entity portrayal across global news articles. Inspired by Peter Pomerantsev's work on information manipulation, this tool reveals how all news sources have an implicit moral compass and vision for society - positioning some entities as advancing progress, others as regression.
+
+The system analyzes entities along two dimensions:
 
 1. **Power Dimension**: How powerful vs. weak entities are portrayed (-2 to +2)
-2. **Moral Dimension**: How good vs. evil entities are portrayed (-2 to +2)
+2. **Moral Dimension**: How entities are positioned relative to the news source's implicit vision for society (-2 to +2)
+
+Through this lens, we can understand how news sources use entities as orientation points to guide readers' moral judgments about world events, and track how these positions shift strategically over time.
 
 The system includes a web dashboard, browser extension, API backend, data processing pipeline, and database components.
 
 ## Documentation Index
+
+### Philosophical Foundation
+
+- [**Philosophical Approach**](PHILOSOPHICAL_APPROACH.md) - Our approach to analyzing implicit moral frameworks in news
 
 ### User Documentation
 
@@ -53,13 +61,15 @@ The system includes a web dashboard, browser extension, API backend, data proces
 
 ## Key Concepts
 
-### Dual-Dimension Sentiment Analysis
+### Cultural Orientation Analysis
 
-The News Bias Analyzer uses a two-dimensional approach to sentiment analysis:
+The News Bias Analyzer uses a novel approach to news content analysis:
 
 - **Traditional sentiment analysis** focuses on positive/negative valence only
-- **Our dual-dimension approach** captures power dynamics and moral framing
-- This enables detection of more nuanced portrayal patterns (hero, villain, victim, etc.)
+- **Our cultural orientation approach** reveals implicit moral direction and societal vision
+- Entities are analyzed as orientation points that guide readers toward specific interpretations
+- Power and moral positioning together create narrative archetypes (hero, villain, victim, threat)
+- Temporal analysis tracks how entity positioning shifts strategically over time
 
 ### Statistical Significance
 

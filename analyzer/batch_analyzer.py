@@ -312,6 +312,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
     processed_count = 0
     error_count = 0
     processed_article_ids = []  # Keep track of processed article IDs for verification
+    failed_article_ids = []     # Keep track of failed article IDs for resetting
     
     # Count completed articles before processing
     before_count = session.query(NewsArticle).filter(
@@ -341,6 +342,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             logger.error(f"Error processing article {article.id}: {result['error']}")
             article.analysis_status = "failed"
             error_count += 1
+            failed_article_ids.append(article.id)
             continue
         
         # Process successful result
@@ -351,6 +353,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             logger.error(f"Error status for article {article.id}: {status_code}")
             article.analysis_status = "failed"
             error_count += 1
+            failed_article_ids.append(article.id)
             continue
         
         # Extract response data
@@ -359,6 +362,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             logger.error(f"Empty response body for article {article.id}")
             article.analysis_status = "failed"
             error_count += 1
+            failed_article_ids.append(article.id)
             continue
         
         try:
@@ -372,6 +376,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
                 logger.error(f"No choices in response for article {article.id}")
                 article.analysis_status = "failed"
                 error_count += 1
+                failed_article_ids.append(article.id)
                 continue
             
             message = choices[0].get("message", {})
@@ -429,11 +434,13 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
                 logger.error(f"Error parsing analysis result for article {article.id}: {e}")
                 article.analysis_status = "failed"
                 error_count += 1
+                failed_article_ids.append(article.id)
                 
         except Exception as e:
             logger.error(f"Error processing article {article.id}: {e}")
             article.analysis_status = "failed"
             error_count += 1
+            failed_article_ids.append(article.id)
     
     # Commit changes
     try:
@@ -472,6 +479,10 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
         
         logger.info(f"Processed batch: {processed_count} articles processed, {error_count} errors")
         logger.info(f"Total completed articles: {after_count} (was {before_count} before)")
+        
+        # Reset failed articles back to unanalyzed so they can be attempted again in future batches
+        if failed_article_ids:
+            reset_failed_articles_by_ids(session, failed_article_ids)
         
     except Exception as e:
         logger.error(f"Error committing batch results: {e}")
@@ -530,7 +541,7 @@ def cleanup_batch_files(batch_info: Dict[str, Any], batch_id: str = "unknown") -
         return False
 
 def reset_failed_articles(session: Session, batch_id: str):
-    """Reset articles that failed processing back to unanalyzed."""
+    """Reset articles that failed processing in a specific batch back to unanalyzed."""
     try:
         articles = session.query(NewsArticle).filter(
             NewsArticle.batch_id == batch_id,
@@ -545,6 +556,27 @@ def reset_failed_articles(session: Session, batch_id: str):
         logger.info(f"Reset {len(articles)} failed articles back to unanalyzed")
     except Exception as e:
         logger.error(f"Error resetting failed articles: {e}")
+        session.rollback()
+
+def reset_failed_articles_by_ids(session: Session, article_ids: List[str]):
+    """Reset specific failed articles back to unanalyzed status by ID."""
+    if not article_ids:
+        return
+    
+    try:
+        count = 0
+        for article_id in article_ids:
+            article = session.query(NewsArticle).get(article_id)
+            if article and article.analysis_status == "failed":
+                article.analysis_status = "unanalyzed"
+                article.batch_id = None
+                count += 1
+        
+        if count > 0:
+            session.commit()
+            logger.info(f"Reset {count} failed articles back to unanalyzed for reprocessing")
+    except Exception as e:
+        logger.error(f"Error resetting failed articles by IDs: {e}")
         session.rollback()
 
 def remove_batch_from_tracking(batch_id: str):

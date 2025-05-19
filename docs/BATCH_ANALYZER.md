@@ -1,6 +1,6 @@
-# Batch Analyzer Documentation
+# Cultural Orientation Batch Analyzer
 
-The Batch Analyzer is a module that analyzes news articles in batches using OpenAI's Batch API. This approach offers several advantages:
+The Batch Analyzer is a module that analyzes news articles in batches to identify how news sources implicitly establish moral direction through entity portrayal. Using OpenAI's Batch API with the gpt-4.1-nano model, this approach offers several advantages:
 
 - **Cost Efficiency**: 50% cost reduction compared to the standard OpenAI API
 - **Higher Rate Limits**: Significantly higher throughput than the synchronous API

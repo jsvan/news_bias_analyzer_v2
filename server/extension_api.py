@@ -443,157 +443,62 @@ class ArticleAnalysisRequest(BaseModel):
 @app.post("/analyze")
 async def analyze_article(request: ArticleAnalysisRequest):
     """
-    Analyze article content for bias and sentiment.
+    Analyze article content for bias and sentiment using OpenAI.
     
-    This is a simplified implementation that provides mock analysis results
-    since we don't have the real analysis pipeline integrated here.
+    This endpoint calls the OpenAI API to perform entity extraction and sentiment analysis.
+    It extracts named entities from the article content and analyzes how they are portrayed
+    in terms of power and moral dimensions.
     """
     logger.info(f"Analyzing article: {request.title} ({request.url})")
+    print(f"\n==== ANALYZING ARTICLE: {request.title} ====")
+    print(f"URL: {request.url}")
+    print(f"Source: {request.source}")
+    print(f"Content length: {len(request.text)} characters")
     
     try:
-        # In a real implementation, this would call the NLP analysis pipeline
-        # But for now, let's return mock data
+        # Import the OpenAI integration
+        from analyzer.openai_integration import SentimentAnalyzer
         
-        # Generate semi-random entity data
-        import random
-        import hashlib
+        print("Initializing OpenAI analyzer...")
+        analyzer = SentimentAnalyzer()
         
-        # Create a hash of the URL to get consistent "random" values for the same article
-        url_hash = int(hashlib.md5(request.url.encode()).hexdigest(), 16)
-        random.seed(url_hash)
-        
-        # Entity types to use in mock data
-        entity_types = ["person", "organization", "country", "city", "political_party"]
-        
-        # Example entities that might be found in news articles
-        example_entities = {
-            "person": [
-                "Joe Biden", "Donald Trump", "Kamala Harris", "Anthony Fauci", 
-                "Elon Musk", "Jeff Bezos", "Vladimir Putin", "Xi Jinping",
-                "Emmanuel Macron", "Boris Johnson", "Angela Merkel"
-            ],
-            "organization": [
-                "United Nations", "World Health Organization", "Microsoft", "Apple",
-                "Amazon", "Google", "Facebook", "Tesla", "Federal Reserve", 
-                "Congress", "Senate", "European Union", "NATO"
-            ],
-            "country": [
-                "United States", "Russia", "China", "United Kingdom", "France",
-                "Germany", "Japan", "India", "Brazil", "Canada", "Australia"
-            ],
-            "city": [
-                "Washington", "New York", "London", "Paris", "Berlin", "Moscow",
-                "Beijing", "Tokyo", "Brussels", "Rome", "Madrid"
-            ],
-            "political_party": [
-                "Democratic Party", "Republican Party", "Labour Party", "Conservative Party",
-                "United Russia", "Communist Party of China", "En Marche", "Christian Democratic Union"
-            ]
+        # Format article for analysis
+        article_data = {
+            "url": request.url,
+            "title": request.title,
+            "text": request.text,
+            "source": request.source,
+            "publish_date": request.publish_date
         }
         
-        # Generate 3-7 entities from the article text
-        num_entities = random.randint(3, 7)
-        entities = []
-        text_lower = request.text.lower()
+        # Call the OpenAI analyzer
+        print("Calling OpenAI for analysis...")
+        analysis_result = analyzer.analyze_article(article_data)
         
-        for _ in range(num_entities):
-            # Select an entity type
-            entity_type = random.choice(entity_types)
-            
-            # Try to find an entity that actually appears in the text
-            matching_entities = []
-            for entity in example_entities[entity_type]:
-                if entity.lower() in text_lower:
-                    matching_entities.append(entity)
-            
-            # If none found, just pick a random one
-            if matching_entities:
-                entity_name = random.choice(matching_entities)
-            else:
-                entity_name = random.choice(example_entities[entity_type])
-            
-            # Generate mentions
-            num_mentions = random.randint(1, 3)
-            mentions = []
-            
-            for _ in range(num_mentions):
-                # Try to find a relevant excerpt from the text
-                words = text_lower.split()
-                if entity_name.lower() in text_lower and len(words) > 20:
-                    # Find the entity in the text and extract surrounding context
-                    entity_pos = text_lower.find(entity_name.lower())
-                    
-                    # Get a window around the entity mention
-                    start_pos = max(0, entity_pos - 50)
-                    end_pos = min(len(text_lower), entity_pos + len(entity_name) + 50)
-                    
-                    # Find word boundaries
-                    while start_pos > 0 and text_lower[start_pos] != ' ':
-                        start_pos -= 1
-                    
-                    while end_pos < len(text_lower) - 1 and text_lower[end_pos] != ' ':
-                        end_pos += 1
-                    
-                    context = text_lower[start_pos:end_pos].strip()
-                    mention_text = entity_name
-                else:
-                    # Generate a fake mention if entity not found in text
-                    contexts = [
-                        "policy statement", "official announcement", 
-                        "press release", "interview", "public speech", 
-                        "diplomatic response", "economic analysis"
-                    ]
-                    templates = [
-                        f"{entity_name} stated", 
-                        f"{entity_name} announced", 
-                        f"{entity_name} confirmed", 
-                        f"{entity_name} denied", 
-                        f"According to {entity_name}", 
-                        f"Sources close to {entity_name} indicate"
-                    ]
-                    mention_text = random.choice(templates)
-                    context = random.choice(contexts)
-                
-                mentions.append({
-                    "text": mention_text,
-                    "context": context
-                })
-            
-            # Generate sentiment scores (-2 to 2 scale)
-            power_score = round((random.random() * 4 - 2), 1)
-            moral_score = round((random.random() * 4 - 2), 1)
-            
-            # 20% chance of strong opinion
-            if random.random() < 0.2:
-                if random.random() < 0.5:
-                    power_score = round(power_score * 1.5, 1)
-                else:
-                    moral_score = round(moral_score * 1.5, 1)
-            
-            # Clamp values to -2 to 2 range
-            power_score = max(-2, min(2, power_score))
-            moral_score = max(-2, min(2, moral_score))
-            
-            # Add significance scores
-            significance = random.random() * 0.5
-            
-            # Add entity to results
-            entities.append({
-                "name": entity_name,
-                "type": entity_type,
-                "power_score": power_score,
-                "moral_score": moral_score,
-                "national_significance": significance,
-                "global_significance": significance * random.random(),
-                "mentions": mentions
-            })
+        # Extract entities from the analysis result
+        entities = analysis_result.get('entities', [])
+        print(f"OpenAI found {len(entities)} entities in the article")
         
-        # Generate composite score (0-100)
-        composite_percentile = random.randint(1, 100)
-        composite_p_value = round(random.random() * 0.2, 3)
+        # Format entities for the response
+        formatted_entities = []
+        for entity in entities:
+            formatted_entity = {
+                "name": entity.get('entity', ''),
+                "type": entity.get('entity_type', ''),
+                "power_score": entity.get('power_score', 0),
+                "moral_score": entity.get('moral_score', 0),
+                "national_significance": 0.3,  # Placeholder
+                "global_significance": 0.2,    # Placeholder
+                "mentions": entity.get('mentions', [])
+            }
+            formatted_entities.append(formatted_entity)
+        
+        # Generate a simple composite score based on entity sentiment
+        composite_percentile = 50  # Default to median
+        composite_p_value = 0.5    # Default p-value
         
         # Create response
-        analysis_result = {
+        api_response = {
             "url": request.url,
             "title": request.title,
             "source": request.source,
@@ -602,12 +507,19 @@ async def analyze_article(request: ArticleAnalysisRequest):
                 "percentile": composite_percentile,
                 "p_value": composite_p_value
             },
-            "entities": entities,
+            "entities": formatted_entities,
             "newly_analyzed": True
         }
         
+        # Print the entities for debugging
+        print("\nAnalysis response contains the following entities:")
+        for entity in formatted_entities:
+            print(f"  - {entity['name']} ({entity['type']})")
+            print(f"    Power: {entity['power_score']}, Moral: {entity['moral_score']}")
+            print(f"    Mentions: {len(entity.get('mentions', []))}")
+        
         logger.info(f"Analysis completed for {request.url}")
-        return analysis_result
+        return api_response
     
     except Exception as e:
         logger.error(f"Error analyzing article: {str(e)}")

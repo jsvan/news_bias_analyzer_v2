@@ -669,9 +669,24 @@ document.addEventListener('DOMContentLoaded', () => {
       // Format mentions if available
       let mentionsHTML = '';
       if (entity.mentions && entity.mentions.length > 0) {
-        mentionsHTML = '<div class="entity-mentions"><h4>Mentions in Article</h4><ul>';
+        mentionsHTML = '<div class="entity-mentions"><h4>Mentions in Article</h4><ul class="mention-list">';
         entity.mentions.forEach(mention => {
-          mentionsHTML += `<li><q>${mention.text}</q></li>`;
+          // Highlight the entity name within the text
+          const displayName = entity.name || entity.entity || "Unknown Entity";
+          let highlightedText = mention.text;
+          
+          // Only attempt highlight if it's not already a short mention
+          if (mention.text.length > displayName.length) {
+            // Case-insensitive replace to highlight the entity name
+            const regex = new RegExp('\\b(' + displayName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + ')\\b', 'gi');
+            highlightedText = mention.text.replace(regex, '<span class="entity-highlight">$1</span>');
+          }
+          
+          mentionsHTML += `
+            <li class="mention-item">
+              <div class="mention-text"><q>${highlightedText}</q></div>
+              <div class="mention-context">${mention.context}</div>
+            </li>`;
         });
         mentionsHTML += '</ul></div>';
       }

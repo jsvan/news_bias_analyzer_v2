@@ -165,7 +165,6 @@ For example, analyzing 1000 articles:
 2. Run batch processing in parallel with scraping:
    - `./run.sh scraper` in one terminal
    - Periodically run batch processing in another
-3. Use gpt-3.5-turbo for the best balance of cost and quality
 4. Keep the metadata file associated with each batch for proper tracking
 
 ## Batch vs. Streaming Analysis

@@ -9,7 +9,7 @@ from pathlib import Path
 # Default configuration
 DEFAULT_CONFIG = {
     "openai": {
-        "default_model": "gpt-4-turbo",
+        "default_model": "gpt-4.1-nano",
         "fallback_model": "gpt-4.1-nano",
         "max_tokens": 4000,
         "temperature": 0.1,

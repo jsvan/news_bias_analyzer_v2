@@ -1,13 +1,14 @@
-# Chrome Extension Component
+# Cultural Navigation Extension
 
-The extension component provides article context by comparing with global sentiment patterns.
+This browser extension helps readers navigate the implicit moral frameworks embedded in news articles. It reveals how current news portrays entities as orientation points, positioning them relative to an implicit vision of societal progress or regression.
 
 ## Features
-- Article content extraction
-- Sentiment visualization
-- Entity opinion comparison
-- Topic clustering
-- Article similarity analysis
+- Real-time analysis of news article moral positioning
+- Power/Moral quadrant visualization revealing narrative archetypes (Hero, Villain, Victim, Threat) 
+- Statistical comparison with typical portrayals across global news ecosystem
+- Identification of entities serving as moral anchors within the article
+- Historical tracking of how the same entities are positioned over time
+- Visualization of the article's position within larger information environments
 
 ## Key Files
 ### Extension

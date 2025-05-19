@@ -6,7 +6,7 @@ This file contains various prompts for different analysis tasks.
 # Core entity extraction and sentiment scoring prompt
 # Focuses on objective extraction without making evaluative judgments
 ENTITY_SENTIMENT_PROMPT = """
-You are a precise sentiment extraction tool for analyzing news articles. Your task is to extract named entities and measure how they are portrayed along two specific dimensions:
+You are a cultural orientation analyzer for news articles. Your task is to identify how news sources implicitly establish moral direction through entity portrayal. All news sources have an implicit moral compass and vision for society's future - some entities and events are framed as progress, others as taking society in the wrong direction. Extract the key entities that serve as orientation points for readers, and measure how they are portrayed along two specific dimensions:
 
 1. POWER DIMENSION: How the entity is portrayed in terms of power, strength, or agency
    * -2: Very weak, vulnerable, helpless, or powerless
@@ -15,21 +15,31 @@ You are a precise sentiment extraction tool for analyzing news articles. Your ta
    * +1: Somewhat powerful or influential
    * +2: Very powerful, strong, influential, or dominant
 
-2. MORAL DIMENSION: How the entity is portrayed in terms of moral character
-   * -2: Very evil, malevolent, corrupt, or immoral
-   * -1: Somewhat negative or questionable morally
-   * 0: Morally neutral portrayal
-   * +1: Somewhat good or moral
-   * +2: Very good, virtuous, ethical, or moral
+2. MORAL DIMENSION: How the entity is positioned relative to the news source's implicit vision for society
+   * -2: Strongly opposes/prevents the desired societal direction, portrayed as harmful
+   * -1: Somewhat opposes or hinders progress toward the desired societal direction
+   * 0: Neutral position in relationship to societal direction
+   * +1: Somewhat supports or enables progress toward the desired societal direction
+   * +2: Strongly supports/enables the desired societal direction, portrayed as beneficial
 
-For each entity, provide:
+For each key entity, group, or concept, provide:
 1. A precise score on each dimension using the -2 to +2 scale (decimal values are allowed)
-2. 2-3 exact quotes from the text that support your scoring
-3. The entity type (person, organization, country, political_party, etc.)
+2. 1-2 KEY PHRASES (not full sentences) that demonstrate sentiment toward it
+3. The entity type that best captures its cultural or political position (country, political_faction, ethnic_group, ideological_group, interest_group, allied_faction, etc.)
 
 IMPORTANT GUIDELINES:
-- Focus only on SIGNIFICANT entities (people, organizations, countries, political parties, etc.)
-- Only include entities that are meaningfully discussed in the text
+- Identify ENTITIES AND CONCEPTS that serve as moral anchors in the article (aim for 8-12 key entities)
+- Recognize how entities are positioned as either 'for' or 'against' the implicit societal direction
+- Pay attention to subtle word choices that reveal the underlying moral perspective
+- Understand that the mere selection of which entities to highlight reveals the news source's priorities
+- Frame individuals primarily as representatives of larger cultural/ideological forces
+- Extract entities that orient readers toward forming specific judgments about world events
+- Notice how news sources shift entity positioning over time to align with changing strategic objectives
+- Look for entities that represent 'progress' or 'regression' based on the article's implicit values
+- Include POLITICAL FACTIONS and how they're positioned relative to societal vision
+- Consider how MEDIA ENTITIES themselves are framed as constructive or detrimental to society
+- Abstract one-time individual mentions into their larger identity group when appropriate
+- For each mention, include KEY PHRASES (not full sentences) that reveal implicit moral positioning
 - Base your analysis solely on how the entity is portrayed in THIS SPECIFIC article
 - Be objective and factual, focusing on the text only
 - Do NOT make judgments about whether the article is biased
@@ -45,7 +55,7 @@ FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
       "power_score": number,
       "moral_score": number,
       "mentions": [
-        {"text": "exact quote from article", "context": "brief factual context"}
+        {"text": "complete sentence from article containing the entity", "context": "explanation of how this shows power/moral sentiment"}
       ]
     }
   ]

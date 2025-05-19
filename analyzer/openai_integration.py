@@ -8,11 +8,22 @@ import logging
 import json
 from typing import Dict, List, Any, Optional, Tuple
 import asyncio
-import backoff
+
+# Try to import optional dependencies, but don't fail if they're not available
+try:
+    import backoff
+    has_backoff = True
+except ImportError:
+    has_backoff = False
+
+try:
+    import tiktoken
+    has_tiktoken = True
+except ImportError:
+    has_tiktoken = False
 
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion
-import tiktoken
 
 # Configure logging
 logging.basicConfig(
@@ -21,45 +32,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Import the prompt from the prompts module instead of duplicating it here
+from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
+
 # Default system prompt for entity and sentiment extraction
-DEFAULT_SYSTEM_PROMPT = """
-You are an expert analyst specializing in media sentiment analysis. Your task is to extract named entities from news articles and analyze how they are portrayed along two dimensions:
-
-1. POWER DIMENSION: How the entity is portrayed in terms of power, strength, or agency
-   * 2: Extremely weak, vulnerable, helpless, or powerless
-   * 0: Neutral portrayal of power
-   * +2: Extremely powerful, strong, influential, or dominant
-
-2. MORAL DIMENSION: How the entity is portrayed in terms of moral character. Ie, do we walk away liking this entity?
-   * -2: Extremely evil, malevolent, corrupt, or immoral
-   * 0: Morally neutral portrayal
-   * +2: Extremely good, virtuous, ethical, or moral
-
-For each entity, include 1-2 representative mentions from the text that support your analysis.
-
-IMPORTANT GUIDELINES:
-- Focus only on SIGNIFICANT entities (people, organizations, countries, political parties, etc.)
-- Only include entities that have clear sentiment indicators in the text
-- Base your analysis solely on how the entity is portrayed in THIS SPECIFIC article
-- Be objective and avoid your own biases
-- Provide precise, nuanced scores using decimal values when appropriate (e.g., +1.3, -1.5)
-- Consider both explicit statements and implicit tone/context
-
-FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
-{
-  "entities": [
-    {
-      "entity": "Entity Name",
-      "entity_type": "person|organization|country|political_party|company",
-      "power_score": number,
-      "moral_score": number,
-      "mentions": [
-        {"text": "exact quote from article", "context": "brief explanation of sentiment"}
-      ]
-    }
-  ]
-}
-"""
+DEFAULT_SYSTEM_PROMPT = ENTITY_SENTIMENT_PROMPT
 
 class OpenAIProcessor:
     """
@@ -68,7 +45,7 @@ class OpenAIProcessor:
     
     def __init__(self, 
                  api_key: str = None, 
-                 model: str = "gpt-4-turbo",
+                 model: str = "gpt-4.1-nano",
                  system_prompt: str = None,
                  max_tokens: int = 4000,
                  temperature: float = 0.1,
@@ -105,13 +82,18 @@ class OpenAIProcessor:
         self.async_client = AsyncOpenAI(api_key=self.api_key)
 
         # Token counter with fallback for newer models
-        try:
-            self.tokenizer = tiktoken.encoding_for_model(model)
-        except KeyError:
-            # Fallback for newer models not yet supported by tiktoken
-            # Using cl100k_base which is used by most newer GPT models
-            print(f"Model {model} not recognized by tiktoken, using cl100k_base encoding instead")
-            self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        if has_tiktoken:
+            try:
+                self.tokenizer = tiktoken.encoding_for_model(model)
+            except KeyError:
+                # Fallback for newer models not yet supported by tiktoken
+                # Using cl100k_base which is used by most newer GPT models
+                print(f"Model {model} not recognized by tiktoken, using cl100k_base encoding instead")
+                self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        else:
+            # If tiktoken is not available, use a simple tokenizer based on spaces and punctuation
+            self.tokenizer = None
+            print("tiktoken not available, using simple token count estimation")
 
         # Stats
         self.total_tokens_used = 0
@@ -120,7 +102,12 @@ class OpenAIProcessor:
     
     def count_tokens(self, text: str) -> int:
         """Count the number of tokens in the given text."""
-        return len(self.tokenizer.encode(text))
+        if has_tiktoken and self.tokenizer:
+            # Use tiktoken if available
+            return len(self.tokenizer.encode(text))
+        else:
+            # Simple approximation: about 4 chars per token for English
+            return len(text) // 4
     
     def prepare_article_text(self, article: Dict[str, Any], max_tokens: int = 6000) -> str:
         """
@@ -158,13 +145,6 @@ class OpenAIProcessor:
         
         return header + text
     
-    @backoff.on_exception(
-        backoff.expo,
-        (Exception),
-        max_tries=3,
-        giveup=lambda e: "maximum context length" in str(e).lower(),
-        factor=2
-    )
     def analyze_article(self, article: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze a single article for entities and sentiments.
@@ -176,38 +156,93 @@ class OpenAIProcessor:
             The original article data with added entity and sentiment analysis
         """
         try:
-            # Prepare article text
-            article_text = self.prepare_article_text(article)
+            max_retries = 3
+            retry_count = 0
+            last_error = None
             
-            # Log token usage for monitoring
-            input_tokens = self.count_tokens(self.system_prompt) + self.count_tokens(article_text)
-            logger.debug(f"Input tokens for article '{article.get('title', '')[:30]}...': {input_tokens}")
+            while retry_count < max_retries:
+                try:
+                    # Prepare article text
+                    article_text = self.prepare_article_text(article)
+                    
+                    # Log token usage for monitoring
+                    input_tokens = self.count_tokens(self.system_prompt) + self.count_tokens(article_text)
+                    logger.debug(f"Input tokens for article '{article.get('title', '')[:30]}...': {input_tokens}")
+                    
+                    # Call OpenAI API
+                    logger.info(f"Analyzing article: {article.get('title', '')[:50]}...")
+                    
+                    # Log the model being used
+                    print(f"Using OpenAI model for analysis: {self.model}")
+                    
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        response_format={"type": "json_object"},
+                        messages=[
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": article_text}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens
+                    )
+                    
+                    # Log the model from the response
+                    print(f"OpenAI response model: {response.model}")
+                    logger.info(f"Analysis completed using model: {response.model}")
+                    
+                    
+                    # If we get here, the API call was successful, so break the retry loop
+                    break
+                    
+                except Exception as e:
+                    last_error = e
+                    # Don't retry if it's a context length error
+                    if "maximum context length" in str(e).lower():
+                        logger.warning(f"Hit maximum context length error, not retrying: {e}")
+                        raise e
+                    
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        # Add exponential backoff: 1s, 2s, 4s, ...
+                        wait_time = 2 ** (retry_count - 1)
+                        logger.warning(f"API error, retrying in {wait_time}s: {e}")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Max retries reached, giving up: {e}")
+                        raise e
             
-            # Call OpenAI API
-            logger.info(f"Analyzing article: {article.get('title', '')[:50]}...")
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": article_text}
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
+            # If we exhausted retries and still have an error, re-raise it
+            if retry_count == max_retries and last_error is not None:
+                raise last_error
             
             # Update stats
             self.total_tokens_used += response.usage.total_tokens
             self.total_api_calls += 1
             
             # Parse the response
-            result = json.loads(response.choices[0].message.content)
+            response_content = response.choices[0].message.content
+            print("\n====== OPENAI ENTITY RESPONSE ======")
+            print(response_content)
+            print("===================================\n")
+            
+            # Log the actual model used from the API response
+            print(f"OpenAI model used: {response.model}")
+            logger.info(f"Analysis performed using OpenAI model: {response.model}")
+            
+            result = json.loads(response_content)
             
             # Add results to article data
             article['entities'] = result.get('entities', [])
-            article['analysis_model'] = self.model
+            article['analysis_model'] = response.model or self.model  # Use actual model from response
             article['processed_at'] = time.time()
+            
+            # Log detailed information about extracted entities
+            entities = article['entities']
+            print(f"\nExtracted {len(entities)} entities:")
+            for entity in entities:
+                print(f"  - {entity.get('entity', 'Unknown')} ({entity.get('entity_type', 'Unknown')})")
+                print(f"    Power: {entity.get('power_score', 'N/A')}, Moral: {entity.get('moral_score', 'N/A')}")
+                print(f"    Mentions: {len(entity.get('mentions', []))}")
             
             logger.info(f"Analyzed article with {len(article['entities'])} entities")
             return article
@@ -240,24 +275,47 @@ class OpenAIProcessor:
             # Prepare article text
             article_text = self.prepare_article_text(article)
             
-            # Call OpenAI API
-            response = await self.async_client.chat.completions.create(
-                model=self.model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": article_text}
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
+            # Simple retry logic with exponential backoff
+            max_retries = 3
+            retry_count = 0
+            
+            while True:
+                try:
+                    # Call OpenAI API
+                    response = await self.async_client.chat.completions.create(
+                        model=self.model,
+                        response_format={"type": "json_object"},
+                        messages=[
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": article_text}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens
+                    )
+                    break  # Success, exit the retry loop
+                except Exception as e:
+                    # Don't retry if it's a context length error
+                    if "maximum context length" in str(e).lower():
+                        raise e
+                    
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        raise e  # Max retries reached, re-raise the exception
+                    
+                    # Exponential backoff
+                    wait_time = 2 ** (retry_count - 1)
+                    logger.warning(f"API error, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
             
             # Parse the response
             result = json.loads(response.choices[0].message.content)
             
+            # Log the actual model used
+            logger.info(f"Async analysis performed using OpenAI model: {response.model}")
+            
             # Add results to article data
             article['entities'] = result.get('entities', [])
-            article['analysis_model'] = self.model
+            article['analysis_model'] = response.model or self.model  # Use actual model from response
             article['processed_at'] = time.time()
             
             logger.debug(f"Analyzed article: {article.get('title', '')[:30]}...")
@@ -388,7 +446,7 @@ class OpenAIProcessor:
 class SentimentAnalyzer:
     """High-level interface for sentiment analysis using OpenAI."""
     
-    def __init__(self, api_key: str = None, model: str = "gpt-4-turbo"):
+    def __init__(self, api_key: str = None, model: str = "gpt-4.1-nano"):
         """
         Initialize the sentiment analyzer.
         

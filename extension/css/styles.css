@@ -873,6 +873,51 @@ button {
   background-color: var(--primary-color);
 }
 
+/* Entity mentions styles */
+.entity-mentions {
+  margin-top: 15px;
+}
+
+.entity-mentions h4 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.mention-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.mention-item {
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: #f7f7f7;
+  border-radius: 5px;
+  border-left: 3px solid #4a90e2;
+}
+
+.mention-text {
+  margin-bottom: 4px;
+  font-style: italic;
+  line-height: 1.4;
+  font-size: 13px;
+}
+
+.mention-context {
+  font-size: 0.9em;
+  color: #555;
+  padding-top: 4px;
+  border-top: 1px solid rgba(0,0,0,0.05);
+}
+
+.entity-highlight {
+  font-weight: bold;
+  color: #4a90e2;
+  background-color: rgba(74, 144, 226, 0.1);
+  padding: 2px 0;
+}
+
 /* Enhanced methodology tab styles */
 .methodology-content {
   font-size: 13px;

@@ -49,22 +49,26 @@ The system is built on several key principles:
 - Python with requests, feedparser, and newspaper3k
 - Schedule library for job scheduling
 
-### Processing Pipeline
+### Cultural Orientation Pipeline
 
-**Responsibility**: Extract entities and sentiment data from articles.
+**Responsibility**: Analyze how news sources implicitly establish moral direction through entity portrayal.
 
-- **Entity Processor**: Uses OpenAI to extract entities and sentiment scores
+- **Entity Orientation Analyzer**: Uses OpenAI to identify entities that serve as moral anchors
+- **Cultural Positioning Detector**: Analyzes how entities are framed relative to an implicit societal vision
 - **Framing Analyzer**: Optional analysis of narrative framing techniques
 - **Batch Processor**: Efficient processing of multiple articles
 
 **Key Design Elements**:
-- LLMs only extract objective sentiment scores without making bias judgments
-- Two-dimensional sentiment scoring: power/strength and moral/ethical dimensions
-- Optional framing analysis kept separate from sentiment data
+- Inspired by Peter Pomerantsev's work on how information shapes perception
+- Two-dimensional analysis: power portrayal and alignment with implicit societal direction
+- Extraction of key phrases that reveal subtle moral positioning
+- Tracking of how entity positioning shifts over time to align with strategic objectives
+- Abstraction of individual mentions to their larger cultural/ideological forces
 
 **Technologies**:
-- OpenAI API with GPT-4 models
-- Async processing for efficiency
+- OpenAI API with gpt-4.1-nano model for cost-efficiency
+- Batch API processing for high-volume analysis
+- Async processing for real-time extension analysis
 
 ### Database Layer
 
