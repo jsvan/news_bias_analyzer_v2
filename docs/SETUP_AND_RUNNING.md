@@ -233,7 +233,14 @@ python -m analysis.trend_analysis --entity "United States" --days 90
 View the current database status and statistics:
 
 ```bash
-./run_db_stats.sh
+# General database statistics
+./run.sh status
+
+# Detailed source statistics
+./run.sh status sources
+
+# Run analyzer diagnostics
+./run.sh analyze diag
 ```
 
 ### 2. Checking Logs
@@ -244,6 +251,9 @@ cat logs/api-server.log
 
 # View frontend logs
 cat logs/frontend.log
+
+# Monitor batch analyzer in real-time
+./run.sh analyze status
 ```
 
 ### 3. Database Maintenance
@@ -258,9 +268,30 @@ cat logs/frontend.log
 # To run migrations manually:
 cd database/migrations
 alembic upgrade head
+
+# Reset articles stuck in processing
+./run.sh analyze reset-stuck --hours 24
+
+# Reset database (clear entity data and reset article status)
+./run.sh analyze reset-database --dry-run  # Check what would be reset
+./run.sh analyze reset-database  # Actually reset the database
+./run.sh analyze reset-database --keep-recent-hours=48  # Keep recent data
 ```
 
-### 4. API Usage Monitoring
+### 4. Data Recovery
+
+```bash
+# Recover from OpenAI batches
+./run.sh analyze recover-batches
+
+# View recovery options
+./run.sh analyze recover-batches --help
+
+# Recover only today's batches
+./run.sh analyze recover-batches --today
+```
+
+### 5. API Usage Monitoring
 
 ```bash
 # View OpenAI API usage statistics

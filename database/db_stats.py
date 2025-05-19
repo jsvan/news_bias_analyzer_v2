@@ -51,11 +51,18 @@ def get_database_stats() -> Dict[str, Any]:
             func.length(NewsArticle.text) > 0
         ).scalar() or 0
         
-        # Articles that have been processed
+        # Articles that have been processed (both completed and in-progress)
         article_stats['processed_count'] = session.query(
             func.count(NewsArticle.id)
         ).filter(
-            NewsArticle.processed_at.isnot(None)
+            NewsArticle.analysis_status.in_(["completed", "in_progress"])
+        ).scalar() or 0
+        
+        # Articles that have completed processing
+        article_stats['completed_count'] = session.query(
+            func.count(NewsArticle.id)
+        ).filter(
+            NewsArticle.analysis_status == "completed"
         ).scalar() or 0
         
         # Articles processing percentage
@@ -77,6 +84,18 @@ def get_database_stats() -> Dict[str, Any]:
             article_stats['avg_length'] = int(article_stats['avg_length'])
         else:
             article_stats['avg_length'] = 0
+        
+        # Get analysis status breakdown
+        status_breakdown = session.query(
+            NewsArticle.analysis_status,
+            func.count(NewsArticle.id)
+        ).group_by(
+            NewsArticle.analysis_status
+        ).all()
+        
+        article_stats['status_breakdown'] = {
+            status or 'null': count for status, count in status_breakdown
+        }
         
         # Recent articles
         current_time = datetime.datetime.now()
@@ -226,6 +245,16 @@ def format_stats_output(stats: Dict[str, Any]) -> str:
     output.append(f"Total articles: {article_stats['total_count']}")
     output.append(f"Articles with text: {article_stats['with_text_count']}")
     output.append(f"Processed articles: {article_stats['processed_count']} ({article_stats['processed_percentage']}%)")
+    if 'completed_count' in article_stats:
+        completed_percentage = round((article_stats['completed_count'] / article_stats['total_count'] * 100) if article_stats['total_count'] > 0 else 0, 1)
+        output.append(f"Completed articles: {article_stats['completed_count']} ({completed_percentage}%)")
+    
+    # Add analysis status breakdown if available
+    if 'status_breakdown' in article_stats:
+        output.append("\nAnalysis Status Breakdown:")
+        for status, count in article_stats['status_breakdown'].items():
+            output.append(f"  - {status}: {count} articles")
+    
     output.append(f"Average article length: {article_stats['avg_length']} characters")
     output.append(f"Articles in last 24 hours: {article_stats['last_24h_count']}")
     output.append(f"Articles in last 7 days: {article_stats['last_7d_count']}")
@@ -282,7 +311,7 @@ def get_source_statistics() -> List[Dict[str, Any]]:
             NewsSource.country,
             NewsSource.language,
             func.count(NewsArticle.id).label('article_count'),
-            func.count(case([(NewsArticle.processed_at.isnot(None), 1)])).label('processed_count'),
+            func.count(case([(NewsArticle.analysis_status.in_(["completed", "in_progress"]), 1)])).label('processed_count'),
             func.count(case([(NewsArticle.analysis_status == 'completed', 1)])).label('analyzed_count')
         ).outerjoin(
             NewsArticle, NewsSource.id == NewsArticle.source_id

@@ -156,8 +156,15 @@ def prepare_batch_input(articles: List[NewsArticle], model: str) -> Tuple[str, D
         title = article.title or "Untitled Article"
         text = article.text or ""
         
+        # Include source information if available
+        source_info = ""
+        if hasattr(article, 'source') and article.source is not None:
+            source_info = f"Source: {article.source.name}\n"
+        elif article.source_id is not None:
+            source_info = f"Source ID: {article.source_id}\n"
+        
         # Truncate text if too long (15000 chars should be safe)
-        analysis_text = f"Title: {title}\n\n{text[:15000]}"
+        analysis_text = f"Title: {title}\n{source_info}\n{text[:15000]}"
         
         # Create batch request line
         batch_line = {

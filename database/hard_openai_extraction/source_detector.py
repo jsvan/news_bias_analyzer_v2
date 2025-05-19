@@ -8,9 +8,11 @@ import re
 import time
 import random
 import logging
+import os
 import concurrent.futures
 from urllib.parse import urlparse, parse_qsl
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from functools import lru_cache
 
 # Configure logging
 logging.basicConfig(
@@ -18,6 +20,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Set up a file handler for easier debugging
+try:
+    log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../logs'))
+    os.makedirs(log_dir, exist_ok=True)
+    file_handler = logging.FileHandler(os.path.join(log_dir, 'source_detector.log'))
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+except Exception as e:
+    print(f"Warning: Could not set up file logger: {e}")
 
 try:
     import requests
@@ -30,26 +42,22 @@ except ImportError:
 class SourceDetector:
     """Identifies the likely source of a news article using multiple detection methods."""
     
-    def __init__(self, db_manager, enable_web_search=True, cache_size=1000):
+    def __init__(self, db_manager, cache_size=1000, enable_web_search=False):
         """
         Initialize the source detector.
         
         Args:
             db_manager: Database manager instance
-            enable_web_search: Whether to enable web search for source detection
             cache_size: Maximum number of items to keep in result cache
+            enable_web_search: Whether to enable web search for source detection
         """
         self.db_manager = db_manager
         self.known_sources = self._load_known_sources()
-        self.enable_web_search = enable_web_search
         
         # Setup caching to avoid redundant lookups
         self.search_cache = {}  # title -> source name cache
         self.cache_size = cache_size
-        
-        # Setup rate limiting for web searches
-        self.last_search_time = 0
-        self.min_search_interval = 1.5  # seconds
+        self.enable_web_search = enable_web_search
         
         # Common source footprints in article text
         self.source_patterns = {
@@ -424,16 +432,15 @@ class SourceDetector:
         finally:
             session.close()
 
-    def detect_source(self, article_data: Dict[str, Any], use_web_search=True) -> int:
+    def detect_source(self, article_data: Dict[str, Any]) -> Optional[int]:
         """
-        Identify the likely source of an article using multiple methods.
+        Identify the likely source of an article using local detection methods only.
         
         Args:
             article_data: Article data dictionary containing title, content, etc.
-            use_web_search: Whether to use web search for source detection
             
         Returns:
-            Source ID from the database
+            Source ID from the database or None if source cannot be determined
         """
         title = article_data.get('title', '')
         content = article_data.get('text', '') or article_data.get('content', '')
@@ -443,6 +450,9 @@ class SourceDetector:
         if title and title in self.search_cache:
             cached_source = self.search_cache[title]
             logger.info(f"Cache hit for title: '{title[:50]}...'")
+            if cached_source == "Unknown Source":
+                logger.info(f"Skipping article with unknown source from cache")
+                return None
             return self._get_or_create_source(cached_source)
         
         # Apply NYT heuristics early since we often need to detect NYT articles
@@ -613,26 +623,6 @@ class SourceDetector:
                     self.search_cache[title] = source_name
                 return self._get_or_create_source(source_name)
         
-        # Method 5: Last resort - web search (only if enabled, available and title exists)
-        if (use_web_search and self.enable_web_search and _has_requests and title and 
-            (not article_data.get('skip_web_search', False))):
-            
-            # Rate limiting for web searches
-            current_time = time.time()
-            if current_time - self.last_search_time < self.min_search_interval:
-                time.sleep(self.min_search_interval - (current_time - self.last_search_time))
-            
-            logger.info(f"Attempting web search for source of: {title}")
-            source_name = self._search_for_source(title, content[:200] if content else '')
-            self.last_search_time = time.time()
-            
-            if source_name:
-                logger.info(f"Source detected from web search: {source_name}")
-                # Cache the result
-                if len(self.search_cache) < self.cache_size:
-                    self.search_cache[title] = source_name
-                return self._get_or_create_source(source_name)
-        
         # Final check for NYT (if we have some evidence but not enough)
         if nyt_score >= 1:
             # Check content for distinctive NYT writing style patterns not counted earlier
@@ -669,13 +659,23 @@ class SourceDetector:
                 self.search_cache[title] = source_name
             return self._get_or_create_source(source_name)
         
-        # Fallback to unknown source
-        logger.info(f"Could not detect source for article: '{title[:50]}...' - using Unknown Source")
-        source_name = "Unknown Source"
+        # Method 5: Try web search as a last resort
+        if self.enable_web_search and title:
+            snippet = content[:200] if content else ''
+            source_name = self._search_for_source(title, snippet)
+            if source_name:
+                logger.info(f"Source detected from web search: {source_name}")
+                if len(self.search_cache) < self.cache_size:
+                    self.search_cache[title] = source_name
+                return self._get_or_create_source(source_name)
+        
+        # If no source detected, return None (we'll skip this article)
+        logger.info(f"Could not detect source for article: '{title[:50]}...' - skipping")
         if title and len(self.search_cache) < self.cache_size:
-            self.search_cache[title] = source_name
-        return self._get_or_create_source(source_name)
+            self.search_cache[title] = "Unknown Source"
+        return None
 
+    @lru_cache(maxsize=1000)
     def _domain_to_source(self, domain: str) -> Optional[str]:
         """
         Convert domain to source name.
@@ -718,7 +718,7 @@ class SourceDetector:
         Returns:
             Source name or None if search fails
         """
-        if not _has_requests:
+        if not _has_requests or not self.enable_web_search:
             return None
             
         # For exact title matches, use "I'm feeling lucky" google search which redirects to the source
@@ -812,6 +812,7 @@ class SourceDetector:
             Source ID from the database
         """
         from database.models import NewsSource
+        from sqlalchemy.exc import IntegrityError
         
         if source_name in self.known_sources:
             return self.known_sources[source_name]
@@ -822,15 +823,24 @@ class SourceDetector:
             # Check again in case it was added by another process
             source = session.query(NewsSource).filter_by(name=source_name).first()
             if not source:
-                source = NewsSource(
-                    name=source_name,
-                    base_url=f"https://{source_name.lower().replace(' ', '')}.example.com",
-                    country="Unknown",
-                    language="en"
-                )
-                session.add(source)
-                session.commit()
-                logger.info(f"Created new source in database: {source_name} (ID: {source.id})")
+                try:
+                    source = NewsSource(
+                        name=source_name,
+                        base_url=f"https://{source_name.lower().replace(' ', '')}.example.com",
+                        country="Unknown",
+                        language="en"
+                    )
+                    session.add(source)
+                    session.commit()
+                    logger.info(f"Created new source in database: {source_name} (ID: {source.id})")
+                except IntegrityError:
+                    # Another process likely created the source first
+                    session.rollback()
+                    # Re-query to get the ID
+                    source = session.query(NewsSource).filter_by(name=source_name).first()
+                    if not source:
+                        logger.error(f"Race condition: Source {source_name} not found after IntegrityError")
+                        return 1  # Default ID as fallback
             
             # Update local cache
             self.known_sources[source_name] = source.id
@@ -842,127 +852,76 @@ class SourceDetector:
         finally:
             session.close()
             
-    def process_batch(self, articles, max_workers=5, web_search_limit=10):
+    def process_batch(self, articles, max_workers=5):
         """
-        Process a batch of articles in parallel with intelligent workload distribution.
+        Process a batch of articles in parallel, skipping articles without a clear source.
         
         Args:
             articles: List of article data dictionaries
             max_workers: Maximum number of parallel workers
-            web_search_limit: Maximum number of web searches to perform (to avoid rate limiting)
             
         Returns:
             Dictionary mapping article IDs to source IDs
         """
-        # First attempt: Try fast methods only (URL/content pattern matching)
-        fast_results = {}
-        articles_needing_search = []
+        # First, refresh our known_sources cache to ensure it's up to date
+        self.known_sources = self._load_known_sources()
+        logger.info(f"Refreshed known sources cache with {len(self.known_sources)} sources")
         
-        # Define a fast detection function that avoids web searches
-        def fast_detect(article):
-            title = article.get('title', '')
-            content = article.get('text', '') or article.get('content', '')
-            url = article.get('url', '')
-            
-            # Method 1: Check if source is explicitly mentioned
-            if article.get('source_name'):
-                source_name = article.get('source_name')
-                logger.info(f"Source explicitly mentioned: {source_name}")
-                
-                # Special case: sometimes sources are incomplete in the data
-                if source_name.lower() == 'nyt' or source_name.lower() == 'the new york times':
-                    return self._get_or_create_source('New York Times')
-                    
-                return self._get_or_create_source(source_name)
-            
-            # Method 2: Try to extract from URL
-            if url and not url.startswith('restored_article_'):
-                domain = urlparse(url).netloc.lower()
-                source_name = self._domain_to_source(domain)
-                if source_name:
-                    logger.info(f"Source detected from URL {url}: {source_name}")
-                    return self._get_or_create_source(source_name)
-            
-            # Method 3: Search for source patterns in content
-            source_name = self._detect_from_content(content)
-            if source_name:
-                logger.info(f"Source detected from content patterns: {source_name}")
-                return self._get_or_create_source(source_name)
-            
-            # Method 4: Title analysis for common news sources
-            if title:
-                for source_name, patterns in self.source_patterns.items():
-                    for pattern in patterns:
-                        if re.search(pattern, title, re.IGNORECASE):
-                            logger.info(f"Source detected from title patterns: {source_name}")
-                            return self._get_or_create_source(source_name)
-                            
-                # Check for specific NYT article patterns from examples
-                if 'law firms' in title.lower() and 'security clearance' in title.lower():
-                    logger.info(f"New York Times detected based on specific article pattern: Law Firms Security Clearance")
-                    return self._get_or_create_source('New York Times')
-                    
-                if 'supreme court' in title.lower() and 'birthright citizenship' in title.lower():
-                    logger.info(f"New York Times detected based on specific article pattern: Supreme Court Birthright Citizenship")
-                    return self._get_or_create_source('New York Times')
-            
-            # If fast methods failed, return None to indicate web search needed
-            return None
+        # Process articles in parallel using detect_source for each
+        results = {}
+        skipped = 0
         
-        # First pass - use fast methods on all articles
-        logger.info(f"First pass: Using fast detection methods on {len(articles)} articles")
-        for article in articles:
-            article_id = article.get('id')
-            try:
-                source_id = fast_detect(article)
-                if source_id is not None:
-                    fast_results[article_id] = source_id
-                else:
-                    articles_needing_search.append(article)
-            except Exception as e:
-                logger.error(f"Error in fast detection for article {article_id}: {e}")
-                fast_results[article_id] = 1  # Default source ID
+        logger.info(f"Processing {len(articles)} articles with parallel detection")
         
-        # Log stats about fast detection
-        logger.info(f"Fast detection identified {len(fast_results)}/{len(articles)} articles")
-        logger.info(f"{len(articles_needing_search)} articles need web search")
+        # Performance metrics
+        start_time = time.time()
         
-        # If we have too many articles needing search, prioritize them
-        if len(articles_needing_search) > web_search_limit:
-            logger.info(f"Too many articles need web search. Limiting to {web_search_limit}")
-            # Sort by title length (shorter titles are often more distinctive)
-            articles_needing_search.sort(key=lambda x: len(x.get('title', '')))
-            articles_needing_search = articles_needing_search[:web_search_limit]
-        
-        # Second pass - use web search for remaining articles
-        if articles_needing_search:
-            logger.info(f"Second pass: Using web search for {len(articles_needing_search)} articles")
-            web_search_results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Map each article to a future
+            future_to_article = {
+                executor.submit(self.detect_source, article): article 
+                for article in articles
+            }
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Map each article to a future
-                future_to_article = {
-                    executor.submit(self.detect_source, article): article 
-                    for article in articles_needing_search
-                }
-                
-                # Process results as they complete
-                for future in concurrent.futures.as_completed(future_to_article):
-                    article = future_to_article[future]
-                    article_id = article.get('id')
-                    try:
-                        source_id = future.result()
-                        web_search_results[article_id] = source_id
-                    except Exception as e:
-                        logger.error(f"Error in web search for article {article_id}: {e}")
-                        web_search_results[article_id] = 1  # Default source ID
-            
-            # Combine results
-            results = {**fast_results, **web_search_results}
-        else:
-            results = fast_results
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(future_to_article):
+                article = future_to_article[future]
+                article_id = article.get('id')
+                try:
+                    source_id = future.result()
+                    if source_id is not None:
+                        results[article_id] = source_id
+                    else:
+                        skipped += 1
+                except Exception as e:
+                    logger.error(f"Error detecting source for article {article_id}: {e}")
+                    skipped += 1
         
-        logger.info(f"Total detection complete: {len(results)}/{len(articles)} articles identified")
+        elapsed_time = time.time() - start_time
+        avg_time_per_article = elapsed_time / len(articles) if articles else 0
+        
+        logger.info(f"Source detection complete: {len(results)} articles with source, {skipped} articles skipped")
+        logger.info(f"Performance: {elapsed_time:.2f}s total, {avg_time_per_article:.4f}s per article")
+        
+        # Log source distribution statistics
+        source_counts = {}
+        for article_id, source_id in results.items():
+            source_counts[source_id] = source_counts.get(source_id, 0) + 1
+        
+        from database.models import NewsSource
+        session = self.db_manager.get_session()
+        try:
+            source_names = {s.id: s.name for s in session.query(NewsSource).filter(NewsSource.id.in_(source_counts.keys())).all()}
+            session.close()
+            
+            logger.info("Source distribution:")
+            for source_id, count in sorted(source_counts.items(), key=lambda x: x[1], reverse=True):
+                source_name = source_names.get(source_id, f"Unknown ({source_id})")
+                logger.info(f"  {source_name}: {count} articles")
+        except Exception as e:
+            logger.error(f"Error logging source distribution: {e}")
+            session.close()
+        
         return results
 
 # Example usage

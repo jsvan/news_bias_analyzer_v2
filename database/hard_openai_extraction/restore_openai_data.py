@@ -43,6 +43,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Set up a file handler for easier debugging
+try:
+    log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../logs'))
+    os.makedirs(log_dir, exist_ok=True)
+    file_handler = logging.FileHandler(os.path.join(log_dir, 'restore_openai_data.log'))
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    
+    # Add structured logging for important events
+    import json
+    def log_structured_event(event_type, data):
+        """Log a structured event with JSON data for easier parsing"""
+        log_entry = json.dumps({"event": event_type, "data": data})
+        logger.info(f"STRUCTURED_EVENT: {log_entry}")
+except Exception as e:
+    print(f"Warning: Could not set up file logger: {e}")
+
 # Check for OpenAI package
 try:
     import openai
@@ -262,7 +279,7 @@ def ensure_default_source(db_manager, source_id=1):
     finally:
         session.close()
 
-def update_or_create_article(db_manager, article_id, article_data, default_source_id=1, source_detector=None):
+def update_or_create_article(db_manager, article_id, article_data, default_source_id=1, source_detector=None, explicit_source_id=None):
     """Update existing article or create a new one if it doesn't exist."""
     title = article_data.get('title')
     content = article_data.get('content')
@@ -294,9 +311,18 @@ def update_or_create_article(db_manager, article_id, article_data, default_sourc
     # Default scrape time (use OpenAI date if available, otherwise a bit before processing time)
     scrape_time = openai_date if openai_date else (datetime.datetime.now() - datetime.timedelta(minutes=10))
     
-    # Use source detector if available
+    # Determine source ID using this priority:
+    # 1. Explicit source ID provided (from batch detection)
+    # 2. Source detector if available
+    # 3. Source name from article data
+    # 4. Default source ID as last resort
     source_id = default_source_id
-    if source_detector:
+    
+    if explicit_source_id is not None:
+        # Use the source ID provided (from batch detection)
+        source_id = explicit_source_id
+        logger.info(f"Using explicit source ID {source_id} for article {article_id}")
+    elif source_detector:
         try:
             # Prepare article data for source detection
             detect_data = {
@@ -306,12 +332,35 @@ def update_or_create_article(db_manager, article_id, article_data, default_sourc
                 'source_name': source_name,
                 'url': f"restored_article_{article_id}"
             }
-            source_id = source_detector.detect_source(detect_data)
-            logger.info(f"Source detector identified source ID {source_id} for article {article_id}")
+            try:
+                detected_source_id = source_detector.detect_source(detect_data)
+                if detected_source_id is not None:
+                    source_id = detected_source_id
+                    logger.info(f"Source detector identified source ID {source_id} for article {article_id}")
+                    
+                    # Log structured event for successful detection
+                    try:
+                        log_structured_event("source_detected", {
+                            "article_id": article_id,
+                            "source_id": source_id,
+                            "detection_method": "source_detector",
+                            "title_length": len(title) if title else 0,
+                            "content_length": len(content) if content else 0
+                        })
+                    except Exception:
+                        pass  # Ignore errors in structured logging
+                else:
+                    logger.warning(f"Source detector couldn't identify source for article {article_id}, skipping")
+                    return None  # Skip articles without a detected source
+            except Exception as e:
+                logger.error(f"Error in source detection for article {article_id}: {str(e)}")
+                # Try to continue with default source rather than fail completely
+                source_id = default_source_id
+                logger.info(f"Falling back to default source ID {source_id} for article {article_id}")
         except Exception as e:
             logger.error(f"Error detecting source for article {article_id}: {e}")
-            # Fall back to default source ID
-            source_id = default_source_id
+            # Skip articles without a detected source
+            return None
     else:
         # Legacy method if source detector not available
         session = db_manager.get_session()
@@ -641,14 +690,18 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         # Add to the list for batch source detection
         if source_detector:
             articles_for_detection.append(article_data)
-        
-        # Create or update article without source detection for now
-        # We'll set the source ID later with batch detection
-        article = update_or_create_article(db_manager, article_id, article_data, default_source_id, None)
-        if not article:
-            logger.error(f"Failed to create/update article {article_id}")
-            stats['errors'] += 1
+            
+            # We'll create the article only after source detection
+            # Article creation is now handled after batch source detection
+            # Skip entity processing for now
             continue
+        else:
+            # If no source detection is enabled, create with default source
+            article = update_or_create_article(db_manager, article_id, article_data, default_source_id, None)
+            if not article:
+                logger.error(f"Failed to create/update article {article_id}")
+                stats['errors'] += 1
+                continue
         
         # Always save entities regardless of whether the article is new or existing
         # This ensures we don't miss any entity analysis
@@ -683,32 +736,84 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         logger.info(f"Performing batch source detection for {len(articles_for_detection)} articles")
         source_results = source_detector.process_batch(
             articles_for_detection, 
-            max_workers=parallel_workers,
-            web_search_limit=web_search_limit
+            max_workers=parallel_workers
         )
         
-        # Update articles with detected sources
+        # Now create articles with detected sources
         if source_results:
-            logger.info(f"Updating articles with detected sources")
-            session = db_manager.get_session()
-            try:
-                update_count = 0
-                for article_id, source_id in source_results.items():
-                    # Only update if source is different from default
-                    if source_id != default_source_id:
-                        article = session.query(NewsArticle).filter_by(id=article_id).first()
-                        if article:
-                            article.source_id = source_id
-                            update_count += 1
+            created_count = 0
+            entity_count = 0
+            skipped_count = 0
+            
+            # We need to recreate the article data to entity mapping
+            article_id_to_entities = {}
+            for custom_id, data in matched_data.items():
+                if 'input' in data and 'output' in data:
+                    article_id = parse_article_id(custom_id)
+                    entities = extract_entities(data['output'])
+                    article_id_to_entities[article_id] = entities
+            
+            logger.info(f"Found sources for {len(source_results)} articles, creating them in database")
+            
+            # Create articles with the detected sources
+            for article_id, source_id in source_results.items():
+                # Get the article data from the detection list
+                article_data = next((a for a in articles_for_detection if a.get('id') == article_id), None)
                 
-                if update_count > 0:
-                    session.commit()
-                    logger.info(f"Updated {update_count} articles with new source IDs")
-            except Exception as e:
-                logger.error(f"Error updating article sources: {e}")
-                session.rollback()
-            finally:
-                session.close()
+                if not article_data:
+                    logger.warning(f"No article data found for ID {article_id}, skipping")
+                    skipped_count += 1
+                    continue
+                
+                # Create or update article with the detected source
+                article = update_or_create_article(db_manager, article_id, article_data, default_source_id, None, source_id)
+                
+                if not article:
+                    logger.error(f"Failed to create/update article {article_id}")
+                    stats['errors'] += 1
+                    continue
+                    
+                created_count += 1
+                
+                # Save entities for this article
+                entities = article_id_to_entities.get(article_id, [])
+                if entities:
+                    # First check if article already has entities
+                    session = db_manager.get_session()
+                    try:
+                        existing_entities = session.query(EntityMention).filter_by(article_id=article_id).count()
+                        session.close()
+                        
+                        if existing_entities > 0:
+                            logger.info(f"Article {article_id} already has {existing_entities} entity mentions, skipping")
+                            stats['processed'] += 1
+                        else:
+                            # Save entities
+                            success = save_entities(db_manager, article_id, entities)
+                            if success:
+                                logger.info(f"Saved {len(entities)} entities for article {article_id}")
+                                stats['processed'] += 1
+                                entity_count += len(entities)
+                            else:
+                                logger.error(f"Failed to save entities for article {article_id}")
+                                stats['errors'] += 1
+                    except Exception as e:
+                        logger.error(f"Error checking existing entities: {e}")
+                        stats['errors'] += 1
+                else:
+                    logger.warning(f"No entities found for article {article_id}")
+                    stats['processed'] += 1
+            
+            logger.info(f"Created {created_count} articles with detected sources")
+            logger.info(f"Saved {entity_count} entities")
+            logger.info(f"Skipped {skipped_count} articles due to data issues")
+            logger.info(f"Skipped {len(articles_for_detection) - len(source_results)} articles with no detected source")
+            
+            # Update statistics
+            stats['source_detected'] = len(source_results)
+            stats['source_missing'] = len(articles_for_detection) - len(source_results)
+        else:
+            logger.warning(f"No sources detected for any articles in batch")
     
     return stats
 
@@ -757,13 +862,24 @@ def main():
         try:
             source_detector = SourceDetector(
                 db_manager, 
-                enable_web_search=not args.disable_web_search,
-                cache_size=args.cache_size
+                cache_size=args.cache_size,
+                enable_web_search=not args.disable_web_search
             )
             logger.info(f"Source detector initialized with {len(source_detector.known_sources)} known sources")
             logger.info(f"Web search {'enabled' if not args.disable_web_search else 'disabled'}")
             logger.info(f"Cache size: {args.cache_size}")
             logger.info(f"Web search batch limit: {args.web_search_limit}")
+            
+            # Log structured event for debugging
+            try:
+                log_structured_event("source_detector_initialized", {
+                    "known_sources_count": len(source_detector.known_sources),
+                    "enable_web_search": not args.disable_web_search,
+                    "cache_size": args.cache_size,
+                    "web_search_limit": args.web_search_limit
+                })
+            except Exception:
+                pass  # Ignore errors in structured logging
         except Exception as e:
             logger.error(f"Error initializing source detector: {e}")
             logger.warning("Continuing without source detection")

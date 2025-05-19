@@ -62,6 +62,11 @@ show_help() {
   echo "  analyzer [LIMIT]       Analyze articles with OpenAI (optional: limit articles to analyze)"
   echo "  analyze                Run the batch analyzer for efficient batch processing"
   echo "  analyze daemon         Run the batch analyzer in daemon mode (continuous polling)"
+  echo "  analyze status         Show detailed batch analyzer status and monitoring"
+  echo "  analyze reset-stuck    Reset articles stuck in processing (use --help for options)"
+  echo "  analyze diag           Run full diagnostic on the analyzer database status"
+  echo "  analyze recover-batches Recover articles from OpenAI batches (use --help for options)"
+  echo "  analyze reset-database  Reset database by clearing entity data and article status"
   echo "  batch                  Run the batch analyzer"
   echo "  api                    Start the API server"
   echo "  dashboard              Start the web dashboard"
@@ -185,6 +190,24 @@ run_batch_analyzer() {
     echo -e "${GREEN}Starting Batch Analyzer in daemon mode...${NC}"
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     python -m analyzer.batch_analyzer --daemon
+  elif [ "$1" = "status" ]; then
+    echo -e "${GREEN}Showing Batch Analyzer status and monitoring...${NC}"
+    python -m analyzer.tools.monitor_batch_analysis
+  elif [ "$1" = "reset-stuck" ]; then
+    echo -e "${GREEN}Running stuck article reset tool...${NC}"
+    shift # Remove 'reset-stuck' argument
+    python -m analyzer.tools.reset_stuck_articles "$@"
+  elif [ "$1" = "diag" ]; then
+    echo -e "${GREEN}Running full analyzer diagnostic...${NC}"
+    python -m analyzer.tools.analyze_db_status
+  elif [ "$1" = "recover-batches" ]; then
+    echo -e "${GREEN}Recovering articles from OpenAI batches...${NC}"
+    shift # Remove 'recover-batches' argument
+    python -m analyzer.tools.recover_openai_batches "$@"
+  elif [ "$1" = "reset-database" ]; then
+    echo -e "${GREEN}Resetting database...${NC}"
+    shift # Remove 'reset-database' argument
+    python -m analyzer.tools.reset_database "$@"
   else
     echo -e "${GREEN}Running Batch Analyzer (one-time check)...${NC}"
     python -m analyzer.batch_analyzer
@@ -234,29 +257,29 @@ start_servers() {
   python -m server.server_manager --type "$SERVER_TYPE"
 }
 
-# Restore OpenAI data to database
+# Restore OpenAI data to database for incomplete articles (recovery script)
 restore_openai_data() {
   setup_python_env
   cd "$PROJECT_ROOT"
-  echo -e "${GREEN}Restoring OpenAI data to database...${NC}"
+  echo -e "${GREEN}Recovering incomplete articles from OpenAI batches...${NC}"
   
   # Check if any additional arguments were passed
   if [ -n "$1" ]; then
-    python -m database.hard_openai_extraction.restore_openai_data "$@"
+    python -m analyzer.tools.recover_openai_batches "$@"
   else
     # Default arguments
     echo -e "${BLUE}Using default settings. Add arguments to customize:${NC}"
     echo "  --batch-dir DIR            Directory with batch files (default: temporary directory)"
-    echo "  --disable-source-detection Disable automatic source detection"
-    echo "  --disable-web-search       Disable web search for source detection (use only pattern matching)"
-    echo "  --web-search-limit NUM     Limit the number of web searches performed in a batch (default: 10)"
-    echo "  --cache-size NUM           Maximum size of source detection cache (default: 1000)"
-    echo "  --parallel-workers NUM     Number of parallel workers for source detection (default: 5)"
+    echo "  --skip-download            Skip downloading batches, just process existing files in batch-dir"
     echo "  --dry-run                  Don't modify database, just show what would happen"
     echo "  --source-id ID             Custom default news source ID (default: 1)"
     echo "  --year YEAR                Year to filter batches (default: 2025)"
+    echo "  --limit NUM                Limit number of batches to process"
+    echo "  --date YYYY-MM-DD          Only process batches from this specific date"
+    echo "  --after-date YYYY-MM-DD    Only process batches after this date"
+    echo "  --today                    Only process batches from today ($(date '+%Y-%m-%d'))"
     echo ""
-    python -m database.hard_openai_extraction.restore_openai_data
+    python -m analyzer.tools.recover_openai_batches
   fi
 }
 

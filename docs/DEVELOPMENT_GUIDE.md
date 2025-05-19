@@ -321,7 +321,9 @@ docker-compose logs -f api
 2. Update Dockerfiles if needed
 3. Document the dependency in relevant READMEs
 
-### Database Migrations
+### Database Management
+
+#### Database Migrations
 
 ```bash
 # Create migration
@@ -337,6 +339,31 @@ alembic upgrade head
 
 # Rollback migration
 alembic downgrade -1
+```
+
+#### Database Maintenance and Recovery
+
+```bash
+# Reset stuck articles
+./run.sh analyze reset-stuck --hours=24
+
+# Check what would be reset with dry run
+./run.sh analyze reset-database --dry-run
+
+# Reset database (clear entity data and reset article status)
+./run.sh analyze reset-database
+
+# Keep recent data when resetting
+./run.sh analyze reset-database --keep-recent-hours=48 
+
+# Keep entities but reset article status
+./run.sh analyze reset-database --keep-entities
+
+# Recover articles from OpenAI batches
+./run.sh analyze recover-batches
+
+# Check database diagnostics
+./run.sh analyze diag
 ```
 
 ### Adding a New API Endpoint
