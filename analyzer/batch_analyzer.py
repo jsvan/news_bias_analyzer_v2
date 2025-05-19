@@ -276,6 +276,34 @@ def download_batch_output(client: OpenAI, file_id: str) -> str:
         logger.error(f"Error downloading batch output: {e}")
         return None
 
+def sanitize_numeric_value(value):
+    """
+    Sanitize a value that should be numeric by removing any non-numeric characters,
+    except for the decimal point and negative sign.
+    
+    Args:
+        value: The value to sanitize
+        
+    Returns:
+        float: The sanitized value as a float, or 0.0 if conversion fails
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    if isinstance(value, str):
+        # Remove any non-numeric characters except decimal point and negative sign
+        # This handles cases like ": 0.5" or "score: 1.2" etc.
+        import re
+        cleaned = re.sub(r'[^0-9\.\-]', '', value)
+        
+        try:
+            return float(cleaned)
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert '{value}' to float after cleaning to '{cleaned}'")
+            return 0.0
+    
+    return 0.0
+
 def process_batch_output(session: Session, output_content: str, article_lookup: Dict[str, NewsArticle], batch_info: Dict[str, Any], batch_id: str = "unknown"):
     """Process batch output and update database."""
     # Parse output file (one JSONL line per result)
@@ -298,6 +326,15 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             continue
         
         article = article_lookup[custom_id]
+        
+        # Skip this article if it no longer exists in the database
+        # This handles cases where articles were deleted after the batch was created
+        try:
+            # Check if article still exists by refreshing it from the database
+            session.refresh(article)
+        except Exception as e:
+            logger.warning(f"Article with ID {article.id} no longer exists in the database. Skipping.")
+            continue
         
         # Check for errors
         if result.get("error"):
@@ -368,12 +405,16 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
                             session.add(entity)
                             session.flush()  # Generate ID
                         
+                        # Get power and moral scores and sanitize them
+                        power_score = sanitize_numeric_value(entity_data.get('power_score', 0))
+                        moral_score = sanitize_numeric_value(entity_data.get('moral_score', 0))
+                        
                         # Create entity mention
                         mention = EntityMention(
                             entity_id=entity.id,
                             article_id=article.id,
-                            power_score=entity_data.get('power_score', 0),
-                            moral_score=entity_data.get('moral_score', 0),
+                            power_score=power_score,
+                            moral_score=moral_score,
                             mentions=entity_data.get('mentions', [])
                         )
                         session.add(mention)
@@ -661,9 +702,12 @@ def check_active_batches(session: Session):
                         # Convert article IDs to article objects
                         article_lookup = {}
                         for custom_id, article_id in article_map.items():
+                            # Check if article still exists in the database
                             article = session.query(NewsArticle).get(article_id)
                             if article:
                                 article_lookup[custom_id] = article
+                            else:
+                                logger.warning(f"Article with ID {article_id} no longer exists in the database. Skipping.")
                         
                         # Process output
                         processed_count, error_count = process_batch_output(session, output_content, article_lookup, batch, batch_id)

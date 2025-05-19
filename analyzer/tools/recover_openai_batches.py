@@ -247,6 +247,8 @@ def update_or_create_article(db_manager, article_id, article_data, source_id=1):
     Only updates articles that are not already marked as 'completed' to avoid
     unnecessary processing.
     
+    IMPORTANT: This function will ONLY update existing articles, never create new ones.
+    
     Args:
         db_manager: Database manager instance
         article_id: Article ID
@@ -254,7 +256,7 @@ def update_or_create_article(db_manager, article_id, article_data, source_id=1):
         source_id: Source ID for the article
         
     Returns:
-        Created or updated article object, or None if failed
+        Updated article object, or None if failed or article doesn't exist
     """
     title = article_data.get('title')
     content = article_data.get('content')
@@ -350,55 +352,11 @@ def update_or_create_article(db_manager, article_id, article_data, source_id=1):
                 logger.info(f"Article {article_id} is already completed, skipping update")
                 return article
         else:
-            # Create a new article record
-            logger.info(f"Creating new article record for {article_id}")
-            
-            # Determine source ID
-            article_source_id = source_id
-            
-            # Try to use source name from article data if available
-            if source_name:
-                session2 = db_manager.get_session()
-                try:
-                    # Look up source by name
-                    source = session2.query(NewsSource).filter_by(name=source_name).first()
-                    if source:
-                        logger.info(f"Found source '{source_name}' (ID: {source.id}) from batch data")
-                        article_source_id = source.id
-                    else:
-                        # Create new source
-                        new_source = NewsSource(
-                            name=source_name,
-                            base_url=f"https://{source_name.lower().replace(' ', '')}.example.com",
-                            country="Unknown",
-                            language="en"
-                        )
-                        session2.add(new_source)
-                        session2.commit()
-                        logger.info(f"Created new source '{source_name}' (ID: {new_source.id}) from batch data")
-                        article_source_id = new_source.id
-                except Exception as e:
-                    logger.error(f"Error processing source '{source_name}': {e}")
-                finally:
-                    session2.close()
-            
-            new_article = NewsArticle(
-                id=article_id,
-                title=title,
-                text=content,
-                source_id=article_source_id,
-                url=f"restored_article_{article_id}",  # Placeholder URL
-                publish_date=publish_date,
-                scraped_at=scrape_time,
-                processed_at=datetime.datetime.now(),
-                analysis_status="completed"
-            )
-            session.add(new_article)
-            session.commit()
-            logger.info(f"Created new article {article_id} with completed status")
-            return new_article
+            # CHANGE: We no longer create new articles, just log that it wasn't found
+            logger.info(f"Article {article_id} not found in database, skipping")
+            return None
     except Exception as e:
-        logger.error(f"Error updating/creating article {article_id}: {e}")
+        logger.error(f"Error updating article {article_id}: {e}")
         session.rollback()
         return None
     finally:
@@ -478,7 +436,8 @@ def save_entities(db_manager, article_id, entities):
 def process_batch_file(input_file, output_file, db_manager, stats, default_source_id=1):
     """
     Process a single batch input/output file pair for recovery.
-    Only updates articles that don't have a completed status.
+    Only updates EXISTING articles that don't have a completed status.
+    Will never create new articles that don't already exist in the database.
     
     Args:
         input_file: Path to input JSONL file
@@ -537,6 +496,7 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
     recovered_count = 0
     total_processed = 0
     already_complete = 0
+    not_found = 0
     
     for custom_id, data in matched_data.items():
         if 'input' not in data or 'output' not in data:
@@ -547,11 +507,17 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         article_id = parse_article_id(custom_id)
         article_status = existing_articles.get(article_id, {'exists': False, 'has_analysis': False})
         
+        # Skip if article doesn't exist in database
+        if not article_status['exists']:
+            logger.info(f"Article {article_id} does not exist in database, skipping")
+            stats['skipped'] += 1
+            not_found += 1
+            continue
+        
         # Skip if article is already completed
-        if (article_status['exists'] and 
-            article_status['has_analysis'] and 
+        if (article_status['has_analysis'] and 
             article_status['analysis_status'] == 'completed'):
-            logger.info(f"Article {article_id} already exists with completed analysis, skipping")
+            logger.info(f"Article {article_id} already has completed analysis, skipping")
             stats['skipped'] += 1
             already_complete += 1
             continue
@@ -590,7 +556,7 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         title_display = article_data.get('title', '')[:50] + ('...' if len(article_data.get('title', '')) > 50 else '')
         logger.info(f"Processing article ID: {article_id}, Title: {title_display}")
         
-        # Update or create article
+        # Update existing article (will never create new articles)
         article = update_or_create_article(
             db_manager, 
             article_id, 
@@ -599,15 +565,14 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         )
         
         if not article:
-            logger.error(f"Failed to create/update article {article_id}")
+            logger.error(f"Failed to update article {article_id}")
             stats['errors'] += 1
             continue
         
         total_processed += 1
         
         # Was this a recovery? (existing article with incomplete status)
-        if (article_status['exists'] and 
-            (article_status['analysis_status'] != 'completed' or not article_status['processed_at'])):
+        if not article_status['processed_at'] or article_status['analysis_status'] != 'completed':
             recovered_count += 1
         
         # Save entities
@@ -627,6 +592,7 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
     stats['recovered'] = recovered_count
     stats['total_processed'] = total_processed
     stats['already_complete'] = already_complete
+    stats['not_found'] = not_found
     
     return stats
 
@@ -846,8 +812,8 @@ def download_openai_batches(output_dir, year=2025, limit=None, date=None, after_
 def recover_openai_batches(args):
     """
     Main function to recover OpenAI batches and update incomplete articles.
-    Only updates articles that are not already marked as 'completed' to avoid
-    unnecessary processing and save costs.
+    Only updates EXISTING articles that are not already marked as 'completed'.
+    Will NEVER create new articles that don't already exist in the database.
     
     Args:
         args: Command-line arguments
@@ -860,6 +826,14 @@ def recover_openai_batches(args):
     logger.info(f"  Batch limit: {args.limit or 'No limit'}")
     logger.info(f"  Skip download: {args.skip_download}")
     logger.info(f"  Dry run: {args.dry_run}")
+    
+    # Print an important notice about the recovery behavior
+    logger.info("\n===== IMPORTANT NOTICE =====")
+    logger.info("This tool will ONLY update EXISTING articles in the database.")
+    logger.info("It will NEVER create new articles or use placeholder URLs.")
+    logger.info("Articles not found in the database will be skipped.")
+    logger.info("=============================\n")
+    
     # Initialize database manager
     db_manager = DatabaseManager()
     
@@ -929,7 +903,8 @@ def recover_openai_batches(args):
             'incomplete': 0,
             'recovered': 0,
             'total_processed': 0,
-            'already_complete': 0
+            'already_complete': 0,
+            'not_found': 0
         }
         
         if not batches:
@@ -950,6 +925,7 @@ def recover_openai_batches(args):
         logger.info(f"Articles recovered (incomplete → complete): {stats['recovered']}")
         logger.info(f"Total articles processed: {stats['total_processed']}")
         logger.info(f"Articles already complete: {stats['already_complete']}")
+        logger.info(f"Articles not found in database: {stats.get('not_found', 0)}")
         logger.info(f"Articles skipped: {stats['skipped']}")
         logger.info(f"Errors encountered: {stats['errors']}")
         logger.info(f"Incomplete data entries: {stats['incomplete']}")

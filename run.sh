@@ -79,6 +79,7 @@ show_help() {
   echo "                         Types: sources - Show detailed source statistics"
   echo "  restore_openai [ARGS]  Restore OpenAI batch data to database with source detection"
   echo "                         Run without args for more information"
+  echo "  sql \"QUERY\"           Run a SQL query on the database"
   echo "  custom <FILE>          Run a custom Python script file"
   echo "  help                   Show this help message"
   echo ""
@@ -267,8 +268,8 @@ restore_openai_data() {
   if [ -n "$1" ]; then
     python -m analyzer.tools.recover_openai_batches "$@"
   else
-    # Default arguments
-    echo -e "${BLUE}Using default settings. Add arguments to customize:${NC}"
+    # Default to using May 18th, 2025 specifically
+    echo -e "${BLUE}Using default settings with hardcoded date (May 18, 2025).${NC}"
     echo "  --batch-dir DIR            Directory with batch files (default: temporary directory)"
     echo "  --skip-download            Skip downloading batches, just process existing files in batch-dir"
     echo "  --dry-run                  Don't modify database, just show what would happen"
@@ -279,7 +280,79 @@ restore_openai_data() {
     echo "  --after-date YYYY-MM-DD    Only process batches after this date"
     echo "  --today                    Only process batches from today ($(date '+%Y-%m-%d'))"
     echo ""
-    python -m analyzer.tools.recover_openai_batches
+    echo -e "${YELLOW}IMPORTANT: This tool will ONLY update EXISTING articles in the database.${NC}"
+    echo -e "${YELLOW}It will NEVER create new articles or use placeholder URLs.${NC}"
+    echo -e "${YELLOW}Articles not found in the database will be skipped.${NC}"
+    echo ""
+    python -m analyzer.tools.recover_openai_batches --date 2025-05-18
+  fi
+}
+
+# Run SQL query on the database
+run_sql_query() {
+  setup_python_env
+  cd "$PROJECT_ROOT"
+  
+  if [ -z "$1" ]; then
+    echo -e "${RED}Error: Please provide a SQL query${NC}"
+    echo "Usage: ./run.sh sql \"SELECT * FROM table_name LIMIT 10;\""
+    exit 1
+  fi
+  
+  QUERY="$1"
+  
+  echo -e "${GREEN}Running SQL query on database...${NC}"
+  
+  # Check if psql is available directly
+  if command -v psql &> /dev/null; then
+    psql "$DATABASE_URL" -c "$QUERY"
+  # If not, try to use it through docker if the container is running
+  elif docker ps | grep -q "news_bias_db"; then
+    docker exec -it news_bias_db psql -U newsbias -d news_bias -c "$QUERY"
+  else
+    # Use Python as a fallback
+    python -c "
+import os
+import sys
+import psycopg2
+from psycopg2 import sql
+
+try:
+    # Connect to the database
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    cur = conn.cursor()
+    
+    # Execute the query
+    cur.execute(\"\"\"$QUERY\"\"\")
+    
+    # If there are results, print them
+    if cur.description:
+        # Get column names
+        colnames = [desc[0] for desc in cur.description]
+        # Fetch all results
+        results = cur.fetchall()
+        
+        # Print column headers
+        print(' | '.join([str(col) for col in colnames]))
+        print('-' * 40)
+        
+        # Print each row
+        for row in results:
+            print(' | '.join([str(cell) for cell in row]))
+        
+        print(f'\n{len(results)} rows returned')
+    else:
+        # For non-SELECT queries
+        print(f'Query executed successfully. {cur.rowcount} rows affected.')
+    
+    # Close the connection
+    cur.close()
+    conn.close()
+    
+except Exception as e:
+    print(f'Error executing query: {e}')
+    sys.exit(1)
+"
   fi
 }
 
@@ -327,6 +400,10 @@ case "$1" in
   restore_openai)
     shift  # Remove the 'restore_openai' command, leaving any arguments
     restore_openai_data "$@"
+    ;;
+  sql)
+    shift  # Remove the 'sql' command, leaving the query
+    run_sql_query "$@"
     ;;
   custom)
     run_custom_script "$2"
