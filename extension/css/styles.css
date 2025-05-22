@@ -465,11 +465,12 @@ button {
 
 .chart-controls {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   margin-bottom: 12px;
-  padding: 8px;
+  padding: 12px;
   background-color: var(--background-color);
   border-radius: 6px;
+  gap: 4px;
 }
 
 .control-group {
@@ -491,13 +492,35 @@ button {
   font-size: 13px;
 }
 
+/* Vertical control groups for cleaner layout */
+.control-group-vertical {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.control-group-vertical select {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: var(--card-background);
+  font-size: 13px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
 .chart-container {
-  height: 220px;
+  height: 385px;
   margin-bottom: 12px;
   background-color: var(--card-background);
   border-radius: 8px;
   padding: 12px;
   box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.chart-container canvas {
+  margin-top: 20px;
 }
 
 .distribution-description {
@@ -549,7 +572,7 @@ button {
 }
 
 .color-box.current {
-  background-color: var(--error-color);
+  background-color: #ff8c00; /* Orange color to match histogram */
 }
 
 .color-box.standard {
@@ -694,11 +717,12 @@ button {
 /* Entity tracking tab styles */
 .tracking-controls {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   margin-bottom: 12px;
-  padding: 8px;
+  padding: 12px;
   background-color: var(--background-color);
   border-radius: 6px;
+  gap: 4px;
 }
 
 .tracking-description {
@@ -852,6 +876,16 @@ button {
   .similarity-results {
     max-height: 150px;
   }
+}
+
+/* Action buttons at top */
+.action-buttons-top {
+  margin-bottom: 16px;
+}
+
+.action-buttons-top button {
+  width: 100%;
+}
 
 /* Info link for methodology */
 .info-link {

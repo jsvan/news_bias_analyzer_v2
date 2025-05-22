@@ -10,16 +10,19 @@ class EntityTrackingViz {
       height: this.canvas.height,
       powerColor: '#3a86ff',
       moralColor: '#ff006e',
+      confidenceColor: 'rgba(58, 134, 255, 0.2)', // Light blue for confidence intervals
       gridColor: '#ddd',
       textColor: '#333',
       backgroundColor: '#f8f9fa',
       animationDuration: 1000, // ms
       showLegend: true,
       showGrid: true,
+      showConfidenceIntervals: true,
       padding: { top: 30, right: 20, bottom: 40, left: 50 },
       entityName: 'Entity',
       entityType: 'Unknown',
-      dateRange: '30 days'
+      dateRange: '30 days',
+      isMockData: false // Flag to indicate if data is real or mocked
     }, options);
     
     this.data = [];
@@ -48,13 +51,18 @@ class EntityTrackingViz {
     if (entityType) this.options.entityType = entityType;
     
     // Sort data by date
-    this.data.sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    // Start animation
-    this.startAnimation();
-    
-    // Immediately render the first frame
-    this.render(0);
+    if (this.data && this.data.length > 0) {
+      this.data.sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      // Start animation
+      this.startAnimation();
+      
+      // Immediately render the first frame
+      this.render(0);
+    } else {
+      // If no data, show empty state
+      this.clear();
+    }
   }
   
   // Start animation sequence
@@ -98,7 +106,7 @@ class EntityTrackingViz {
     
     // Draw subtitle
     this.ctx.font = '10px Arial';
-    this.ctx.fillText('Select an entity to view sentiment changes over time', width / 2, height / 2 + 20);
+    this.ctx.fillText('Not enough data points collected for this entity', width / 2, height / 2 + 20);
   }
   
   // Render the chart with animation progress (0-1)
@@ -240,7 +248,7 @@ class EntityTrackingViz {
   
   // Draw data lines with animation
   drawLines(progress, minDate, maxDate) {
-    const { powerColor, moralColor } = this.options;
+    const { powerColor, moralColor, confidenceColor, showConfidenceIntervals } = this.options;
     const { x, y, width: chartWidth, height: chartHeight } = this.chartDimensions;
     
     // Calculate how many data points to show based on animation progress
@@ -248,6 +256,11 @@ class EntityTrackingViz {
     const visibleData = this.data.slice(0, pointsToShow);
     
     if (visibleData.length < 2) return;
+    
+    // Draw confidence intervals first (if available and enabled)
+    if (showConfidenceIntervals && visibleData[0].power_ci_lower !== undefined) {
+      this.drawConfidenceIntervals(visibleData);
+    }
     
     // Draw power score line
     this.ctx.strokeStyle = powerColor;
@@ -308,6 +321,66 @@ class EntityTrackingViz {
     if (visibleData.length >= 4) {
       this.drawTrendIndicators(visibleData);
     }
+  }
+  
+  // Draw confidence intervals as shaded areas
+  drawConfidenceIntervals(visibleData) {
+    const { confidenceColor } = this.options;
+    const { x, y, width: chartWidth, height: chartHeight } = this.chartDimensions;
+    
+    this.ctx.fillStyle = confidenceColor;
+    
+    // Draw power score confidence interval
+    this.ctx.beginPath();
+    
+    // Draw upper boundary
+    visibleData.forEach((dataPoint, index) => {
+      const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+      const yPos = y + chartHeight - ((dataPoint.power_ci_upper + 2) / 4) * chartHeight;
+      
+      if (index === 0) {
+        this.ctx.moveTo(xPos, yPos);
+      } else {
+        this.ctx.lineTo(xPos, yPos);
+      }
+    });
+    
+    // Draw lower boundary (in reverse order to close the path)
+    for (let index = visibleData.length - 1; index >= 0; index--) {
+      const dataPoint = visibleData[index];
+      const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+      const yPos = y + chartHeight - ((dataPoint.power_ci_lower + 2) / 4) * chartHeight;
+      this.ctx.lineTo(xPos, yPos);
+    }
+    
+    this.ctx.closePath();
+    this.ctx.fill();
+    
+    // Draw moral score confidence interval
+    this.ctx.beginPath();
+    
+    // Draw upper boundary
+    visibleData.forEach((dataPoint, index) => {
+      const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+      const yPos = y + chartHeight - ((dataPoint.moral_ci_upper + 2) / 4) * chartHeight;
+      
+      if (index === 0) {
+        this.ctx.moveTo(xPos, yPos);
+      } else {
+        this.ctx.lineTo(xPos, yPos);
+      }
+    });
+    
+    // Draw lower boundary (in reverse order to close the path)
+    for (let index = visibleData.length - 1; index >= 0; index--) {
+      const dataPoint = visibleData[index];
+      const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+      const yPos = y + chartHeight - ((dataPoint.moral_ci_lower + 2) / 4) * chartHeight;
+      this.ctx.lineTo(xPos, yPos);
+    }
+    
+    this.ctx.closePath();
+    this.ctx.fill();
   }
   
   // Draw trend indicators (arrows showing trend direction)
@@ -410,14 +483,15 @@ class EntityTrackingViz {
     this.ctx.fillText(
       `${this.options.entityName} (${this.options.entityType}) - Past ${this.options.dateRange}`, 
       width / 2, 
-      15
+      10
     );
     
     // Draw legend if enabled
     if (this.options.showLegend) {
       const legendY = this.options.height - 15;
-      const legendX1 = width / 2 - 75;
-      const legendX2 = width / 2 + 25;
+      const legendX1 = width / 2 - 100;
+      const legendX2 = width / 2 - 20;
+      const legendX3 = width / 2 + 60;
       
       // Power score legend
       this.ctx.fillStyle = powerColor;
@@ -428,8 +502,8 @@ class EntityTrackingViz {
       
       this.ctx.fillStyle = textColor;
       this.ctx.textAlign = 'left';
-      this.ctx.font = '10px Arial';
-      this.ctx.fillText('Power Score', legendX1 + 15, legendY + 4);
+      this.ctx.font = '9px Arial';
+      this.ctx.fillText('Power', legendX1 + 15, legendY + 4);
       
       // Moral score legend
       this.ctx.fillStyle = moralColor;
@@ -439,41 +513,19 @@ class EntityTrackingViz {
       this.ctx.fill();
       
       this.ctx.fillStyle = textColor;
-      this.ctx.fillText('Moral Score', legendX2 + 15, legendY + 4);
+      this.ctx.fillText('Moral', legendX2 + 15, legendY + 4);
+      
+      // Confidence interval legend (if enabled)
+      if (this.options.showConfidenceIntervals && this.data.length > 0 && this.data[0].power_ci_lower !== undefined) {
+        this.ctx.fillStyle = this.options.confidenceColor;
+        this.ctx.fillRect(legendX3, legendY, 10, 8);
+        
+        this.ctx.fillStyle = textColor;
+        this.ctx.fillText('95% CI', legendX3 + 15, legendY + 4);
+      }
     }
   }
   
-  // Generate random demo data (for testing)
-  static generateDemoData(entityName = 'Example Entity', numPoints = 10) {
-    const data = [];
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - numPoints);
-    
-    for (let i = 0; i < numPoints; i++) {
-      const date = new Date(startDate);
-      date.setDate(date.getDate() + i);
-      
-      // Generate slightly trending data
-      const powerBase = -0.5 + (i / numPoints) * 1.5; // Trend from -0.5 to 1.0
-      const moralBase = 0.2 + (i / numPoints) * 0.8;  // Trend from 0.2 to 1.0
-      
-      // Add some random variance
-      const powerScore = Math.min(2, Math.max(-2, powerBase + (Math.random() - 0.5)));
-      const moralScore = Math.min(2, Math.max(-2, moralBase + (Math.random() - 0.5)));
-      
-      data.push({
-        date: date.toISOString(),
-        power_score: powerScore,
-        moral_score: moralScore
-      });
-    }
-    
-    return {
-      entity_name: entityName,
-      entity_type: 'Person',
-      data: data
-    };
-  }
 }
 
 // Export for use in popup.js

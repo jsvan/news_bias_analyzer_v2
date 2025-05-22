@@ -5,27 +5,34 @@ class SentimentHistogram {
   constructor(canvasId, options = {}) {
     this.canvas = document.getElementById(canvasId);
     this.ctx = this.canvas.getContext('2d');
+    
+    // Ensure canvas dimensions match HTML attributes
+    this.canvas.width = 320;
+    this.canvas.height = 300;
+    
     this.options = Object.assign({
       width: this.canvas.width,
       height: this.canvas.height,
       barColor: '#3498db',
-      highlightColor: '#e74c3c',
+      highlightColor: '#ff8c00', // Orange color for current article
       textColor: '#333',
       countryColor: '#2ecc71', // Color for country-specific data
       bins: 10,
       showPercentile: true,
       animate: true,
-      country: null  // Currently selected country (null = global)
+      country: null,  // Currently selected country (null = global)
+      isMockData: false // Flag to indicate if data is real or mock
     }, options);
     
     this.data = null;
     this.currentValue = null;
+    this.currentBinInfo = null;
   }
   
   // Set data for histogram
-  setData(data, currentValue, countryData = null) {
+  setData(data, currentValue, comparisonData = null) {
     this.data = data;          // Global data
-    this.countryData = countryData; // Country-specific data
+    this.comparisonData = comparisonData; // Comparison data (country/source)
     this.currentValue = currentValue;
     this.render();
   }
@@ -56,7 +63,7 @@ class SentimentHistogram {
         bins[numBins - 1]++;
       } else {
         const binIndex = Math.floor((value - min) / binWidth);
-        bins[binIndex]++;
+        bins[binIndex < 0 ? 0 : (binIndex >= numBins ? numBins - 1 : binIndex)]++;
       }
     });
     
@@ -82,26 +89,31 @@ class SentimentHistogram {
   
   // Render the histogram
   render() {
-    if (!this.data || this.data.length === 0 || (this.data.length < 10 && this.data.every(val => val === 0))) {
-      this.drawEmptyState("Not enough data available for statistical analysis");
+    if (!this.data || this.data.length === 0 || (this.data.length < 5 && this.data.every(val => val === 0))) {
+      this.drawEmptyState("No data available for this entity");
       return;
     }
     
     const { width, height, barColor, highlightColor, countryColor, textColor, bins, showPercentile, country } = this.options;
     
-    // Clear canvas
+    // Clear canvas and reset current bin info
     this.ctx.clearRect(0, 0, width, height);
+    this.currentBinInfo = null;
     
     // Create bins for global data
     const binData = this.createBins(this.data, bins);
     const { counts, boundaries, max } = binData;
     
-    // Create bins for country data if available
-    let countryBinData = null;
-    if (this.countryData && this.countryData.length > 0 && country) {
-      const countryDataForBin = this.countryData[country] || [];
-      if (countryDataForBin.length > 0) {
-        countryBinData = this.createBins(countryDataForBin, bins);
+    // Create bins for comparison data if available
+    let comparisonBinData = null;
+    let comparisonLabel = "";
+    
+    if (this.comparisonData) {
+      const comparisonKey = Object.keys(this.comparisonData)[0];
+      if (comparisonKey && this.comparisonData[comparisonKey] && this.comparisonData[comparisonKey].length >= 3) {
+        const comparisonDataForBin = this.comparisonData[comparisonKey];
+        comparisonBinData = this.createBins(comparisonDataForBin, bins);
+        comparisonLabel = comparisonKey;
       }
     }
     
@@ -109,13 +121,13 @@ class SentimentHistogram {
     const currentBin = this.findBinForValue(this.currentValue, boundaries);
     
     // Calculate dimensions
-    const padding = { top: 20, right: 20, bottom: 40, left: 40 };
+    const padding = { top: 30, right: 20, bottom: 40, left: 40 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
     const barWidth = chartWidth / bins;
     
     // Determine maximum value for scaling
-    const maxValue = countryBinData ? Math.max(max, countryBinData.max) : max;
+    const maxValue = comparisonBinData ? Math.max(max, comparisonBinData.max) : max;
     
     // Draw axes
     this.ctx.beginPath();
@@ -139,24 +151,11 @@ class SentimentHistogram {
 
       // Draw bar
       this.ctx.fillStyle = i === currentBin ? highlightColor : barColor;
-      this.ctx.fillRect(x, y, barWidth - 2, barHeight);
+      this.ctx.fillRect(x, y, barWidth - 0.1, barHeight);
 
-      // Add visual indicator for current value if this is the current bin
+      // Store current bin info for later drawing (after all bars)
       if (i === currentBin) {
-        // Draw marker triangle above the bar
-        this.ctx.beginPath();
-        this.ctx.fillStyle = highlightColor;
-        this.ctx.moveTo(x + barWidth / 2, y - 10);
-        this.ctx.lineTo(x + barWidth / 2 - 7, y - 3);
-        this.ctx.lineTo(x + barWidth / 2 + 7, y - 3);
-        this.ctx.closePath();
-        this.ctx.fill();
-
-        // Add "Current Article" label
-        this.ctx.fillStyle = highlightColor;
-        this.ctx.textAlign = 'center';
-        this.ctx.font = 'bold 10px Arial';
-        this.ctx.fillText("Your Article", x + barWidth / 2, y - 15);
+        this.currentBinInfo = { x, y, barWidth };
       }
 
       // Draw bin boundary label (only show first, middle, and last for clarity)
@@ -183,15 +182,15 @@ class SentimentHistogram {
       }
     });
     
-    // Draw country-specific bars if available
-    if (countryBinData) {
-      countryBinData.counts.forEach((count, i) => {
+    // Draw comparison-specific bars if available
+    if (comparisonBinData) {
+      comparisonBinData.counts.forEach((count, i) => {
         const x = padding.left + i * barWidth + barWidth / 4;
         const barHeight = (count / maxValue) * chartHeight;
         const y = height - padding.bottom - barHeight;
         const narrowBarWidth = barWidth / 2;
         
-        // Draw country bar overlay
+        // Draw comparison bar overlay
         this.ctx.fillStyle = countryColor;
         this.ctx.globalAlpha = 0.7;
         this.ctx.fillRect(x, y, narrowBarWidth, barHeight);
@@ -211,7 +210,36 @@ class SentimentHistogram {
       this.ctx.fillText(Math.round(value), padding.left - 5, y);
     }
     
+    // Draw current article indicator after all bars (so it's on top)
+    if (this.currentBinInfo) {
+      const { x, y, barWidth } = this.currentBinInfo;
+      
+      // Calculate percentile for the second line of text
+      const lowerCount = this.data.filter(v => v < this.currentValue).length;
+      const percentile = Math.round((lowerCount / this.data.length) * 100);
+      
+      // Draw marker triangle above the bar
+      this.ctx.beginPath();
+      this.ctx.fillStyle = highlightColor;
+      this.ctx.moveTo(x + barWidth / 2, y - 10);
+      this.ctx.lineTo(x + barWidth / 2 - 7, y - 3);
+      this.ctx.lineTo(x + barWidth / 2 + 7, y - 3);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      // Add "Your Article" label (on top of everything)
+      this.ctx.fillStyle = highlightColor;
+      this.ctx.textAlign = 'center';
+      this.ctx.font = 'bold 10px Arial';
+      this.ctx.fillText("Your Article", x + barWidth / 2, y - 25);
+      
+      // Add percentile as second line
+      this.ctx.font = '9px Arial';
+      this.ctx.fillText(`${percentile}th percentile`, x + barWidth / 2, y - 15);
+    }
+    
     // Draw axes labels
+    this.ctx.fillStyle = textColor;  // Reset to black for axis labels
     this.ctx.textAlign = 'center';
     this.ctx.font = '12px Arial';
     this.ctx.fillText('Sentiment Score', width / 2, height - 5);
@@ -219,52 +247,33 @@ class SentimentHistogram {
     this.ctx.save();
     this.ctx.translate(15, height / 2);
     this.ctx.rotate(-Math.PI / 2);
+    this.ctx.fillStyle = textColor;  // Reset to black for y-axis label
     this.ctx.fillText('Frequency', 0, 0);
     this.ctx.restore();
     
-    // Draw title with country info if applicable
-    let titleText = country ? `${country} Sentiment Distribution` : 'Global Sentiment Distribution';
-    this.ctx.fillStyle = textColor;
-    this.ctx.textAlign = 'center';
-    this.ctx.font = 'bold 12px Arial';
-    this.ctx.fillText(titleText, width / 2, padding.top - 5);
+    // Title is now handled in HTML, not drawn on canvas
     
-    // Draw percentile info
-    if (showPercentile && currentBin >= 0) {
-      // Calculate percentile of current value
-      const lowerCount = this.data.filter(v => v < this.currentValue).length;
-      const percentile = Math.round((lowerCount / this.data.length) * 100);
-      
-      // Draw text showing percentile
-      this.ctx.fillStyle = textColor;
-      this.ctx.textAlign = 'center';
-      this.ctx.font = '11px Arial';
-      this.ctx.fillText(
-        `Current article: ${percentile}th percentile`, 
-        width / 2, 
-        height - padding.bottom + 30
-      );
-    }
+    // Percentile info is now part of the "Your Article" pointer above
     
-    // Draw legend for country comparison
-    if (countryBinData) {
+    // Draw legend for comparison data
+    if (comparisonBinData) {
       const legendY = padding.top + 15;
       const legendX1 = padding.left + 10;
       const legendX2 = padding.left + chartWidth / 2;
       
-      // Global legend
+      // Global/All Sources legend
       this.ctx.fillStyle = barColor;
       this.ctx.fillRect(legendX1, legendY, 10, 10);
       this.ctx.fillStyle = textColor;
       this.ctx.textAlign = 'left';
       this.ctx.font = '10px Arial';
-      this.ctx.fillText('Global', legendX1 + 15, legendY + 5);
+      this.ctx.fillText('All Sources', legendX1 + 15, legendY + 5);
       
-      // Country legend
+      // Comparison legend (country or source)
       this.ctx.fillStyle = countryColor;
       this.ctx.fillRect(legendX2, legendY, 10, 10);
       this.ctx.fillStyle = textColor;
-      this.ctx.fillText(country, legendX2 + 15, legendY + 5);
+      this.ctx.fillText(comparisonLabel, legendX2 + 15, legendY + 5);
     }
   }
   
@@ -280,8 +289,9 @@ class SentimentHistogram {
 
     // Draw a small legend or explanation
     this.ctx.font = '10px Arial';
-    this.ctx.fillText('More data points are needed for meaningful analysis', width / 2, height / 2 + 25);
+    this.ctx.fillText('Analysis requires more data points for this entity', width / 2, height / 2 + 25);
   }
+  
 }
 
 // Export for use in popup.js

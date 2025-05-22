@@ -57,6 +57,11 @@
           </div>
         </div>
         
+        <!-- Action buttons at top -->
+        <div class="action-buttons-top">
+          <button id="view-details-btn" class="primary-btn">Visualize Detailed Analysis</button>
+        </div>
+        
         <!-- Entities list -->
         <div class="entities-section">
           <h3>Entity Analysis</h3>
@@ -65,8 +70,7 @@
           </div>
         </div>
         
-        <button id="view-details-btn" class="secondary-btn">View Detailed Analysis</button>
-        <button id="analyze-again-btn" class="primary-btn">Analyze Again</button>
+        <button id="analyze-again-btn" class="secondary-btn">Analyze Again</button>
       </div>
       
       <!-- No article state -->
@@ -106,21 +110,20 @@
         <h3>Sentiment Distribution Comparison</h3>
         
         <div class="chart-controls">
-          <div class="control-group">
-            <label for="entity-selector">Entity:</label>
-            <select id="entity-selector"></select>
-          </div>
-          <div class="control-group">
-            <label for="dimension-selector">Dimension:</label>
-            <select id="dimension-selector">
-              <option value="power">Power</option>
-              <option value="moral">Moral</option>
+          <div class="control-group-vertical">
+            <select id="entity-selector">
+              <option value="">Select Entity...</option>
             </select>
           </div>
-          <div class="control-group">
-            <label for="country-selector">Country:</label>
+          <div class="control-group-vertical">
+            <select id="dimension-selector">
+              <option value="power">Power Dimension</option>
+              <option value="moral">Moral Dimension</option>
+            </select>
+          </div>
+          <div class="control-group-vertical">
             <select id="country-selector">
-              <option value="">Global</option>
+              <option value="">Global Comparison</option>
               <option value="United States">United States</option>
               <option value="United Kingdom">United Kingdom</option>
               <option value="Canada">Canada</option>
@@ -136,7 +139,8 @@
         </div>
         
         <div class="chart-container">
-          <canvas id="distribution-chart" width="320" height="200"></canvas>
+          <h4 id="distribution-title">Sentiment Distribution</h4>
+          <canvas id="distribution-chart" width="320" height="300"></canvas>
         </div>
         
         <div class="distribution-description">
@@ -199,12 +203,12 @@
         <h3>Entity Sentiment Tracking</h3>
 
         <div class="tracking-controls">
-          <div class="control-group">
-            <label for="tracking-entity-selector">Entity:</label>
-            <select id="tracking-entity-selector"></select>
+          <div class="control-group-vertical">
+            <select id="tracking-entity-selector">
+              <option value="">Select Entity...</option>
+            </select>
           </div>
-          <div class="control-group">
-            <label for="tracking-time-range">Time Range:</label>
+          <div class="control-group-vertical">
             <select id="tracking-time-range">
               <option value="7">Last Week</option>
               <option value="30" selected>Last Month</option>

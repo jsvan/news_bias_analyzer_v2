@@ -48,9 +48,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeExtension();
   
   // Event Listeners
-  analyzeBtn.addEventListener('click', startAnalysis);
-  forceAnalyzeBtn.addEventListener('click', startAnalysis);
-  retryBtn.addEventListener('click', startAnalysis);
+  analyzeBtn.addEventListener('click', function() {
+    startAnalysis(false); // Explicitly pass false for forceReanalysis
+  });
+  forceAnalyzeBtn.addEventListener('click', function() {
+    startAnalysis(true); // Explicitly pass true for forceReanalysis
+  });
+  retryBtn.addEventListener('click', function() {
+    startAnalysis(false); // Explicitly pass false for forceReanalysis
+  });
   viewDetailsBtn.addEventListener('click', showDetailedView);
   analyzeAgainBtn.addEventListener('click', resetToInitialState);
   backBtn.addEventListener('click', hideDetailedView);
@@ -84,68 +90,207 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // Check if we have cached results for the current tab
+      // First check if we have in-memory results for this tab
       const tabKey = `tab_${currentTab.id}`;
       chrome.storage.local.get([tabKey], (result) => {
         if (result[tabKey] && result[tabKey].result) {
           // We have cached results for this tab
+          console.log('Found in-memory results for current tab');
           analysisResult = result[tabKey].result;
           displayResults(analysisResult);
         } else {
-          // No cached results in tab-based storage, check URL-based storage
-          const urlKey = generateArticleId(currentTab.url);
-          chrome.storage.local.get([urlKey], (urlResult) => {
-            if (urlResult[urlKey] && urlResult[urlKey].result) {
-              // Found cached results
-              console.log('Found cached analysis for URL:', currentTab.url);
-              analysisResult = urlResult[urlKey].result;
-
-              // Also cache in tab storage for faster future access
-              chrome.storage.local.set({
-                [tabKey]: {
-                  tabId: currentTab.id,
-                  url: currentTab.url,
-                  result: analysisResult,
-                  timestamp: Date.now()
-                }
-              });
-
-              displayResults(analysisResult);
-            } else {
-              // No cached results at all, show initial state
-              showState(initialState);
-            }
-          });
+          // If not in memory, try to retrieve from database via API
+          checkForExistingAnalysis(currentTab);
         }
       });
     });
   }
+
+  // Check if this URL has already been analyzed in our database
+  function checkForExistingAnalysis(tab) {
+    showState(loadingState);
+    
+    // Show checking message
+    const loadingText = document.querySelector('#loading-state p');
+    if (loadingText) {
+      loadingText.textContent = 'Checking for existing analysis...';
+    }
+    
+    // Call the API to check if this URL has been analyzed before
+    fetch(`${API_ENDPOINT}/analysis/by-url?url=${encodeURIComponent(tab.url)}`)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.exists && data.entities && data.entities.length > 0) {
+          console.log('Found existing analysis in database:', data);
+          
+          // Format the data to match our analysis result structure
+          const formattedResult = {
+            id: generateArticleId(data.url),
+            url: data.url,
+            title: data.title,
+            source: data.source,
+            entities: data.entities,
+            quotes: data.quotes || [],
+            composite_score: data.composite_score || { percentile: 50 },
+            from_database: true
+          };
+          
+          // Save in local storage for faster access
+          const tabKey = `tab_${tab.id}`;
+          const urlKey = generateArticleId(tab.url);
+          
+          chrome.storage.local.set({
+            [tabKey]: {
+              tabId: tab.id,
+              url: tab.url,
+              result: formattedResult,
+              timestamp: Date.now()
+            },
+            [urlKey]: {
+              url: tab.url,
+              result: formattedResult,
+              timestamp: Date.now()
+            }
+          });
+          
+          // Update the global variable and display results
+          analysisResult = formattedResult;
+          displayResults(analysisResult);
+          
+          // Log success
+          console.log('Successfully loaded and displayed analysis from database');
+        } else {
+          // No existing analysis, show initial state
+          console.log('No existing analysis found for URL:', tab.url);
+          showState(initialState);
+        }
+      })
+      .catch(error => {
+        console.error('Error checking for existing analysis:', error);
+        showState(initialState);
+      });
+  }
   
   // Start analysis
-  function startAnalysis() {
+  function startAnalysis(forceReanalysis = false) {
+    console.log(`startAnalysis called with forceReanalysis=${forceReanalysis}`);
+    
+    // If we already have cached analysis and we're not forcing re-analysis,
+    // just display it from memory
+    if (analysisResult && analysisResult.from_database && !forceReanalysis) {
+      console.log("Using cached analysis from memory");
+      displayResults(analysisResult);
+      return;
+    }
+    
     showState(loadingState);
+    
+    // Update loading message
+    const loadingText = document.querySelector('#loading-state p');
+    if (loadingText) {
+      loadingText.textContent = forceReanalysis ? 
+        'Re-analyzing article content...' : 
+        'Checking for existing analysis...';
+    }
 
     // Get the current tab
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const currentTab = tabs[0];
-
-      // Use API for content extraction
-      tryExtractContent(currentTab)
-        .then(extractedContent => {
-          if (extractedContent) {
-            // Successfully extracted content from the API
-            currentArticle = extractedContent;
-            analyzeWithApi(currentArticle);
-          } else {
-            // Show error if API extraction fails
-            showError('Content extraction failed. Please make sure the API server is running.');
-          }
-        })
-        .catch(error => {
-          console.error("Error with content extraction API:", error);
-          showError('Server unreachable: Please make sure the API server is running at ' + API_ENDPOINT);
-        });
+      
+      console.log(`Processing tab: ${currentTab.url}`);
+      
+      // Always check for existing analysis first, unless explicitly forcing reanalysis
+      if (!forceReanalysis) {
+        console.log("Checking for existing analysis in database");
+        // Check if this URL has already been analyzed first
+        fetch(`${API_ENDPOINT}/analysis/by-url?url=${encodeURIComponent(currentTab.url)}`)
+          .then(response => {
+            if (!response.ok) {
+              // If the check fails, proceed with extraction
+              throw new Error(`API request failed: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            if (data.exists && data.entities && data.entities.length > 0) {
+              // Found existing analysis - display it directly
+              console.log('Found existing analysis in database:', data);
+              
+              // Format the data to match our analysis result structure
+              const formattedResult = {
+                id: generateArticleId(data.url),
+                url: data.url,
+                title: data.title,
+                source: data.source,
+                entities: data.entities,
+                quotes: data.quotes || [],
+                composite_score: data.composite_score || { percentile: 50 },
+                from_database: true
+              };
+              
+              // Update the global variable and display results
+              analysisResult = formattedResult;
+              displayResults(analysisResult);
+              
+              // Cache the result for future use
+              cacheAnalysisResult(formattedResult);
+            } else {
+              console.log("No existing analysis found, proceeding with extraction");
+              // No existing analysis, proceed with extraction
+              
+              if (loadingText) {
+                loadingText.textContent = 'Extracting and analyzing article content...';
+              }
+              
+              extractAndAnalyze(currentTab, false);
+            }
+          })
+          .catch(error => {
+            console.error('Error checking for existing analysis:', error);
+            // If check fails, fall back to extraction
+            
+            if (loadingText) {
+              loadingText.textContent = 'Extracting and analyzing article content...';
+            }
+            
+            extractAndAnalyze(currentTab, false);
+          });
+      } else {
+        // Force reanalysis - skip database check and extract directly
+        console.log("Force reanalysis - skipping database check");
+        
+        if (loadingText) {
+          loadingText.textContent = 'Re-analyzing article content...';
+        }
+        
+        extractAndAnalyze(currentTab, true);
+      }
     });
+  }
+  
+  // Helper function to extract and analyze content
+  function extractAndAnalyze(tab, forceReanalysis) {
+    // Use API for content extraction
+    tryExtractContent(tab)
+      .then(extractedContent => {
+        if (extractedContent) {
+          // Successfully extracted content from the API
+          currentArticle = extractedContent;
+          analyzeWithApi(currentArticle, forceReanalysis);
+        } else {
+          // Show error if API extraction fails
+          showError('Content extraction failed. Please make sure the API server is running.');
+        }
+      })
+      .catch(error => {
+        console.error("Error with content extraction API:", error);
+        showError('Server unreachable: Please make sure the API server is running at ' + API_ENDPOINT);
+      });
   }
 
   // Extract content using the /extract API endpoint
@@ -204,7 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // Real API call to our local API server
-  function analyzeWithApi(article) {
+  function analyzeWithApi(article, forceReanalysis = false) {
     // Show loading state
     showState(loadingState);
     
@@ -213,7 +358,8 @@ document.addEventListener('DOMContentLoaded', () => {
       url: article.url,
       source: article.source,
       title: article.headline,
-      textLength: article.content ? article.content.length : 0
+      textLength: article.content ? article.content.length : 0,
+      forceReanalysis: forceReanalysis
     });
     
     // Log the API endpoint
@@ -224,7 +370,8 @@ document.addEventListener('DOMContentLoaded', () => {
       url: article.url,
       source: article.source,
       title: article.headline,
-      text: article.content
+      text: article.content,
+      force_reanalysis: forceReanalysis
     };
     
     // Log the full request details
@@ -296,7 +443,9 @@ document.addEventListener('DOMContentLoaded', () => {
         entities: entities,
         quotes: quotes,
         composite_score: result.composite_score || { percentile: 50 },
-        from_cache: false
+        newly_analyzed: result.newly_analyzed,
+        from_database: result.from_database,
+        saved_to_database: result.saved_to_database
       };
       
       console.log('Formatted result:', formattedResult);
@@ -432,21 +581,27 @@ document.addEventListener('DOMContentLoaded', () => {
         percentileText = 'average';
       }
 
-      // Create a simple cache indicator tag if showing cached results
+      // Create a source indicator tag 
       const cacheTag = document.getElementById('cache-indicator');
       if (cacheTag) {
-        if (result.from_cache) {
+        if (result.from_database) {
           // Retrieved from database
-          cacheTag.textContent = 'DB';
+          cacheTag.textContent = 'FROM DB';
           cacheTag.title = 'Analysis retrieved from database';
           cacheTag.style.display = 'inline-block';
           cacheTag.style.backgroundColor = '#4a90e2';
-        } else if (result.timestamp || result.analyzed_at) {
-          // Retrieved from browser extension cache
-          cacheTag.textContent = 'CACHED';
-          cacheTag.title = 'Previously analyzed article';
+        } else if (result.newly_analyzed) {
+          // Fresh analysis
+          cacheTag.textContent = 'NEW';
+          cacheTag.title = 'Newly analyzed article';
           cacheTag.style.display = 'inline-block';
-          cacheTag.style.backgroundColor = '#06d6a0';
+          cacheTag.style.backgroundColor = '#2ecc71';
+        } else if (result.saved_to_database) {
+          // Saved to database
+          cacheTag.textContent = 'SAVED';
+          cacheTag.title = 'Analysis saved to database';
+          cacheTag.style.display = 'inline-block';
+          cacheTag.style.backgroundColor = '#3498db';
         } else {
           cacheTag.style.display = 'none';
         }
@@ -464,6 +619,33 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Show results state
       showState(resultsState);
+      
+      // If analysis was from database, add a message
+      if (result.from_database) {
+        // Add a previously analyzed message at the bottom if it doesn't exist
+        let dbNote = document.getElementById('database-note');
+        if (!dbNote) {
+          dbNote = document.createElement('div');
+          dbNote.id = 'database-note';
+          dbNote.className = 'database-note';
+          dbNote.innerHTML = '<p>This page was previously analyzed and loaded from database.</p>';
+          
+          // Add force re-analyze button
+          const reanalyzeBtn = document.createElement('button');
+          reanalyzeBtn.textContent = 'Re-analyze';
+          reanalyzeBtn.className = 'small-button';
+          reanalyzeBtn.addEventListener('click', () => {
+            console.log("Force re-analysis button clicked");
+            // Clear any cached results for this URL to ensure a fresh analysis
+            analysisResult = null;
+            startAnalysis(true); // Pass true to force re-analysis
+          });
+          dbNote.appendChild(reanalyzeBtn);
+          
+          // Add to results container
+          resultsState.appendChild(dbNote);
+        }
+      }
     } catch (e) {
       console.error("Error displaying results:", e);
       showError("Failed to display results: " + e.message);
@@ -744,46 +926,137 @@ document.addEventListener('DOMContentLoaded', () => {
     const entitySelector = document.getElementById('entity-selector');
     const dimensionSelector = document.getElementById('dimension-selector');
     const countrySelector = document.getElementById('country-selector');
+    let sourceSelector = document.getElementById('source-selector');
     const sampleSizeInfo = document.getElementById('sample-size-info');
     
-    // Clear and repopulate entity selector
-    entitySelector.innerHTML = '';
-    
-    if (!analysisResult.entities || analysisResult.entities.length === 0) {
-      // Show empty state
-      window.sentimentHistogram.drawEmptyState('No entities available');
-      entitySelector.innerHTML = '<option value="">No entities available</option>';
-      sampleSizeInfo.textContent = 'No data available';
-      return;
+    // Fix the layout of controls - we'll put each selector on its own row
+    const tabControls = document.querySelector('.tab-controls');
+    if (tabControls) {
+      // Apply new styles to improve layout
+      tabControls.style.display = 'flex';
+      tabControls.style.flexDirection = 'column';
+      tabControls.style.gap = '10px';
+      
+      // Ensure each control group has proper width
+      const controlGroups = tabControls.querySelectorAll('.control-group');
+      controlGroups.forEach(group => {
+        group.style.width = '100%';
+        group.style.display = 'flex';
+        group.style.flexDirection = 'column';
+        group.style.marginBottom = '8px';
+        
+        // Make selects take full width
+        const select = group.querySelector('select');
+        if (select) {
+          select.style.width = '100%';
+        }
+      });
     }
     
-    // Populate entity dropdown
-    analysisResult.entities.forEach(entity => {
-      const displayName = entity.name || entity.entity;
-      if (!displayName) return;
+    // If sourceSelector doesn't exist, create it
+    let comparisonContainer = document.querySelector('.comparison-container');
+    if (!comparisonContainer) {
+      // Create comparison container and selectors
+      comparisonContainer = document.createElement('div');
+      comparisonContainer.className = 'comparison-container';
+      comparisonContainer.style.width = '100%';
       
-      const option = document.createElement('option');
-      option.value = displayName;
-      option.textContent = displayName;
-      entitySelector.appendChild(option);
-    });
+      // Add source selector if it doesn't exist
+      if (!sourceSelector) {
+        const sourceSelectorContainer = document.createElement('div');
+        sourceSelectorContainer.className = 'control-group';
+        sourceSelectorContainer.style.width = '100%';
+        sourceSelectorContainer.innerHTML = `
+          <label for="source-selector">Compare with source:</label>
+          <select id="source-selector" style="width: 100%;">
+            <option value="">All Sources</option>
+          </select>
+        `;
+        comparisonContainer.appendChild(sourceSelectorContainer);
+        
+        // Add it to the distribution controls
+        const controlsContainer = countrySelector ? countrySelector.closest('.tab-controls') : null;
+        if (controlsContainer) {
+          controlsContainer.appendChild(comparisonContainer);
+          sourceSelector = document.getElementById('source-selector');
+        }
+      }
+    }
     
-    // Event listeners for controls
-    entitySelector.addEventListener('change', updateDistributionChart);
-    dimensionSelector.addEventListener('change', updateDistributionChart);
-    countrySelector.addEventListener('change', updateDistributionChart);
+    // Clear and repopulate entity selector
+    if (entitySelector) {
+      entitySelector.innerHTML = '';
+      
+      if (!analysisResult || !analysisResult.entities || analysisResult.entities.length === 0) {
+        // Show empty state
+        if (window.sentimentHistogram) {
+          window.sentimentHistogram.drawEmptyState('No entities available');
+        }
+        entitySelector.innerHTML = '<option value="">No entities available</option>';
+        if (sampleSizeInfo) {
+          sampleSizeInfo.textContent = 'No data available';
+        }
+        return;
+      }
+      
+      // Populate entity dropdown
+      analysisResult.entities.forEach(entity => {
+        const displayName = entity.name || entity.entity;
+        if (!displayName) return;
+        
+        const option = document.createElement('option');
+        option.value = displayName;
+        option.textContent = displayName;
+        entitySelector.appendChild(option);
+      });
+    }
     
-    // Load initial data
-    updateDistributionChart();
+    // Ensure all selectors exist before adding event listeners
+    if (entitySelector) {
+      entitySelector.addEventListener('change', updateDistributionChart);
+    }
+    
+    if (dimensionSelector) {
+      dimensionSelector.addEventListener('change', updateDistributionChart);
+    }
+    
+    if (countrySelector) {
+      countrySelector.addEventListener('change', updateDistributionChart);
+    }
+    
+    if (sourceSelector) {
+      sourceSelector.addEventListener('change', updateDistributionChart);
+    }
+    
+    // Load initial data only if we have entities
+    if (analysisResult && analysisResult.entities && analysisResult.entities.length > 0) {
+      updateDistributionChart();
+    }
     
     // Update distribution chart based on selections
     function updateDistributionChart() {
+      // Handle cases where elements might not exist
+      if (!entitySelector || !dimensionSelector || !window.sentimentHistogram) {
+        console.error("Required elements for distribution chart not found");
+        return;
+      }
+      
+      // Re-fetch sourceSelector in case it was created after initial load
+      sourceSelector = document.getElementById('source-selector');
+    
       const selectedEntity = entitySelector.value;
-      const selectedDimension = dimensionSelector.value;
-      const selectedCountry = countrySelector.value;
+      const selectedDimension = dimensionSelector ? dimensionSelector.value : 'power';
+      const selectedCountry = countrySelector ? countrySelector.value : '';
+      const selectedSource = sourceSelector ? sourceSelector.value : '';
       
       if (!selectedEntity) {
         window.sentimentHistogram.drawEmptyState('Please select an entity');
+        return;
+      }
+      
+      // Ensure we have analysis result with entities
+      if (!analysisResult || !analysisResult.entities || !Array.isArray(analysisResult.entities)) {
+        window.sentimentHistogram.drawEmptyState('No entity data available');
         return;
       }
       
@@ -796,204 +1069,155 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       
-      // Get the score based on selected dimension
-      const score = selectedDimension === 'power' ? entity.power_score : entity.moral_score;
+      // Show loading state
+      sampleSizeInfo.textContent = 'Loading distribution data...';
       
-      // For demo, generate some random distribution data
-      // In real implementation, this would be fetched from the API
-      const demoData = generateDemoDistribution(score);
+      // Build API URL with parameters
+      let apiUrl = `${API_ENDPOINT}/stats/sentiment/distribution?entity_name=${encodeURIComponent(selectedEntity)}&dimension=${selectedDimension}`;
       
-      // Update the histogram
-      window.sentimentHistogram.setData(demoData.globalData, score, 
-        selectedCountry ? { [selectedCountry]: demoData.countryData } : null);
-      
-      // Update sample size info
-      sampleSizeInfo.textContent = `Sample: ${demoData.sampleSize} entity mentions across ${demoData.articleCount} articles`;
-      
-      if (selectedCountry) {
-        window.sentimentHistogram.setCountry(selectedCountry);
-      }
-    }
-    
-    // Generate demo distribution for testing
-    function generateDemoDistribution(currentValue) {
-      // Generate bell-curve-ish distribution around mean
-      const mean = 0;
-      const stdDev = 1;
-      const count = 1000;
-      
-      const globalData = [];
-      for (let i = 0; i < count; i++) {
-        // Box-Muller transform for normal distribution
-        const u1 = Math.random();
-        const u2 = Math.random();
-        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-        
-        // Transform to desired mean and standard deviation
-        let value = mean + z0 * stdDev;
-        
-        // Clamp to [-2, 2] range
-        value = Math.max(-2, Math.min(2, value));
-        
-        globalData.push(value);
+      // Only add one comparison filter - source takes precedence over country
+      if (selectedSource) {
+        apiUrl += `&source_id=${selectedSource}`;
+      } else if (selectedCountry) {
+        apiUrl += `&country=${encodeURIComponent(selectedCountry)}`;
       }
       
-      // Add more values near the current value to make it less unusual
-      for (let i = 0; i < 50; i++) {
-        const variance = (Math.random() - 0.5) * 0.5;
-        let value = currentValue + variance;
-        value = Math.max(-2, Math.min(2, value));
-        globalData.push(value);
-      }
-      
-      // Generate country data (subset of global with slight bias)
-      const countryData = [];
-      const countryBias = 0.3;
-      
-      for (let i = 0; i < count / 4; i++) {
-        const u1 = Math.random();
-        const u2 = Math.random();
-        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-        
-        // Add slight bias
-        let value = mean + countryBias + z0 * stdDev;
-        value = Math.max(-2, Math.min(2, value));
-        
-        countryData.push(value);
-      }
-      
-      return {
-        globalData,
-        countryData,
-        sampleSize: count,
-        articleCount: Math.floor(count / 3)
-      };
+      // Fetch distribution data from API
+      fetch(apiUrl)
+        .then(response => {
+          if (!response.ok) {
+            // Handle API errors gracefully
+            return response.json().then(errorData => {
+              throw new Error(errorData.detail || `API request failed: ${response.status}`);
+            }).catch(() => {
+              throw new Error(`API request failed: ${response.status}`);
+            });
+          }
+          return response.json();
+        })
+        .then(data => {
+          console.log('Distribution API response:', data);
+          
+          // Check if we have valid data
+          if (!data.has_data || !data.values || data.values.length < 5) {
+            window.sentimentHistogram.drawEmptyState('No data available for this entity');
+            if (sampleSizeInfo) {
+              sampleSizeInfo.textContent = `Sample: ${data.sample_size || 0} entity mentions (insufficient for analysis)`;
+            }
+            return;
+          }
+          
+          // Set the data in the histogram
+          // The API now returns comparison_data directly
+          const comparisonData = data.comparison_data || null;
+          window.sentimentHistogram.setData(
+            data.values, 
+            data.current_value, 
+            comparisonData
+          );
+          
+          // Update HTML title based on comparison data
+          const titleElement = document.getElementById('distribution-title');
+          if (titleElement) {
+            if (comparisonData) {
+              const comparisonKey = Object.keys(comparisonData)[0];
+              titleElement.textContent = comparisonKey ? 
+                `Sentiment Distribution with ${comparisonKey} Comparison` :
+                'Sentiment Distribution';
+            } else {
+              titleElement.textContent = 'Sentiment Distribution';
+            }
+          }
+          
+          // Update sample size info
+          sampleSizeInfo.textContent = `Sample: ${data.sample_size} entity mentions across ${data.source_count} news sources`;
+          
+          // Update available sources dropdown if we have source data
+          if (data.available_sources && data.available_sources.length > 0 && sourceSelector) {
+            // Keep the current selection
+            const currentSelection = sourceSelector.value;
+            
+            // Clear existing options except the first one
+            while (sourceSelector.options.length > 1) {
+              sourceSelector.remove(1);
+            }
+            
+            // Add new source options
+            data.available_sources.forEach(source => {
+              const option = document.createElement('option');
+              option.value = source.id;
+              option.textContent = `${source.name} (${source.count})`;
+              sourceSelector.appendChild(option);
+            });
+            
+            // Restore previous selection if it exists in the new options
+            if (currentSelection) {
+              for (let i = 0; i < sourceSelector.options.length; i++) {
+                if (sourceSelector.options[i].value === currentSelection) {
+                  sourceSelector.selectedIndex = i;
+                  break;
+                }
+              }
+            }
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching distribution data:', error);
+          
+          // Show user-friendly error messages
+          if (error.message.includes('Insufficient data')) {
+            window.sentimentHistogram.drawEmptyState('Insufficient data for this entity');
+            if (sampleSizeInfo) {
+              sampleSizeInfo.textContent = 'This entity has too few mentions for statistical analysis';
+            }
+          } else if (error.message.includes('not found')) {
+            window.sentimentHistogram.drawEmptyState('Entity not found in database');
+            if (sampleSizeInfo) {
+              sampleSizeInfo.textContent = 'This entity is not yet in our database';
+            }
+          } else {
+            window.sentimentHistogram.drawEmptyState('Error loading data');
+            if (sampleSizeInfo) {
+              sampleSizeInfo.textContent = 'Error: Could not fetch data from server';
+            }
+          }
+        });
     }
   }
   
-  // Load similarity cluster data
+  // Load similarity data
   function loadSimilarityData() {
     // Show loading state in similarity-results
     const container = document.getElementById('similarity-results');
+    const canvasContainer = document.getElementById('similarity-canvas').parentNode;
+    
     container.innerHTML = `
-      <div class="loading">
-        <div class="loader"></div>
-        <p>Finding similar articles...</p>
+      <div class="no-data-message">
+        <h3>Feature Not Available</h3>
+        <p>The Similar Articles feature requires additional data indexing that has not yet been implemented.</p>
+        <p>Please check back later when this feature is fully developed.</p>
       </div>
     `;
     
-    // Get form controls
+    // Also show message in the canvas
+    if (window.similarityCluster) {
+      const canvas = document.getElementById('similarity-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#333';
+      ctx.textAlign = 'center';
+      ctx.font = '14px Arial';
+      ctx.fillText('Similar Articles Feature Not Available', canvas.width/2, canvas.height/2 - 10);
+      ctx.font = '12px Arial';
+      ctx.fillText('This feature requires additional data infrastructure', canvas.width/2, canvas.height/2 + 15);
+    }
+    
+    // Disable the form controls
     const thresholdSelect = document.getElementById('similarity-threshold');
     const maxResultsSelect = document.getElementById('max-results');
     
-    // Add event listeners
-    thresholdSelect.addEventListener('change', updateSimilarityResults);
-    maxResultsSelect.addEventListener('change', updateSimilarityResults);
-    
-    // For demo, we'd normally call the API here
-    // const threshold = parseFloat(thresholdSelect.value);
-    // const maxResults = parseInt(maxResultsSelect.value);
-    
-    // Simulate API response with demo data
-    setTimeout(() => {
-      const demoData = generateDemoSimilarityData();
-      displaySimilarityResults(demoData);
-      updateSimilarityVisualization(demoData);
-    }, 1000);
-    
-    function updateSimilarityResults() {
-      // This would normally call the API with new parameters
-      const demoData = generateDemoSimilarityData();
-      displaySimilarityResults(demoData);
-      updateSimilarityVisualization(demoData);
-    }
-    
-    function displaySimilarityResults(data) {
-      if (!data || data.length === 0) {
-        container.innerHTML = '<div class="empty-message">No similar articles found</div>';
-        return;
-      }
-      
-      container.innerHTML = '';
-      
-      data.forEach(article => {
-        const similarityPercent = Math.round(article.similarity * 100);
-        const articleCard = document.createElement('div');
-        articleCard.className = 'similar-article-card';
-        
-        articleCard.innerHTML = `
-          <div class="article-header">
-            <div class="similarity-badge">${similarityPercent}%</div>
-            <div class="article-source">${article.source}</div>
-            <div class="article-date">${formatDate(article.date)}</div>
-          </div>
-          <h4 class="article-title">${article.title}</h4>
-          <p class="article-excerpt">${article.excerpt}</p>
-          <a href="${article.url}" class="article-link" target="_blank">Read Article</a>
-        `;
-        
-        container.appendChild(articleCard);
-      });
-    }
-    
-    function updateSimilarityVisualization(data) {
-      // Prepare data for visualization
-      const nodes = data.map(article => ({
-        id: article.id,
-        title: article.title,
-        source: article.source,
-        url: article.url,
-        similarity: article.similarity
-      }));
-      
-      // Add current article to the data
-      nodes.unshift({
-        id: analysisResult.id,
-        title: analysisResult.title,
-        source: analysisResult.source,
-        url: analysisResult.url,
-        similarity: 1.0
-      });
-      
-      // Update visualization
-      window.similarityCluster.setData(nodes, analysisResult.id);
-    }
-    
-    function formatDate(dateStr) {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString();
-    }
-    
-    function generateDemoSimilarityData() {
-      const articles = [];
-      const sources = ['CNN', 'Fox News', 'The New York Times', 'The Washington Post', 'BBC', 'Al Jazeera', 'Reuters'];
-      
-      // Generate 5-15 similar articles
-      const count = Math.floor(Math.random() * 10) + 5;
-      
-      for (let i = 0; i < count; i++) {
-        const similarity = Math.random() * 0.3 + 0.65; // 65-95% similarity
-        const source = sources[Math.floor(Math.random() * sources.length)];
-        const daysAgo = Math.floor(Math.random() * 14); // 0-14 days ago
-        
-        const date = new Date();
-        date.setDate(date.getDate() - daysAgo);
-        
-        articles.push({
-          id: `similar_${i}`,
-          title: `Similar article ${i + 1} about this topic`,
-          source: source,
-          date: date.toISOString(),
-          similarity: similarity,
-          excerpt: 'This is a summary of the similar article that discusses the same topics and entities with a similar perspective...',
-          url: '#', // This would be a real URL in production
-          cluster: Math.floor(Math.random() * 3) // Random cluster for visualization
-        });
-      }
-      
-      // Sort by similarity, descending
-      return articles.sort((a, b) => b.similarity - a.similarity);
-    }
+    if (thresholdSelect) thresholdSelect.disabled = true;
+    if (maxResultsSelect) maxResultsSelect.disabled = true;
   }
   
   // Load entity tracking data
@@ -1002,6 +1226,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const entitySelector = document.getElementById('tracking-entity-selector');
     const timeRangeSelect = document.getElementById('tracking-time-range');
     const insightBox = document.getElementById('tracking-insight');
+    const dataInfoContainer = document.createElement('div');
+    dataInfoContainer.id = 'tracking-data-info';
+    dataInfoContainer.className = 'data-info';
+    
+    // Add the data info container after the tracking insight box if it doesn't exist
+    if (!document.getElementById('tracking-data-info')) {
+      insightBox.parentNode.insertBefore(dataInfoContainer, insightBox.nextSibling);
+    }
     
     // Clear and populate entity selector
     entitySelector.innerHTML = '';
@@ -1010,6 +1242,7 @@ document.addEventListener('DOMContentLoaded', () => {
       entitySelector.innerHTML = '<option value="">No entities available</option>';
       window.entityTracking.clear();
       insightBox.textContent = 'No entity data available for tracking';
+      dataInfoContainer.textContent = '';
       return;
     }
     
@@ -1034,10 +1267,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateEntityTracking() {
       const selectedEntity = entitySelector.value;
       const timeRange = parseInt(timeRangeSelect.value);
+      const windowSize = 7; // 7-day sliding window
       
       if (!selectedEntity) {
         window.entityTracking.clear();
         insightBox.textContent = 'Select an entity to view sentiment tracking data';
+        dataInfoContainer.textContent = '';
         return;
       }
       
@@ -1048,94 +1283,95 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!entity) {
         window.entityTracking.clear();
         insightBox.textContent = 'Entity data not found';
+        dataInfoContainer.textContent = '';
         return;
       }
       
-      // Generate demo data (in real app, we'd fetch from API)
-      const demoData = generateDemoTrackingData(entity, timeRange);
+      // Show loading state
+      insightBox.textContent = 'Loading entity tracking data...';
+      dataInfoContainer.textContent = '';
       
-      // Update visualization
-      window.entityTracking.setData(
-        demoData.data, 
-        selectedEntity, 
-        entity.type || entity.entity_type || 'Entity'
-      );
-      
-      // Update insight box
-      updateInsightText(demoData);
-    }
-    
-    function updateInsightText(trackingData) {
-      if (!trackingData || !trackingData.data || trackingData.data.length < 2) {
-        insightBox.textContent = 'Insufficient data for trend analysis';
-        return;
-      }
-      
-      // Calculate trends
-      const firstPoint = trackingData.data[0];
-      const lastPoint = trackingData.data[trackingData.data.length - 1];
-      
-      const powerChange = lastPoint.power_score - firstPoint.power_score;
-      const moralChange = lastPoint.moral_score - firstPoint.moral_score;
-      
-      // Generate insight text
-      let insightText = `Over the past ${trackingData.timeRange} days: `;
-      
-      if (Math.abs(powerChange) > 0.5 || Math.abs(moralChange) > 0.5) {
-        if (Math.abs(powerChange) > Math.abs(moralChange)) {
-          insightText += powerChange > 0 
-            ? `This entity is being portrayed as increasingly powerful (${powerChange.toFixed(1)} change).` 
-            : `This entity is being portrayed as increasingly vulnerable (${Math.abs(powerChange).toFixed(1)} change).`;
-        } else {
-          insightText += moralChange > 0 
-            ? `This entity is being portrayed more positively (${moralChange.toFixed(1)} moral score increase).` 
-            : `This entity is being portrayed more negatively (${Math.abs(moralChange).toFixed(1)} moral score decrease).`;
-        }
-      } else {
-        insightText += 'The portrayal of this entity has remained relatively stable.';
-      }
-      
-      insightBox.textContent = insightText;
-    }
-    
-    function generateDemoTrackingData(entity, timeRange) {
-      const data = [];
-      const now = new Date();
-      
-      // Start values near the entity's current scores
-      let powerScore = entity.power_score || 0;
-      let moralScore = entity.moral_score || 0;
-      
-      // Add some trend direction
-      const powerTrend = (Math.random() - 0.5) * 0.1;  // Small random trend
-      const moralTrend = (Math.random() - 0.5) * 0.1;  // Small random trend
-      
-      // Generate data points for each day in the range
-      for (let i = timeRange; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(now.getDate() - i);
-        
-        // Apply trends and some random noise
-        powerScore += powerTrend + (Math.random() - 0.5) * 0.3;
-        moralScore += moralTrend + (Math.random() - 0.5) * 0.3;
-        
-        // Clamp to valid range
-        powerScore = Math.max(-2, Math.min(2, powerScore));
-        moralScore = Math.max(-2, Math.min(2, moralScore));
-        
-        data.push({
-          date: date.toISOString(),
-          power_score: powerScore,
-          moral_score: moralScore
+      // Fetch tracking data from API
+      fetch(`${API_ENDPOINT}/stats/entity/tracking?entity_name=${encodeURIComponent(selectedEntity)}&days=${timeRange}&window_size=${windowSize}`)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          // Check if we have no data at all
+          if (!data.has_data || !data.data || data.data.length === 0) {
+            window.entityTracking.clear();
+            insightBox.textContent = 'No data available for this entity';
+            dataInfoContainer.textContent = 'No data points found for this entity in the selected time period';
+            return;
+          }
+          
+          // If we have limited data, show a warning but still display it
+          const limitedData = data.limited_data || data.data.length < 3;
+          
+          // Update visualization with real data
+          window.entityTracking.setData(
+            data.data, 
+            data.entity_name, 
+            data.entity_type || entity.type || entity.entity_type
+          );
+          
+          // Show data info with warning for limited data
+          if (limitedData) {
+            dataInfoContainer.innerHTML = `
+              <div class="data-warning">Limited data available: analysis may not be statistically significant</div>
+              <div>Data from ${data.sample_size} mentions across ${data.source_count} sources over the past ${data.time_period || timeRange + ' days'}</div>
+            `;
+            dataInfoContainer.querySelector('.data-warning').style.color = '#e67e22';
+            dataInfoContainer.querySelector('.data-warning').style.fontWeight = 'bold';
+            dataInfoContainer.querySelector('.data-warning').style.marginBottom = '5px';
+          } else {
+            dataInfoContainer.textContent = `Data from ${data.sample_size} mentions across ${data.source_count} sources over the past ${data.time_period || timeRange + ' days'}`;
+          }
+          
+          // Generate insight text based on the first and last data points
+          const points = data.data;
+          if (points.length >= 2) {
+            const firstPoint = points[0];
+            const lastPoint = points[points.length - 1];
+            
+            const powerChange = lastPoint.power_score - firstPoint.power_score;
+            const moralChange = lastPoint.moral_score - firstPoint.moral_score;
+            
+            // Generate a base insight
+            let insightText = '';
+            if (Math.abs(powerChange) > Math.abs(moralChange)) {
+              insightText = powerChange > 0.3 
+                ? `${selectedEntity} is being portrayed as increasingly powerful over time`
+                : powerChange < -0.3
+                  ? `${selectedEntity} is being portrayed as increasingly vulnerable over time`
+                  : `${selectedEntity}'s power portrayal is relatively stable`;
+            } else {
+              insightText = moralChange > 0.3
+                ? `${selectedEntity} is being portrayed more positively over time`
+                : moralChange < -0.3
+                  ? `${selectedEntity} is being portrayed more negatively over time`
+                  : `${selectedEntity}'s moral portrayal is relatively stable`;
+            }
+            
+            // Add a qualifier if the data is limited
+            if (limitedData) {
+              insightText += ' (based on limited data)';
+            }
+            
+            insightBox.textContent = insightText;
+          } else {
+            insightBox.textContent = 'Not enough data points to generate meaningful insights';
+          }
+        })
+        .catch(error => {
+          console.error('Error fetching entity tracking data:', error);
+          window.entityTracking.clear();
+          insightBox.textContent = 'Error loading entity tracking data';
+          dataInfoContainer.textContent = 'Could not retrieve data from server';
         });
-      }
-      
-      return {
-        entity_name: entity.name || entity.entity,
-        entity_type: entity.type || entity.entity_type,
-        timeRange: timeRange,
-        data: data
-      };
     }
   }
   
@@ -1149,108 +1385,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // Hide details container initially
     detailsContainer.classList.add('hidden');
     
-    // Add event listeners
-    viewTypeSelect.addEventListener('change', updateTopicCluster);
-    thresholdSelect.addEventListener('change', updateTopicCluster);
+    // Disable form controls 
+    if (viewTypeSelect) viewTypeSelect.disabled = true;
+    if (thresholdSelect) thresholdSelect.disabled = true;
     
-    // Load initial data
-    updateTopicCluster();
-    
-    function updateTopicCluster() {
-      const viewType = viewTypeSelect.value;
-      const threshold = thresholdSelect.value;
-      
-      // Generate demo cluster data
-      const demoData = generateDemoClusterData(viewType, threshold);
-      
-      // Update visualization
-      window.topicCluster.setData(demoData);
+    // Display not available message
+    const canvas = document.getElementById('topic-cluster-canvas');
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#333';
+      ctx.textAlign = 'center';
+      ctx.font = '14px Arial';
+      ctx.fillText('Topic Clusters Feature Not Available', canvas.width/2, canvas.height/2 - 10);
+      ctx.font = '12px Arial';
+      ctx.fillText('This feature requires additional data indexing and categorization', canvas.width/2, canvas.height/2 + 15);
     }
     
-    function generateDemoClusterData(viewType, threshold) {
-      // This would normally come from the API
-      // For demo, we'll generate random topic clusters
-      
-      const thresholdValues = {
-        'weak': 0.3,
-        'medium': 0.5,
-        'strong': 0.7
-      };
-      
-      const minStrength = thresholdValues[threshold] || 0.5;
-      
-      // For topics view
-      if (viewType === 'topics') {
-        // Use the TopicClusterViz built-in demo data generator
-        return TopicClusterViz.generateDemoData(5, 8);
-      }
-      
-      // For entities view
-      const entities = [];
-      const links = [];
-      
-      // Use entities from the current article
-      if (analysisResult.entities && analysisResult.entities.length > 0) {
-        // Add entities from the article
-        analysisResult.entities.forEach((entity, index) => {
-          entities.push({
-            id: `entity_${index}`,
-            label: entity.name || entity.entity || `Entity ${index}`,
-            type: 'entity',
-            group: entity.type === 'country' ? 0 : 
-                  entity.type === 'organization' ? 1 : 
-                  entity.type === 'person' ? 2 : 3,
-            cluster: entity.type === 'country' ? 0 : 
-                     entity.type === 'organization' ? 1 : 
-                     entity.type === 'person' ? 2 : 3,
-            size: 1,
-            count: 1
-          });
-        });
-        
-        // Add links between entities (demo only)
-        for (let i = 0; i < entities.length; i++) {
-          for (let j = i + 1; j < entities.length; j++) {
-            // Add link with some probability based on threshold
-            if (Math.random() < minStrength * 0.8) {
-              links.push({
-                source: entities[i].id,
-                target: entities[j].id,
-                weight: Math.random() * (1 - minStrength) + minStrength
-              });
-            }
-          }
-        }
-      } else {
-        // Generate demo entities and links
-        for (let i = 0; i < 10; i++) {
-          entities.push({
-            id: `entity_${i}`,
-            label: `Entity ${i}`,
-            type: 'entity',
-            group: i % 4,
-            cluster: i % 4,
-            size: Math.random() * 0.5 + 0.8,
-            count: Math.floor(Math.random() * 5) + 1
-          });
-        }
-        
-        // Add random links
-        for (let i = 0; i < entities.length; i++) {
-          for (let j = i + 1; j < entities.length; j++) {
-            if (Math.random() < minStrength * 0.8) {
-              links.push({
-                source: entities[i].id,
-                target: entities[j].id,
-                weight: Math.random() * (1 - minStrength) + minStrength
-              });
-            }
-          }
-        }
-      }
-      
-      return { nodes: entities, links: links };
-    }
+    // Add a message to the details container
+    detailsContainer.classList.remove('hidden');
+    detailsContainer.innerHTML = `
+      <div class="no-data-message">
+        <h3>Feature Not Available</h3>
+        <p>The Topic Clusters feature requires additional topic modeling that has not yet been implemented.</p>
+        <p>Please check back later when this feature is fully developed.</p>
+      </div>
+    `;
   }
   
   // Populate methodology tab
@@ -1291,6 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     container.innerHTML = html;
   }
+  
   
   // Reset to initial state
   function resetToInitialState() {
@@ -1334,560 +1495,5 @@ document.addEventListener('DOMContentLoaded', () => {
       default:
         return type.charAt(0).toUpperCase() + type.slice(1);
     }
-  }
-  
-  // Initialize sentiment histogram visualization
-  function initializeSentimentHistogram() {
-    console.log("Initializing sentiment histogram visualization");
-    const entitySelector = document.getElementById('entity-selector');
-    const dimensionSelector = document.getElementById('dimension-selector');
-    const countrySelector = document.getElementById('country-selector');
-    const sampleSizeInfo = document.getElementById('sample-size-info');
-    
-    // Clear existing options
-    entitySelector.innerHTML = '';
-    
-    // Add entities to the selector
-    analysisResult.entities.forEach(entity => {
-      const option = document.createElement('option');
-      option.value = entity.name || entity.entity;
-      option.textContent = entity.name || entity.entity;
-      entitySelector.appendChild(option);
-    });
-    
-    // Create histogram instance
-    const histogramChart = new SentimentHistogram('distribution-chart');
-    
-    // Function to update the histogram with current selections
-    function updateHistogram() {
-      const selectedEntity = entitySelector.value;
-      const dimension = dimensionSelector.value;
-      const country = countrySelector.value;
-      
-      // Get entity data
-      const entity = analysisResult.entities.find(e => (e.name || e.entity) === selectedEntity);
-      if (!entity) return;
-      
-      // Try to get distribution data from API
-      const params = new URLSearchParams({
-        entity_name: selectedEntity,
-        dimension: dimension
-      });
-      
-      if (country) {
-        params.append('country', country);
-      }
-      
-      const apiUrl = `${API_ENDPOINT}/stats/sentiment/distribution?${params.toString()}`;
-      
-      // Set loading state
-      sampleSizeInfo.textContent = 'Loading distribution data...';
-      
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(data => {
-          // Set the data in the histogram
-          histogramChart.setData(data.values, data.current_value, data.country_data);
-          
-          // Update sample size info
-          sampleSizeInfo.textContent = `Sample size: ${data.sample_size} mentions across ${data.source_count} sources`;
-        })
-        .catch(error => {
-          console.error('Error fetching distribution data:', error);
-          
-          // Fall back to generated data if API fails
-          const fallbackData = generateMockDistributionData(entity, dimension);
-          const currentValue = dimension === 'power' ? entity.power_score : entity.moral_score;
-          
-          histogramChart.setData(fallbackData.values, currentValue, fallbackData.countryData);
-          sampleSizeInfo.textContent = `Sample size: ${fallbackData.sampleSize} mentions across ${fallbackData.sourceCount} sources (fallback data)`;
-        });
-    }
-    
-    // Generate mock distribution data as fallback
-    function generateMockDistributionData(entity, dimension) {
-      const mean = dimension === 'power' ? entity.power_score : entity.moral_score;
-      const values = [];
-      
-      // Generate a normal-ish distribution around the entity's score
-      for (let i = 0; i < 100; i++) {
-        const randomValue = mean + (Math.random() * 2 - 1);
-        values.push(Math.max(-2, Math.min(2, randomValue)));
-      }
-      
-      return {
-        values: values,
-        countryData: {},
-        sampleSize: 100 + Math.floor(Math.random() * 900),
-        sourceCount: 10 + Math.floor(Math.random() * 40)
-      };
-    }
-    
-    // Set up event listeners
-    entitySelector.addEventListener('change', updateHistogram);
-    dimensionSelector.addEventListener('change', updateHistogram);
-    countrySelector.addEventListener('change', updateHistogram);
-    
-    // Initial render
-    if (entitySelector.options.length > 0) {
-      updateHistogram();
-    }
-  }
-  
-  // Initialize entity tracking visualization
-  function initializeEntityTracking() {
-    console.log("Initializing entity tracking visualization");
-    const entitySelector = document.getElementById('tracking-entity-selector');
-    const timeRangeSelector = document.getElementById('tracking-time-range');
-    const insightBox = document.getElementById('tracking-insight');
-    
-    // Clear existing options
-    entitySelector.innerHTML = '';
-    
-    // Add entities to the selector
-    analysisResult.entities.forEach(entity => {
-      const option = document.createElement('option');
-      option.value = entity.name || entity.entity;
-      option.textContent = entity.name || entity.entity;
-      entitySelector.appendChild(option);
-    });
-    
-    // Create tracking visualization
-    const trackingViz = new EntityTrackingViz('entity-tracking-chart');
-    
-    // Function to update tracking data
-    function updateTracking() {
-      const selectedEntity = entitySelector.value;
-      const days = parseInt(timeRangeSelector.value);
-      
-      // Get entity data
-      const entity = analysisResult.entities.find(e => (e.name || e.entity) === selectedEntity);
-      if (!entity) return;
-      
-      // Set loading state
-      insightBox.textContent = 'Loading entity tracking data...';
-      
-      // Try to get tracking data from API
-      const params = new URLSearchParams({
-        entity_name: selectedEntity,
-        days: days
-      });
-      
-      const apiUrl = `${API_ENDPOINT}/stats/entity/tracking?${params.toString()}`;
-      
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(data => {
-          // Set data in the visualization
-          trackingViz.setData(data.data, data.entity_name, data.entity_type || entity.type || entity.entity_type || 'Unknown');
-          
-          // Analyze trends for insight text
-          const trendAnalysis = analyzeTrends(data.data);
-          
-          // Update insight text
-          insightBox.textContent = `${data.entity_name} shows ${trendAnalysis.powerTrend} trend in power sentiment and ${trendAnalysis.moralTrend} trend in moral sentiment over the past ${days} days across news sources.`;
-        })
-        .catch(error => {
-          console.error('Error fetching entity tracking data:', error);
-          
-          // Fall back to generated data if API fails
-          const fallbackData = EntityTrackingViz.generateDemoData(entity.name || entity.entity, 12);
-          
-          // Set fallback data
-          trackingViz.setData(fallbackData.data, fallbackData.entity_name, entity.type || entity.entity_type || 'Unknown');
-          
-          // Update insight text with fallback message
-          insightBox.textContent = `${entity.name || entity.entity} shows ${Math.random() > 0.5 ? 'an upward' : 'a downward'} trend in ${Math.random() > 0.5 ? 'power' : 'moral'} sentiment over the past ${days} days across news sources. (fallback data)`;
-        });
-    }
-    
-    // Helper function to analyze trends in the data
-    function analyzeTrends(data) {
-      if (!data || data.length < 2) {
-        return { powerTrend: 'no clear', moralTrend: 'no clear' };
-      }
-      
-      // Calculate simple linear regression for power scores
-      let powerSum = 0;
-      data.forEach(point => {
-        powerSum += point.power_score;
-      });
-      const powerAvg = powerSum / data.length;
-      
-      let powerTrendDirection = 0;
-      for (let i = 1; i < data.length; i++) {
-        powerTrendDirection += (data[i].power_score - data[i-1].power_score);
-      }
-      
-      // Calculate simple linear regression for moral scores
-      let moralSum = 0;
-      data.forEach(point => {
-        moralSum += point.moral_score;
-      });
-      const moralAvg = moralSum / data.length;
-      
-      let moralTrendDirection = 0;
-      for (let i = 1; i < data.length; i++) {
-        moralTrendDirection += (data[i].moral_score - data[i-1].moral_score);
-      }
-      
-      // Determine trend descriptions
-      const powerTrend = powerTrendDirection > 0.1 ? 'an upward' : 
-                         powerTrendDirection < -0.1 ? 'a downward' : 'a stable';
-                         
-      const moralTrend = moralTrendDirection > 0.1 ? 'an upward' : 
-                        moralTrendDirection < -0.1 ? 'a downward' : 'a stable';
-      
-      return { powerTrend, moralTrend };
-    }
-    
-    // Set up event listeners
-    entitySelector.addEventListener('change', updateTracking);
-    timeRangeSelector.addEventListener('change', updateTracking);
-    
-    // Initial render
-    if (entitySelector.options.length > 0) {
-      updateTracking();
-    }
-  }
-  
-  // Initialize similarity cluster visualization
-  function initializeSimilarityCluster() {
-    console.log("Initializing similarity cluster visualization");
-    const similarityThreshold = document.getElementById('similarity-threshold');
-    const maxResults = document.getElementById('max-results');
-    const similarityResults = document.getElementById('similarity-results');
-    
-    // Create similarity visualization
-    const similarityViz = new SimilarityClusterViz('similarity-canvas');
-    
-    // Function to update similarity data
-    function updateSimilarity() {
-      const threshold = parseFloat(similarityThreshold.value);
-      const limit = parseInt(maxResults.value);
-      
-      // Set loading state
-      similarityResults.innerHTML = '<div class="loading"><div class="loader"></div><p>Finding similar articles...</p></div>';
-      
-      // Try to get similar articles from API
-      const params = new URLSearchParams({
-        article_url: analysisResult.url,
-        threshold: threshold,
-        max_results: limit
-      });
-      
-      const apiUrl = `${API_ENDPOINT}/similarity/articles/similar?${params.toString()}`;
-      
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(similarArticles => {
-          // Clear previous results
-          similarityResults.innerHTML = '';
-          
-          if (!similarArticles || similarArticles.length === 0) {
-            // Show no results message
-            similarityResults.innerHTML = '<div class="no-results">No similar articles found.</div>';
-            return;
-          }
-          
-          // Add results to the list
-          similarArticles.forEach(article => {
-            const articleItem = document.createElement('div');
-            articleItem.className = 'similar-article-item';
-            
-            // Format the date if it's in ISO format
-            let formattedDate = article.date || article.publish_date;
-            try {
-              if (formattedDate && formattedDate.includes('T')) {
-                formattedDate = new Date(formattedDate).toLocaleDateString();
-              }
-            } catch (e) {
-              console.warn('Error formatting date:', e);
-              formattedDate = 'Unknown date';
-            }
-            
-            articleItem.innerHTML = `
-              <div class="similarity-score">${Math.round(article.similarity * 100)}%</div>
-              <div class="article-info">
-                <h4 class="article-title">${article.title}</h4>
-                <div class="article-source">${article.source}</div>
-                <div class="article-date">${formattedDate}</div>
-              </div>
-            `;
-            
-            // Add click handler to open the article
-            articleItem.addEventListener('click', () => {
-              if (article.url) {
-                window.open(article.url, '_blank');
-              }
-            });
-            
-            similarityResults.appendChild(articleItem);
-          });
-          
-          // Now get cluster visualization data
-          fetchClusterVisualization(similarArticles);
-        })
-        .catch(error => {
-          console.error('Error fetching similar articles:', error);
-          
-          // Fall back to generated data if API fails
-          const fallbackArticles = generateMockSimilarArticles(analysisResult, limit, threshold);
-          
-          // Clear loading state
-          similarityResults.innerHTML = '';
-          
-          if (fallbackArticles.length === 0) {
-            similarityResults.innerHTML = '<div class="no-results">No similar articles found.</div>';
-            return;
-          }
-          
-          // Display fallback data
-          fallbackArticles.forEach(article => {
-            const articleItem = document.createElement('div');
-            articleItem.className = 'similar-article-item';
-            
-            articleItem.innerHTML = `
-              <div class="similarity-score">${Math.round(article.similarity * 100)}%</div>
-              <div class="article-info">
-                <h4 class="article-title">${article.title}</h4>
-                <div class="article-source">${article.source}</div>
-                <div class="article-date">${article.date} (fallback)</div>
-              </div>
-            `;
-            
-            articleItem.addEventListener('click', () => {
-              if (article.url) {
-                window.open(article.url, '_blank');
-              }
-            });
-            
-            similarityResults.appendChild(articleItem);
-          });
-          
-          // Update the visualization with fallback data
-          const vizData = [
-            {
-              id: analysisResult.id || 'current',
-              title: analysisResult.title,
-              source: analysisResult.source,
-              similarity: 1.0
-            },
-            ...fallbackArticles
-          ];
-          
-          similarityViz.setData(vizData, analysisResult.id || 'current');
-        });
-    }
-    
-    // Function to fetch cluster visualization data
-    function fetchClusterVisualization(similarArticles) {
-      // Try to get cluster data from API
-      const params = new URLSearchParams({
-        article_url: analysisResult.url,
-        cluster_count: 3
-      });
-      
-      const apiUrl = `${API_ENDPOINT}/similarity/articles/cluster?${params.toString()}`;
-      
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(clusterData => {
-          // Update the visualization with cluster data
-          similarityViz.setData(clusterData.nodes, 'source');
-        })
-        .catch(error => {
-          console.error('Error fetching cluster data:', error);
-          
-          // Fall back to simple visualization with just the similar articles
-          const vizData = [
-            {
-              id: analysisResult.id || 'current',
-              title: analysisResult.title,
-              source: analysisResult.source,
-              similarity: 1.0
-            },
-            ...similarArticles.map(article => ({
-              id: article.id || `similar_${Math.random().toString(36).substring(7)}`,
-              title: article.title,
-              source: article.source,
-              url: article.url,
-              similarity: article.similarity,
-              cluster: article.cluster || 0
-            }))
-          ];
-          
-          similarityViz.setData(vizData, analysisResult.id || 'current');
-        });
-    }
-    
-    // Generate mock similar articles as fallback
-    function generateMockSimilarArticles(article, limit, threshold) {
-      const result = [];
-      const sourceDomains = [
-        'nytimes.com',
-        'washingtonpost.com',
-        'cnn.com',
-        'foxnews.com',
-        'bbc.com',
-        'reuters.com',
-        'apnews.com',
-        'nbcnews.com',
-        'politico.com'
-      ];
-      
-      const currentDate = new Date();
-      
-      for (let i = 0; i < limit; i++) {
-        // Random similarity score above threshold
-        const similarity = threshold + (Math.random() * (1 - threshold));
-        
-        // Create random date within past 30 days
-        const randomDaysAgo = Math.floor(Math.random() * 30);
-        const date = new Date(currentDate);
-        date.setDate(date.getDate() - randomDaysAgo);
-        
-        // Create a mock article
-        result.push({
-          id: `similar_${i}`,
-          title: `Similar article about ${article.title.split(' ').slice(0, 3).join(' ')}...`,
-          source: sourceDomains[Math.floor(Math.random() * sourceDomains.length)],
-          url: `https://${sourceDomains[Math.floor(Math.random() * sourceDomains.length)]}/article-${i}`,
-          date: date.toLocaleDateString(),
-          similarity: similarity,
-          // For cluster visualization
-          cluster: Math.floor(Math.random() * 3)
-        });
-      }
-      
-      // Sort by similarity (highest first)
-      return result.sort((a, b) => b.similarity - a.similarity);
-    }
-    
-    // Set up event listeners
-    similarityThreshold.addEventListener('change', updateSimilarity);
-    maxResults.addEventListener('change', updateSimilarity);
-    
-    // Initial render
-    updateSimilarity();
-  }
-  
-  // Initialize topic cluster visualization
-  function initializeTopicCluster() {
-    console.log("Initializing topic cluster visualization");
-    const viewType = document.getElementById('cluster-view-type');
-    const threshold = document.getElementById('cluster-threshold');
-    const clusterDetails = document.getElementById('cluster-details');
-    const selectedItemTitle = document.getElementById('selected-item-title');
-    const selectedItemDetails = document.getElementById('selected-item-details');
-    
-    // Create topic cluster visualization
-    const topicClusterViz = new TopicClusterViz('topic-cluster-canvas', {
-      onNodeSelected: (node) => {
-        // Update details panel when a node is selected
-        clusterDetails.classList.remove('hidden');
-        selectedItemTitle.textContent = node.label;
-        
-        // Show different details based on node type
-        if (node.type === 'topic') {
-          selectedItemDetails.innerHTML = `
-            <p>Topic cluster with ${node.count || 0} related entities</p>
-            <ul>
-              ${(node.related || []).map(rel => `<li>${rel}</li>`).join('')}
-            </ul>
-          `;
-        } else {
-          selectedItemDetails.innerHTML = `
-            <p>${node.type || node.entity_type || 'Entity'}</p>
-            <div class="entity-sentiment">
-              <div>Power: ${node.power || 'N/A'}</div>
-              <div>Moral: ${node.moral || 'N/A'}</div>
-            </div>
-          `;
-        }
-      }
-    });
-    
-    // Function to update the cluster visualization
-    function updateCluster() {
-      const viewTypeValue = viewType.value;
-      const thresholdValue = threshold.value;
-      
-      // Hide details panel while loading
-      clusterDetails.classList.add('hidden');
-      
-      // Try to get topic cluster data from API
-      const params = new URLSearchParams({
-        article_url: analysisResult.url,
-        view_type: viewTypeValue,
-        threshold: thresholdValue
-      });
-      
-      const apiUrl = `${API_ENDPOINT}/stats/topics/cluster?${params.toString()}`;
-      
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(clusterData => {
-          // Update the visualization with cluster data
-          topicClusterViz.setData(clusterData);
-        })
-        .catch(error => {
-          console.error('Error fetching topic cluster data:', error);
-          
-          // Fall back to generated data if API fails
-          const fallbackData = generateTopicClusters(analysisResult.entities, viewTypeValue, thresholdValue);
-          
-          // Update the visualization with fallback data
-          topicClusterViz.setData(fallbackData);
-        });
-    }
-    
-    // Generate mock topic clusters based on entities (fallback)
-    function generateTopicClusters(entities, viewType, threshold) {
-      // Map threshold value to strength
-      const strengthMap = {
-        'weak': 0.3,
-        'medium': 0.5,
-        'strong': 0.7
-      };
-      
-      // For demonstration, we'll use the demo data generator
-      const topicCount = Math.min(4, Math.max(2, Math.ceil(entities.length / 3)));
-      const entitiesPerTopic = Math.min(8, Math.max(entities.length, 5));
-      
-      return TopicClusterViz.generateDemoData(topicCount, entitiesPerTopic);
-    }
-    
-    // Set up event listeners
-    viewType.addEventListener('change', updateCluster);
-    threshold.addEventListener('change', updateCluster);
-    
-    // Initial render
-    updateCluster();
   }
 });

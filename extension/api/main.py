@@ -249,9 +249,14 @@ def get_sentiment_trends(
 
 # Include routers if available
 if has_stats_router:
+    # Override the database dependency in the stats router
+    from extension.api.statistical_endpoints import get_db_session
+    app.dependency_overrides[get_db_session] = get_db
     app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
+    
 if has_article_router:
     app.include_router(article_router, prefix="/articles", tags=["Articles"])
+    
 if has_similarity_router:
     app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
 

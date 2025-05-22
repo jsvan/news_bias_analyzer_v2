@@ -1,0 +1,612 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Typography, 
+  CircularProgress, 
+  Container,
+  Grid,
+  Card, 
+  CardContent,
+  CardHeader,
+  Tabs,
+  Tab,
+  Button,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Chip,
+  Paper,
+  Alert,
+  Autocomplete,
+  TextField,
+  IconButton,
+  Tooltip,
+  Divider
+} from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import InfoIcon from '@mui/icons-material/Info';
+import DownloadIcon from '@mui/icons-material/Download';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+
+import { api, entityApi, sourcesApi, statsApi } from '../services/api';
+import SentimentChart from '../components/SentimentChart';
+import SentimentDistributionChart from '../components/SentimentDistributionChart';
+import EntityTrendChart from '../components/EntityTrendChart';
+import SourceBiasChart from '../components/SourceBiasChart';
+
+// Types
+import { 
+  Entity, 
+  NewsSource, 
+  EntitySentimentSummary,
+  SentimentDistributions,
+  TrendData 
+} from '../types';
+
+const Dashboard: React.FC = () => {
+  // State for data
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [sources, setSources] = useState<NewsSource[]>([]);
+  const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
+  const [distributions, setDistributions] = useState<Record<string, SentimentDistributions>>({});
+  const [trends, setTrends] = useState<TrendData[]>([]);
+  const [sourceComparisons, setSourceComparisons] = useState<any>({});
+  
+  // Selected items
+  const [selectedEntity, setSelectedEntity] = useState<string>('');
+  const [selectedSources, setSelectedSources] = useState<number[]>([]);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<number>(30); // days
+  const [selectedEntityTypes, setSelectedEntityTypes] = useState<string[]>(['person', 'country', 'organization']);
+  
+  // UI state
+  const [currentTab, setCurrentTab] = useState(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshingData, setRefreshingData] = useState<boolean>(false);
+
+  // Entity type grouping (for easier filtering)
+  const entityTypes = {
+    'person': 'Individuals',
+    'country': 'Countries',
+    'organization': 'Organizations',
+    'political_party': 'Political Parties',
+    'company': 'Companies'
+  };
+
+  // We'll fetch all data directly from the API
+
+  interface TrendPoint {
+    date: string;
+    power_score: number;
+    moral_score: number;
+    mention_count: number;
+  }
+
+  // Fetch data on component mount
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  const fetchInitialData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Fetch real data from the API
+      
+      // Fetch news sources
+      const sourcesResponse = await api.get('/sources');
+      const sourcesData = sourcesResponse.data || [];
+      setSources(sourcesData);
+      
+      // Set some default selected sources if available
+      if (sourcesData.length > 0) {
+        setSelectedSources(sourcesData.slice(0, Math.min(3, sourcesData.length)).map(s => s.id));
+      }
+      
+      // Fetch entities
+      const entitiesResponse = await api.get('/entities');
+      const entitiesData = entitiesResponse.data || [];
+      setEntities(entitiesData);
+      
+      // Set default selected entity if available
+      if (entitiesData.length > 0) {
+        setSelectedEntity(entitiesData[0].name);
+      }
+      
+      // Fetch trending entities with sentiment scores
+      try {
+        const trendingEntitiesResponse = await api.get('/stats/trending_entities');
+        setHighlightedEntities(trendingEntitiesResponse.data || []);
+      } catch (err) {
+        console.warn('Could not fetch trending entities:', err);
+        setHighlightedEntities([]);
+      }
+      
+      // Fetch distributions for entities
+      const distributionsMap: Record<string, SentimentDistributions> = {};
+      
+      // Fetch entity distributions for the first entity
+      if (entitiesData.length > 0) {
+        try {
+          const entityDistributionResponse = await entityApi.getEntityDistribution(entitiesData[0].id);
+          if (entityDistributionResponse) {
+            distributionsMap[entitiesData[0].name] = entityDistributionResponse;
+          }
+        } catch (err) {
+          console.warn(`Could not fetch distribution for ${entitiesData[0].name}:`, err);
+        }
+      }
+      
+      setDistributions(distributionsMap);
+      
+      // Fetch trend data
+      try {
+        const trendsResponse = await statsApi.getHistoricalSentiment(
+          entitiesData.length > 0 ? entitiesData[0].id : 0, 
+          { days: selectedTimeRange }
+        );
+        
+        if (trendsResponse) {
+          setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+        } else {
+          setTrends([]);
+        }
+      } catch (err) {
+        console.warn('Could not fetch trend data:', err);
+        setTrends([]);
+      }
+      
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError('Failed to load data. Please check that the API server is running.');
+      setLoading(false);
+    }
+  };
+
+  const refreshData = async () => {
+    setRefreshingData(true);
+    
+    try {
+      // Fetch fresh data from the API
+      if (entities.length > 0) {
+        // Refresh trending entities
+        try {
+          const trendingEntitiesResponse = await api.get('/stats/trending_entities');
+          setHighlightedEntities(trendingEntitiesResponse.data || []);
+        } catch (err) {
+          console.warn('Could not refresh trending entities:', err);
+        }
+        
+        // Refresh distribution for selected entity
+        if (selectedEntity) {
+          try {
+            const entityObj = entities.find(e => e.name === selectedEntity);
+            if (entityObj) {
+              const entityDistributionResponse = await entityApi.getEntityDistribution(entityObj.id);
+              if (entityDistributionResponse) {
+                setDistributions(prev => ({
+                  ...prev,
+                  [selectedEntity]: entityDistributionResponse
+                }));
+              }
+            }
+          } catch (err) {
+            console.warn(`Could not refresh distribution for ${selectedEntity}:`, err);
+          }
+        }
+        
+        // Refresh trend data
+        try {
+          const entityObj = entities.find(e => e.name === selectedEntity);
+          if (entityObj) {
+            const trendsResponse = await statsApi.getHistoricalSentiment(
+              entityObj.id, 
+              { days: selectedTimeRange }
+            );
+            
+            if (trendsResponse) {
+              setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+            }
+          }
+        } catch (err) {
+          console.warn('Could not refresh trend data:', err);
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshingData(false);
+    }
+  };
+
+  const handleTimeRangeChange = async (event: React.ChangeEvent<{ value: unknown }>) => {
+    const newRange = event.target.value as number;
+    setSelectedTimeRange(newRange);
+    
+    // Fetch real trend data for the new time range
+    if (selectedEntity) {
+      try {
+        const entityObj = entities.find(e => e.name === selectedEntity);
+        if (entityObj) {
+          const trendsResponse = await statsApi.getHistoricalSentiment(
+            entityObj.id, 
+            { days: newRange }
+          );
+          
+          if (trendsResponse) {
+            setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+          } else {
+            setTrends([]);
+          }
+        }
+      } catch (err) {
+        console.warn(`Could not fetch trend data for time range ${newRange}:`, err);
+        setTrends([]);
+      }
+    }
+  };
+
+  const handleEntityTypeChange = (event: React.ChangeEvent<{ value: unknown }>) => {
+    setSelectedEntityTypes(event.target.value as string[]);
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 4, textAlign: 'center' }}>
+        <Typography variant="h5" color="error" gutterBottom>
+          {error}
+        </Typography>
+        <Typography>
+          Please make sure the API server is running at http://localhost:8000
+        </Typography>
+        <Button 
+          variant="contained" 
+          sx={{ mt: 3 }} 
+          onClick={fetchInitialData}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  // Filter entities by selected types
+  const filteredEntities = entities.filter(entity => 
+    selectedEntityTypes.includes(entity.type)
+  );
+
+  const getEntityTypeGrouping = () => {
+    const groupedEntities: Record<string, string[]> = {};
+    
+    entities.forEach(entity => {
+      if (!groupedEntities[entity.type]) {
+        groupedEntities[entity.type] = [];
+      }
+      groupedEntities[entity.type].push(entity.name);
+    });
+    
+    return groupedEntities;
+  };
+
+  return (
+    <Container maxWidth="xl">
+      <Box sx={{ py: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+          <Typography variant="h4" component="h1" gutterBottom>
+            News Bias Analyzer Dashboard
+          </Typography>
+          
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Tooltip title="Refresh data">
+              <IconButton 
+                color="primary" 
+                onClick={refreshData}
+                disabled={refreshingData}
+              >
+                {refreshingData ? <CircularProgress size={24} /> : <RefreshIcon />}
+              </IconButton>
+            </Tooltip>
+            
+            <Tooltip title="Export data as CSV">
+              <IconButton color="primary">
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+            
+            <Button 
+              variant="outlined" 
+              startIcon={<CompareArrowsIcon />}
+              onClick={() => alert('Comparison feature coming soon!')}
+            >
+              Compare Sources
+            </Button>
+          </Box>
+        </Box>
+        
+        <Paper sx={{ mb: 4 }}>
+          <Tabs
+            value={currentTab}
+            onChange={(e, newValue) => setCurrentTab(newValue)}
+            variant="fullWidth"
+          >
+            <Tab label="Entity Analysis" />
+            <Tab label="Source Comparison" />
+            <Tab label="Temporal Trends" />
+            <Tab label="Statistics & Distributions" />
+          </Tabs>
+        </Paper>
+        
+        {/* Filters section */}
+        <Paper sx={{ p: 2, mb: 4 }}>
+          <Grid container spacing={3} alignItems="center">
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="entity-type-label">Entity Types</InputLabel>
+                <Select
+                  labelId="entity-type-label"
+                  id="entity-type-select"
+                  multiple
+                  value={selectedEntityTypes}
+                  onChange={handleEntityTypeChange}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {(selected as string[]).map((value) => (
+                        <Chip key={value} label={entityTypes[value as keyof typeof entityTypes] || value} size="small" />
+                      ))}
+                    </Box>
+                  )}
+                >
+                  {Object.entries(entityTypes).map(([type, label]) => (
+                    <MenuItem key={type} value={type}>
+                      {label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="time-range-label">Time Range</InputLabel>
+                <Select
+                  labelId="time-range-label"
+                  id="time-range-select"
+                  value={selectedTimeRange}
+                  onChange={handleTimeRangeChange}
+                >
+                  <MenuItem value={7}>Last 7 days</MenuItem>
+                  <MenuItem value={30}>Last 30 days</MenuItem>
+                  <MenuItem value={90}>Last 3 months</MenuItem>
+                  <MenuItem value={180}>Last 6 months</MenuItem>
+                  <MenuItem value={365}>Last year</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} sm={12} md={6}>
+              <Autocomplete
+                id="entity-autocomplete"
+                options={filteredEntities.map(e => e.name)}
+                value={selectedEntity}
+                onChange={(event, newValue) => {
+                  if (newValue) setSelectedEntity(newValue);
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Select Entity" size="small" fullWidth />
+                )}
+              />
+            </Grid>
+          </Grid>
+        </Paper>
+        
+        {/* Main content based on selected tab */}
+        {currentTab === 0 && (
+          <Grid container spacing={4}>
+            <Grid item xs={12} md={7}>
+              <Card>
+                <CardHeader 
+                  title="Entity Sentiment Analysis" 
+                  subheader="Power vs. Moral positioning of key entities"
+                  action={
+                    <Tooltip title="Entities are positioned based on their average sentiment scores across all analyzed news sources. The quadrants represent different narrative archetypes.">
+                      <IconButton>
+                        <InfoIcon />
+                      </IconButton>
+                    </Tooltip>
+                  }
+                />
+                <CardContent>
+                  <SentimentChart 
+                    data={highlightedEntities}
+                    entityTypes={getEntityTypeGrouping()}
+                    height={500}
+                    showLabels={true}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12} md={5}>
+              <Card>
+                <CardHeader 
+                  title="Entity Distribution" 
+                  subheader={`Sentiment distribution for ${selectedEntity}`}
+                />
+                <CardContent>
+                  {distributions[selectedEntity] ? (
+                    <SentimentDistributionChart 
+                      distributions={distributions[selectedEntity]}
+                      entityName={selectedEntity}
+                      height={250}
+                    />
+                  ) : (
+                    <Box sx={{ height: 250, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      <Typography color="text.secondary">Select an entity to view distribution</Typography>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+              
+              <Card sx={{ mt: 3 }}>
+                <CardHeader 
+                  title="Notable Entities" 
+                  subheader="Entities with unusual sentiment patterns"
+                />
+                <CardContent>
+                  <Grid container spacing={2}>
+                    {highlightedEntities.slice(0, 6).map(entity => (
+                      <Grid item xs={12} sm={6} key={entity.entity}>
+                        <Paper 
+                          elevation={1} 
+                          sx={{ 
+                            p: 2, 
+                            borderLeft: '4px solid',
+                            borderColor: entity.moral_score > 0.5 ? 'success.main' : 
+                                        entity.moral_score < -0.5 ? 'error.main' :
+                                        'warning.main',
+                            cursor: 'pointer',
+                            '&:hover': { bgcolor: 'action.hover' }
+                          }}
+                          onClick={() => setSelectedEntity(entity.entity)}
+                        >
+                          <Typography variant="subtitle1">{entity.entity}</Typography>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Power: {entity.power_score.toFixed(1)}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Moral: {entity.moral_score.toFixed(1)}
+                            </Typography>
+                          </Box>
+                          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                            {entity.global_percentile}% percentile
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    ))}
+                  </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <Card>
+                <CardHeader 
+                  title="Sentiment Over Time" 
+                  subheader={`Tracking ${selectedEntity || 'entity'} sentiment trends`}
+                />
+                <CardContent>
+                  {selectedEntity ? (
+                    <Box sx={{ height: 400 }}>
+                      <EntityTrendChart 
+                        entityName={selectedEntity}
+                        data={trends.find(t => t.name === selectedEntity)?.data || []}
+                        height={400}
+                      />
+                    </Box>
+                  ) : (
+                    <Box sx={{ height: 400, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      <Typography color="text.secondary">Select an entity to view trends</Typography>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        )}
+        
+        {currentTab === 1 && (
+          <Box>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Source comparison functionality is under development. It will allow you to compare how different news sources portray the same entities.
+            </Alert>
+            
+            <Grid container spacing={4}>
+              <Grid item xs={12}>
+                <Card>
+                  <CardHeader 
+                    title="Source Bias Comparison" 
+                    subheader="Compare sentiment patterns across news sources"
+                  />
+                  <CardContent>
+                    <Box sx={{ height: 500, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      <Typography variant="body1" color="text.secondary">
+                        Source comparison visualization coming soon
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+        
+        {currentTab === 2 && (
+          <Box>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Temporal analysis shows how entity sentiment changes over time, helping identify shifts in media portrayal.
+            </Alert>
+            
+            <Grid container spacing={4}>
+              <Grid item xs={12}>
+                <Card>
+                  <CardHeader 
+                    title="Temporal Trend Analysis" 
+                    subheader={`Sentiment trends over the last ${selectedTimeRange} days`}
+                  />
+                  <CardContent>
+                    <Box sx={{ height: 500 }}>
+                      {/* Would be implemented with a more sophisticated chart library */}
+                      <Typography color="text.secondary" sx={{ mb: 2 }}>
+                        This visualization would show sentiment trends for multiple entities over time.
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+        
+        {currentTab === 3 && (
+          <Box>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Statistical analysis helps identify unusual entity portrayals and media bias patterns.
+            </Alert>
+            
+            <Grid container spacing={4}>
+              <Grid item xs={12}>
+                <Card>
+                  <CardHeader 
+                    title="Statistical Distributions" 
+                    subheader="Sentiment distribution analysis"
+                  />
+                  <CardContent>
+                    <Box sx={{ height: 500, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      <Typography variant="body1" color="text.secondary">
+                        Statistical analysis visualization coming soon
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+      </Box>
+    </Container>
+  );
+};
+
+export default Dashboard;

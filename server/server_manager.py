@@ -146,18 +146,21 @@ def start_server(server_type):
     # Try to kill any existing processes on the default ports
     default_extension_port = 8000
     default_dashboard_port = 8001
+    default_frontend_port = 3000
     
     # Attempt to kill any servers on default ports
     killed_extension = kill_existing_server(default_extension_port)
     killed_dashboard = kill_existing_server(default_dashboard_port)
+    killed_frontend = kill_existing_server(default_frontend_port)
     
-    if killed_extension or killed_dashboard:
+    if killed_extension or killed_dashboard or killed_frontend:
         # Wait for ports to be released if any servers were killed
         logger.info("Waiting for ports to be released...")
         time.sleep(2)
     
     extension_process = None
     dashboard_process = None
+    frontend_process = None
     
     try:
         # Determine which server(s) to start
@@ -178,6 +181,48 @@ def start_server(server_type):
             logger.info(f"Running command: {' '.join(extension_cmd)}")
             extension_process = subprocess.Popen(extension_cmd)
             logger.info(f"Extension API server started with PID: {extension_process.pid}")
+            
+            # Also start the frontend server when starting the extension server
+            # Make sure the frontend port is free
+            if is_port_in_use(default_frontend_port):
+                logger.error(f"Port {default_frontend_port} is still in use despite cleanup attempt!")
+                logger.error("Please manually kill the process using this port and try again.")
+                # Clean up extension process if it was started
+                if extension_process:
+                    extension_process.terminate()
+                sys.exit(1)
+            
+            # Check if the frontend directory and package.json exist
+            frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+            frontend_package_json = os.path.join(frontend_dir, "package.json")
+            
+            if os.path.exists(frontend_package_json):
+                logger.info(f"Starting Frontend server on port {default_frontend_port}...")
+                
+                # Check if node_modules exists, if not, run npm install
+                if not os.path.exists(os.path.join(frontend_dir, "node_modules")):
+                    logger.info("Installing frontend dependencies...")
+                    npm_install_cmd = ["npm", "install"]
+                    try:
+                        subprocess.run(npm_install_cmd, cwd=frontend_dir, check=True)
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Failed to install frontend dependencies: {e}")
+                        # Continue anyway, dependencies might be installed already
+                    except FileNotFoundError:
+                        logger.error("npm command not found. Make sure Node.js is installed.")
+                        logger.info("Continuing without starting frontend server.")
+                
+                # Start the frontend server
+                frontend_cmd = ["npm", "run", "dev"]
+                try:
+                    frontend_process = subprocess.Popen(frontend_cmd, cwd=frontend_dir)
+                    logger.info(f"Frontend server started with PID: {frontend_process.pid}")
+                except FileNotFoundError:
+                    logger.error("npm command not found. Make sure Node.js is installed.")
+                    logger.info("Continuing without frontend server.")
+            else:
+                logger.warning(f"Frontend package.json not found at {frontend_package_json}")
+                logger.info("Continuing without starting frontend server.")
         
         if server_type in ['dashboard', 'both']:
             # Make sure the default port is free
@@ -187,6 +232,8 @@ def start_server(server_type):
                 # Clean up extension process if it was started
                 if extension_process:
                     extension_process.terminate()
+                if frontend_process:
+                    frontend_process.terminate()
                 sys.exit(1)
                 
             logger.info(f"Starting Dashboard API server on port {default_dashboard_port}...")
@@ -209,6 +256,9 @@ def start_server(server_type):
             if dashboard_process:
                 logger.info(f"Terminating Dashboard API server (PID: {dashboard_process.pid})")
                 dashboard_process.terminate()
+            if frontend_process:
+                logger.info(f"Terminating Frontend server (PID: {frontend_process.pid})")
+                frontend_process.terminate()
             sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
@@ -217,6 +267,8 @@ def start_server(server_type):
         logger.info("Servers are running. Press Ctrl+C to stop.")
         if server_type in ['extension', 'both']:
             logger.info(f"Extension API: http://localhost:{default_extension_port}")
+            if frontend_process:
+                logger.info(f"Frontend: http://localhost:{default_frontend_port}")
         if server_type in ['dashboard', 'both']:
             logger.info(f"Dashboard API: http://localhost:{default_dashboard_port}")
         
@@ -229,17 +281,24 @@ def start_server(server_type):
             if dashboard_process and dashboard_process.poll() is not None:
                 logger.error(f"Dashboard API server exited with code: {dashboard_process.returncode}")
                 dashboard_process = None
+                
+            if frontend_process and frontend_process.poll() is not None:
+                logger.error(f"Frontend server exited with code: {frontend_process.returncode}")
+                frontend_process = None
             
-            # If both processes have exited, exit the manager
-            if server_type == 'both' and extension_process is None and dashboard_process is None:
-                logger.error("Both servers have exited. Shutting down.")
-                break
-            elif server_type == 'extension' and extension_process is None:
-                logger.error("Extension API server has exited. Shutting down.")
-                break
-            elif server_type == 'dashboard' and dashboard_process is None:
-                logger.error("Dashboard API server has exited. Shutting down.")
-                break
+            # Continue running as long as at least one server is still alive (depending on type)
+            if server_type == 'both':
+                if extension_process is None and dashboard_process is None and frontend_process is None:
+                    logger.error("All servers have exited. Shutting down.")
+                    break
+            elif server_type == 'extension':
+                if extension_process is None and frontend_process is None:
+                    logger.error("Extension API and Frontend servers have exited. Shutting down.")
+                    break
+            elif server_type == 'dashboard':
+                if dashboard_process is None:
+                    logger.error("Dashboard API server has exited. Shutting down.")
+                    break
             
             time.sleep(1)
     
@@ -251,6 +310,9 @@ def start_server(server_type):
         if dashboard_process:
             logger.info(f"Terminating Dashboard API server (PID: {dashboard_process.pid})")
             dashboard_process.terminate()
+        if frontend_process:
+            logger.info(f"Terminating Frontend server (PID: {frontend_process.pid})")
+            frontend_process.terminate()
     
     except Exception as e:
         logger.error(f"Error: {str(e)}")
@@ -260,6 +322,9 @@ def start_server(server_type):
         if dashboard_process:
             logger.info(f"Terminating Dashboard API server (PID: {dashboard_process.pid})")
             dashboard_process.terminate()
+        if frontend_process:
+            logger.info(f"Terminating Frontend server (PID: {frontend_process.pid})")
+            frontend_process.terminate()
         sys.exit(1)
 
 if __name__ == "__main__":

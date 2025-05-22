@@ -8,14 +8,20 @@ for the browser extension, including sentiment distributions and entity tracking
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import func, cast, Float, desc, case, and_
 from datetime import datetime, timedelta
-import random
 from pydantic import BaseModel
-import numpy as np
+import logging
+import random
+import math
 
-# Import database utilities (adjust imports as needed)
-from database.db import get_session
-from database.models import Entity, EntityMention, NewsArticle
+# Import database utilities  
+# Note: get_session is provided by main.py as get_db dependency
+from database.models import Entity, EntityMention, NewsArticle, NewsSource
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,17 +30,25 @@ class SentimentDistributionResponse(BaseModel):
     entity_type: str
     current_value: float
     values: List[float]
-    country_data: Optional[Dict[str, List[float]]] = None
+    comparison_data: Optional[Dict[str, List[float]]] = None
+    comparison_label: Optional[str] = None
     sample_size: int
     source_count: int
+    available_sources: Optional[List[Dict[str, Any]]] = None
+    has_data: bool
 
+
+def get_db_session():
+    """Database session dependency - will be overridden by main.py"""
+    pass
 
 @router.get("/sentiment/distribution", response_model=SentimentDistributionResponse)
 async def get_sentiment_distribution(
     entity_name: str,
     dimension: str = Query("power", regex="^(power|moral)$"),
     country: Optional[str] = None,
-    session: Session = Depends(get_session)
+    source_id: Optional[int] = None,
+    session: Session = Depends(get_db_session)
 ):
     """
     Get sentiment distribution data for a specific entity.
@@ -51,73 +65,180 @@ async def get_sentiment_distribution(
         Distribution data with current value and comparison data
     """
     try:
-        # In a real implementation, you would:
-        # 1. Query for the entity in the database
-        # 2. Get all mentions of this entity
-        # 3. Calculate distribution statistics
-        # 4. Return properly formatted data
+        # Get the entity by name
+        entity = session.query(Entity).filter(
+            func.lower(Entity.name) == func.lower(entity_name)
+        ).first()
         
-        # For demo purposes, generate mock data
-        current_value = random.uniform(-1.5, 1.5)
+        if not entity:
+            # Try fuzzy matching if exact match fails
+            entity = session.query(Entity).filter(
+                func.lower(Entity.name).like(f"%{entity_name.lower()}%")
+            ).first()
         
-        # Create a normal-ish distribution around a mean value
-        mean = random.uniform(-0.5, 0.5)
-        std_dev = random.uniform(0.5, 1.0)
+        if not entity:
+            # Entity not found in database
+            logger.error(f"Entity '{entity_name}' not found in database.")
+            raise HTTPException(status_code=404, detail=f"Entity '{entity_name}' not found in database")
         
-        # Generate distribution values
-        values = []
-        for _ in range(100):
-            # Base value from normal distribution
-            value = np.random.normal(mean, std_dev)
-            # Clamp to -2 to 2 range
-            value = max(-2, min(2, value))
-            values.append(value)
+        # Get all mentions of this entity
+        score_field = EntityMention.power_score if dimension == "power" else EntityMention.moral_score
         
-        # Create country-specific data if requested
-        country_data = None
-        if country:
-            country_data = {
-                country: [
-                    max(-2, min(2, np.random.normal(mean + 0.3, std_dev * 0.8)))
-                    for _ in range(50)
-                ]
-            }
-        
-        return SentimentDistributionResponse(
-            entity_name=entity_name,
-            entity_type=get_mock_entity_type(entity_name),
-            current_value=current_value,
-            values=values,
-            country_data=country_data,
-            sample_size=len(values),
-            source_count=random.randint(10, 40)
+        # Query for all mentions of this entity with the selected dimension
+        mentions_query = session.query(score_field).filter(
+            EntityMention.entity_id == entity.id,
+            score_field.isnot(None)  # Ensure we only get mentions with valid scores
         )
         
+        # Count total mentions
+        total_mentions = mentions_query.count()
+        
+        # If we don't have enough data, return error
+        if total_mentions < 5:
+            logger.error(f"Insufficient data for entity '{entity_name}' ({total_mentions} mentions).")
+            raise HTTPException(status_code=400, detail=f"Insufficient data for entity '{entity_name}'. Only {total_mentions} mentions found, need at least 5.")
+        
+        # Get all score values  
+        values = [float(score[0]) for score in mentions_query.all()]
+        
+        # Get the most recent mention score as the current value
+        most_recent = session.query(score_field, EntityMention.created_at).filter(
+            EntityMention.entity_id == entity.id,
+            score_field.isnot(None)
+        ).order_by(
+            EntityMention.created_at.desc()
+        ).first()
+        
+        current_value = most_recent[0] if most_recent else values[0]
+        
+        # Get comparison data if requested
+        comparison_data = None
+        comparison_label = None
+        
+        # 1. Get source-specific data if requested
+        if source_id:
+            # Get the source information
+            source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
+            
+            source_mentions = session.query(score_field).join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).filter(
+                EntityMention.entity_id == entity.id,
+                NewsArticle.source_id == source_id,
+                score_field.isnot(None)
+            ).all()
+            
+            if source and len(source_mentions) >= 3:
+                comparison_data = {
+                    source.name: [float(score[0]) for score in source_mentions]
+                }
+                comparison_label = source.name
+        
+        # 2. Get country data if requested and no source data available
+        elif country:
+            # Join with NewsArticle and NewsSource to filter by country
+            country_mentions = session.query(score_field).join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).join(
+                NewsSource, NewsArticle.source_id == NewsSource.id
+            ).filter(
+                EntityMention.entity_id == entity.id,
+                score_field.isnot(None),
+                func.lower(NewsSource.country) == func.lower(country)
+            ).all()
+            
+            # Only include country data if we have enough values
+            if len(country_mentions) >= 3:
+                comparison_data = {
+                    country: [float(score[0]) for score in country_mentions]
+                }
+                comparison_label = country
+        
+        # Get the count of distinct news sources for this entity
+        source_count = session.query(func.count(func.distinct(NewsSource.id))).join(
+            NewsArticle, NewsSource.id == NewsArticle.source_id
+        ).join(
+            EntityMention, NewsArticle.id == EntityMention.article_id
+        ).filter(
+            EntityMention.entity_id == entity.id
+        ).scalar() or 0
+        
+        # Get available sources for this entity to offer as comparison options
+        available_sources = session.query(
+            NewsSource.id,
+            NewsSource.name,
+            func.count(EntityMention.id).label('mention_count')
+        ).join(
+            NewsArticle, NewsSource.id == NewsArticle.source_id
+        ).join(
+            EntityMention, NewsArticle.id == EntityMention.article_id
+        ).filter(
+            EntityMention.entity_id == entity.id,
+            score_field.isnot(None)
+        ).group_by(
+            NewsSource.id, 
+            NewsSource.name
+        ).having(
+            func.count(EntityMention.id) >= 3  # Only include sources with enough data
+        ).order_by(
+            func.count(EntityMention.id).desc()
+        ).limit(10).all()  # Get top 10 sources
+        
+        sources_list = [
+            {"id": source.id, "name": source.name, "count": source.mention_count}
+            for source in available_sources
+        ]
+        
+        return SentimentDistributionResponse(
+            entity_name=entity.name,
+            entity_type=entity.entity_type or "unknown",
+            current_value=float(current_value),
+            values=values,
+            comparison_data=comparison_data,
+            comparison_label=comparison_label,
+            sample_size=total_mentions,
+            source_count=source_count,
+            available_sources=sources_list,
+            has_data=True
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (404, 400, etc.)
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get sentiment distribution: {str(e)}")
+        logger.error(f"Failed to get sentiment distribution: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 class EntityTrackingResponse(BaseModel):
     entity_name: str
     entity_type: str
-    data: List[Dict[str, Any]]  # Contains date, power_score, moral_score
+    data: List[Dict[str, Any]]  # Contains date, power_score, moral_score, confidence intervals
+    has_data: bool
+    limited_data: bool
+    sample_size: int
+    source_count: int
+    time_period: str
+    is_mock_data: bool
 
 
 @router.get("/entity/tracking", response_model=EntityTrackingResponse)
 async def get_entity_tracking(
     entity_name: str,
     days: int = Query(30, ge=1, le=365),
-    session: Session = Depends(get_session)
+    window_size: int = Query(7, ge=1, le=30),
+    session: Session = Depends(get_db_session)
 ):
     """
     Get entity sentiment tracking data over time.
     
     This endpoint provides time series data for visualizing how sentiment toward
-    an entity has changed over time.
+    an entity has changed over time, using a sliding window average.
     
     Args:
         entity_name: The name of the entity to track
         days: Number of days to look back
+        window_size: Size of the sliding window in days for averaging
         
     Returns:
         Time series data with sentiment values
@@ -127,23 +248,79 @@ async def get_entity_tracking(
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
-        # In a real implementation, you would:
-        # 1. Query for the entity in the database
-        # 2. Get mentions over the time period
-        # 3. Aggregate by day/week
-        # 4. Return the time series
+        # Get the entity by name
+        entity = session.query(Entity).filter(
+            func.lower(Entity.name) == func.lower(entity_name)
+        ).first()
         
-        # For demo purposes, generate mock data
-        tracking_data = generate_mock_tracking_data(entity_name, days)
+        if not entity:
+            # Try fuzzy matching if exact match fails
+            entity = session.query(Entity).filter(
+                func.lower(Entity.name).like(f"%{entity_name.lower()}%")
+            ).first()
         
-        return EntityTrackingResponse(
-            entity_name=entity_name,
-            entity_type=get_mock_entity_type(entity_name),
-            data=tracking_data
+        if not entity:
+            # Entity not found in database
+            logger.error(f"Entity '{entity_name}' not found in database.")
+            raise HTTPException(status_code=404, detail=f"Entity '{entity_name}' not found in database")
+        
+        # Get entity mentions over the time period
+        mentions = session.query(
+            EntityMention.created_at,
+            EntityMention.power_score,
+            EntityMention.moral_score
+        ).filter(
+            EntityMention.entity_id == entity.id,
+            EntityMention.created_at >= start_date,
+            EntityMention.created_at <= end_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        ).order_by(
+            EntityMention.created_at
+        ).all()
+        
+        # Get the count of distinct news sources for this entity
+        source_count = session.query(func.count(func.distinct(NewsSource.id))).join(
+            NewsArticle, NewsSource.id == NewsArticle.source_id
+        ).join(
+            EntityMention, NewsArticle.id == EntityMention.article_id
+        ).filter(
+            EntityMention.entity_id == entity.id,
+            EntityMention.created_at >= start_date,
+            EntityMention.created_at <= end_date
+        ).scalar() or 0
+        
+        # If we don't have enough data, return error
+        if len(mentions) < 5:
+            logger.error(f"Insufficient tracking data for entity '{entity_name}' ({len(mentions)} mentions).")
+            raise HTTPException(status_code=400, detail=f"Insufficient tracking data for entity '{entity_name}'. Only {len(mentions)} mentions found, need at least 5.")
+        
+        # Implementation of sliding window average
+        tracking_data = calculate_sliding_window_average(
+            mentions, 
+            start_date, 
+            end_date, 
+            window_size
         )
         
+        return EntityTrackingResponse(
+            entity_name=entity.name,
+            entity_type=entity.entity_type or "unknown",
+            data=tracking_data,
+            has_data=len(tracking_data) > 0,
+            limited_data=len(mentions) < 20,
+            sample_size=len(mentions),
+            source_count=source_count,
+            time_period=f"{days} days",
+            is_mock_data=False
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (404, 400, etc.)
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get entity tracking data: {str(e)}")
+        logger.error(f"Failed to get entity tracking data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 class TopicClusterResponse(BaseModel):
@@ -156,7 +333,7 @@ async def get_topic_clusters(
     article_url: Optional[str] = None,
     view_type: str = Query("topics", regex="^(topics|entities)$"),
     threshold: str = Query("medium", regex="^(weak|medium|strong)$"),
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_db_session)
 ):
     """
     Get topic and entity relationship cluster data.
@@ -173,142 +350,101 @@ async def get_topic_clusters(
         Nodes and links for network visualization
     """
     try:
-        # In a real implementation, you would:
-        # 1. Query for topics/entities based on parameters
-        # 2. Calculate relationship strengths
-        # 3. Create network visualization data
+        # Topic clustering not yet implemented with real data
+        raise HTTPException(status_code=501, detail="Topic clustering feature not yet implemented")
         
-        # For demo purposes, generate mock data
-        return generate_mock_topic_clusters(view_type, threshold, article_url)
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get topic clusters: {str(e)}")
+        logger.error(f"Failed to get topic clusters: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-# Helper functions for generating mock data
+# Helper functions for data processing
 
-def get_mock_entity_type(entity_name):
-    """Guess entity type based on name."""
-    entity_name = entity_name.lower()
+def calculate_sliding_window_average(mentions, start_date, end_date, window_size):
+    """
+    Calculate sliding window average for entity sentiment tracking.
     
-    country_keywords = ['america', 'china', 'russia', 'united states', 'france', 'germany', 'japan']
-    org_keywords = ['company', 'corp', 'inc', 'organization', 'united nations', 'who', 'nato']
-    party_keywords = ['party', 'republican', 'democrat', 'labour', 'conservative']
-    
-    if any(keyword in entity_name for keyword in country_keywords):
-        return 'country'
-    elif any(keyword in entity_name for keyword in org_keywords):
-        return 'organization'
-    elif any(keyword in entity_name for keyword in party_keywords):
-        return 'political_party'
-    else:
-        return 'person'  # Default assumption
-
-
-def generate_mock_tracking_data(entity_name, days):
-    """Generate mock time series data for entity tracking."""
-    end_date = datetime.now()
-    
-    # Create a base trend direction
-    trend_power = random.choice([-0.02, -0.01, 0, 0.01, 0.02])
-    trend_moral = random.choice([-0.02, -0.01, 0, 0.01, 0.02])
-    
-    # Start with a random sentiment in the middle range
-    base_power = random.uniform(-0.5, 0.5)
-    base_moral = random.uniform(-0.5, 0.5)
-    
-    # Generate daily data points
-    tracking_data = []
-    for day in range(days):
-        # Calculate date
-        current_date = end_date - timedelta(days=days-day-1)
+    Args:
+        mentions: List of entity mentions with created_at, power_score, moral_score
+        start_date: Start date for the time series
+        end_date: End date for the time series
+        window_size: Size of the sliding window in days
         
-        # Calculate sentiment with trend and some random variation
-        power_score = base_power + (trend_power * day) + random.uniform(-0.3, 0.3)
-        moral_score = base_moral + (trend_moral * day) + random.uniform(-0.3, 0.3)
-        
-        # Clamp values to -2 to 2 range
-        power_score = max(-2, min(2, power_score))
-        moral_score = max(-2, min(2, moral_score))
-        
-        # Add data point
-        tracking_data.append({
-            "date": current_date.isoformat(),
-            "power_score": power_score,
-            "moral_score": moral_score
-        })
+    Returns:
+        List of data points with averaged scores
+    """
+    # Convert to list of dictionaries for easier manipulation
+    mention_data = [
+        {
+            "date": mention.created_at,
+            "power_score": float(mention.power_score) if mention.power_score is not None else 0.0,
+            "moral_score": float(mention.moral_score) if mention.moral_score is not None else 0.0
+        }
+        for mention in mentions
+    ]
     
-    return tracking_data
-
-
-def generate_mock_topic_clusters(view_type, threshold, article_url=None):
-    """Generate mock topic cluster data for visualization."""
-    # Number of nodes based on threshold
-    node_counts = {
-        "weak": 15,
-        "medium": 10,
-        "strong": 6
-    }
+    # If we have too few data points, just return them directly
+    if len(mention_data) <= window_size:
+        return sorted(mention_data, key=lambda x: x["date"])
     
-    # Topic or entity names based on view type
-    node_names = {
-        "topics": [
-            "Politics", "Economics", "Foreign Policy", "Climate", 
-            "Healthcare", "Technology", "Education", "Military", 
-            "Immigration", "Trade", "Social Issues", "Energy",
-            "Transportation", "Housing", "Agriculture"
-        ],
-        "entities": [
-            "Joe Biden", "Donald Trump", "United States", "China", 
-            "Russia", "European Union", "United Nations", "Congress",
-            "Federal Reserve", "Republican Party", "Democratic Party", 
-            "NATO", "World Health Organization", "Supreme Court", "Pentagon"
+    # Create a range of dates from start to end date
+    current_date = start_date
+    result = []
+    
+    # For each day in the range, create a window and average the scores
+    while current_date <= end_date:
+        window_start = current_date - timedelta(days=window_size)
+        
+        # Get mentions within the window
+        window_mentions = [
+            m for m in mention_data
+            if window_start <= m["date"] <= current_date
         ]
-    }
-    
-    # Create nodes based on type and threshold
-    nodes = []
-    num_nodes = min(node_counts[threshold], len(node_names[view_type]))
-    
-    for i in range(num_nodes):
-        node_type = "topic" if view_type == "topics" else "entity"
-        entity_type = "" if view_type == "topics" else get_mock_entity_type(node_names[view_type][i])
         
-        nodes.append({
-            "id": f"{node_type}_{i}",
-            "label": node_names[view_type][i],
-            "type": node_type,
-            "entity_type": entity_type,
-            "count": random.randint(3, 20),
-            "cluster": random.randint(0, 2),
-            "size": 1.0 + random.random()
-        })
+        # Only include days that have data
+        if window_mentions:
+            # Calculate average scores
+            power_scores = [m["power_score"] for m in window_mentions]
+            moral_scores = [m["moral_score"] for m in window_mentions]
+            
+            avg_power = sum(power_scores) / len(power_scores)
+            avg_moral = sum(moral_scores) / len(moral_scores)
+            
+            # Calculate standard deviations for confidence intervals
+            if len(power_scores) > 1:
+                power_std = (sum((x - avg_power) ** 2 for x in power_scores) / (len(power_scores) - 1)) ** 0.5
+                moral_std = (sum((x - avg_moral) ** 2 for x in moral_scores) / (len(moral_scores) - 1)) ** 0.5
+            else:
+                power_std = 0
+                moral_std = 0
+            
+            # Calculate 95% confidence intervals (approx. ±1.96 * std_err)
+            power_ci = 1.96 * (power_std / (len(power_scores) ** 0.5))
+            moral_ci = 1.96 * (moral_std / (len(moral_scores) ** 0.5))
+            
+            result.append({
+                "date": current_date.isoformat(),
+                "power_score": avg_power,
+                "moral_score": avg_moral,
+                "power_ci_lower": avg_power - power_ci,
+                "power_ci_upper": avg_power + power_ci,
+                "moral_ci_lower": avg_moral - moral_ci,
+                "moral_ci_upper": avg_moral + moral_ci,
+                "count": len(window_mentions)  # Include count for reference
+            })
+        
+        # Move to next day
+        current_date += timedelta(days=1)
     
-    # Create links between nodes
-    links = []
-    link_density = {
-        "weak": 0.4,
-        "medium": 0.3,
-        "strong": 0.2
-    }
+    # If we have too many points, sample them to reduce data size
+    if len(result) > 30:
+        # Use step size to reduce points while maintaining overall trend
+        step = len(result) // 30 + 1
+        result = result[::step]
     
-    for i in range(len(nodes)):
-        for j in range(i+1, len(nodes)):
-            # Probability of link based on threshold
-            if random.random() < link_density[threshold]:
-                # Stronger weight for nodes in same cluster
-                weight = 0.3 + (0.7 * random.random())
-                if nodes[i]["cluster"] == nodes[j]["cluster"]:
-                    weight += 0.2
-                
-                links.append({
-                    "source": nodes[i]["id"],
-                    "target": nodes[j]["id"],
-                    "weight": weight,
-                    "value": weight
-                })
-    
-    return {
-        "nodes": nodes,
-        "links": links
-    }
+    return result
+
+
+# No mock data - all responses come from real database data

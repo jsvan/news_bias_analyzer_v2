@@ -18,9 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_, cast, Float
 import requests
 from urllib.parse import urlparse
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -271,6 +272,10 @@ def get_sentiment_trends(
     
     return {"trends": list(trends.values())}
 
+# Statistical endpoints are now handled by the statistical_endpoints router
+
+# Entity tracking endpoint is now handled by the statistical_endpoints router
+
 # Define content extraction request/response models
 class ExtractionRequest(BaseModel):
     url: str
@@ -439,23 +444,204 @@ class ArticleAnalysisRequest(BaseModel):
     publish_date: Optional[str] = None
     force_reanalysis: Optional[bool] = False
 
+# Endpoint to retrieve analysis by URL
+@app.get("/analysis/by-url", response_model=Dict[str, Any])
+async def get_analysis_by_url(
+    url: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve existing analysis for an article by URL.
+    
+    This endpoint checks if an article has already been analyzed and returns the results.
+    The extension uses this to auto-populate the analysis when a user visits a previously
+    analyzed page.
+    """
+    try:
+        # Convert URL to MD5 hash for lookup (same method used by scraper)
+        import hashlib
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+        
+        # Look up the article in the database
+        article = db.query(NewsArticle).filter(NewsArticle.id == url_hash).first()
+        
+        if not article or article.analysis_status != "completed":
+            # Article not found or analysis not complete
+            return {
+                "url": url,
+                "exists": False,
+                "message": "Article not found or not yet analyzed"
+            }
+        
+        # Get all entity mentions for this article
+        entity_mentions = db.query(
+            Entity, 
+            EntityMention
+        ).join(
+            EntityMention, 
+            Entity.id == EntityMention.entity_id
+        ).filter(
+            EntityMention.article_id == article.id
+        ).all()
+        
+        if not entity_mentions:
+            return {
+                "url": url,
+                "exists": True,
+                "title": article.title,
+                "source": article.source.name if article.source else "Unknown",
+                "publish_date": article.publish_date,
+                "entities": [],
+                "message": "No entities found in analysis"
+            }
+        
+        # Format entities for response
+        formatted_entities = []
+        unique_entities = {}
+        
+        for entity, mention in entity_mentions:
+            entity_id = entity.id
+            
+            # Initialize entity data if not seen yet
+            if entity_id not in unique_entities:
+                unique_entities[entity_id] = {
+                    "name": entity.name,
+                    "type": entity.entity_type,
+                    "power_score": mention.power_score,
+                    "moral_score": mention.moral_score,
+                    "mentions": []
+                }
+            
+            # Add mention data if available
+            if mention.mentions:
+                unique_entities[entity_id]["mentions"].extend(mention.mentions)
+        
+        # Convert to list
+        formatted_entities = list(unique_entities.values())
+        
+        # Create response
+        response = {
+            "url": url,
+            "exists": True,
+            "title": article.title,
+            "source": article.source.name if article.source else "Unknown",
+            "publish_date": article.publish_date,
+            "entities": formatted_entities,
+            "analysis_date": article.processed_at,
+            "from_database": True
+        }
+        
+        return response
+    
+    except Exception as e:
+        logger.error(f"Error retrieving analysis for URL {url}: {str(e)}")
+        return {
+            "url": url,
+            "exists": False,
+            "error": str(e),
+            "message": "Error retrieving analysis"
+        }
+
 # Article analysis endpoint
 @app.post("/analyze")
-async def analyze_article(request: ArticleAnalysisRequest):
+async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends(get_db)):
+    # Validate required fields
+    if not request.url or not request.title or not request.text or not request.source:
+        logger.error("Missing required fields in analyze request")
+        missing_fields = []
+        if not request.url: missing_fields.append("url")
+        if not request.title: missing_fields.append("title")
+        if not request.text: missing_fields.append("text")
+        if not request.source: missing_fields.append("source")
+        
+        error_message = f"Missing required fields: {', '.join(missing_fields)}"
+        logger.error(error_message)
+        raise HTTPException(status_code=422, detail=error_message)
     """
     Analyze article content for bias and sentiment using OpenAI.
     
     This endpoint calls the OpenAI API to perform entity extraction and sentiment analysis.
     It extracts named entities from the article content and analyzes how they are portrayed
-    in terms of power and moral dimensions.
+    in terms of power and moral dimensions. Analysis results are saved to the database.
     """
     logger.info(f"Analyzing article: {request.title} ({request.url})")
+    logger.info(f"Force reanalysis: {request.force_reanalysis}")
     print(f"\n==== ANALYZING ARTICLE: {request.title} ====")
     print(f"URL: {request.url}")
     print(f"Source: {request.source}")
+    print(f"Force reanalysis: {request.force_reanalysis}")
     print(f"Content length: {len(request.text)} characters")
     
     try:
+        # Check if this URL already exists in the database
+        import hashlib
+        url_hash = hashlib.md5(request.url.encode('utf-8')).hexdigest()
+        
+        # Look up article in database
+        article = db.query(NewsArticle).filter(NewsArticle.id == url_hash).first()
+        
+        # If article exists, check if we should re-analyze
+        if article and article.analysis_status == "completed" and not request.force_reanalysis:
+            # Get existing entity mentions
+            logger.info(f"Found existing article in database, skipping analysis. Force reanalysis={request.force_reanalysis}")
+            entity_mentions = db.query(
+                Entity, 
+                EntityMention
+            ).join(
+                EntityMention, 
+                Entity.id == EntityMention.entity_id
+            ).filter(
+                EntityMention.article_id == article.id
+            ).all()
+            
+            if entity_mentions:
+                logger.info(f"Using existing analysis for {request.url} ({len(entity_mentions)} entity mentions)")
+                
+                # Format entities for response
+                formatted_entities = []
+                unique_entities = {}
+                
+                for entity, mention in entity_mentions:
+                    entity_id = entity.id
+                    
+                    # Initialize entity data if not seen yet
+                    if entity_id not in unique_entities:
+                        unique_entities[entity_id] = {
+                            "name": entity.name,
+                            "type": entity.entity_type,
+                            "power_score": float(mention.power_score) if mention.power_score else 0,
+                            "moral_score": float(mention.moral_score) if mention.moral_score else 0,
+                            "mentions": []
+                        }
+                    
+                    # Add mention data if available
+                    if mention.mentions:
+                        unique_entities[entity_id]["mentions"].extend(mention.mentions)
+                
+                # Convert to list
+                formatted_entities = list(unique_entities.values())
+                
+                # Generate a simple composite score
+                composite_percentile = 50  # Default to median
+                composite_p_value = 0.5    # Default p-value
+                
+                # Create response
+                api_response = {
+                    "url": request.url,
+                    "title": article.title,
+                    "source": article.source.name if article.source else request.source,
+                    "publish_date": article.publish_date,
+                    "composite_score": {
+                        "percentile": composite_percentile,
+                        "p_value": composite_p_value
+                    },
+                    "entities": formatted_entities,
+                    "newly_analyzed": False,
+                    "from_database": True
+                }
+                
+                return api_response
+        
         # Import the OpenAI integration
         from analyzer.openai_integration import SentimentAnalyzer
         
@@ -471,6 +657,48 @@ async def analyze_article(request: ArticleAnalysisRequest):
             "publish_date": request.publish_date
         }
         
+        # Ensure we have a news source record
+        source = None
+        if request.source:
+            # Look up source by name
+            source = db.query(NewsSource).filter(func.lower(NewsSource.name) == func.lower(request.source)).first()
+            
+            # Create source if it doesn't exist
+            if not source:
+                source = NewsSource(
+                    name=request.source,
+                    base_url=urlparse(request.url).netloc,
+                    country="Unknown",
+                    language="en"
+                )
+                db.add(source)
+                db.flush()  # Get the ID without committing
+        
+        # Create or update article record
+        if not article:
+            # Create new article record
+            article = NewsArticle(
+                id=url_hash,
+                url=request.url,
+                title=request.title,
+                text=request.text,
+                publish_date=request.publish_date or datetime.utcnow(),
+                source_id=source.id if source else None,
+                analysis_status="in_progress",
+                last_analysis_attempt=datetime.utcnow()
+            )
+            db.add(article)
+        else:
+            # Update existing article
+            article.title = request.title
+            article.text = request.text
+            article.publish_date = request.publish_date or article.publish_date or datetime.utcnow()
+            article.source_id = source.id if source else article.source_id
+            article.analysis_status = "in_progress"
+            article.last_analysis_attempt = datetime.utcnow()
+        
+        db.flush()  # Make sure article has an ID
+                
         # Call the OpenAI analyzer
         print("Calling OpenAI for analysis...")
         analysis_result = analyzer.analyze_article(article_data)
@@ -479,19 +707,59 @@ async def analyze_article(request: ArticleAnalysisRequest):
         entities = analysis_result.get('entities', [])
         print(f"OpenAI found {len(entities)} entities in the article")
         
-        # Format entities for the response
+        # Store entities and mentions in the database
         formatted_entities = []
-        for entity in entities:
+        for entity_data in entities:
+            entity_name = entity_data.get('entity', '')
+            entity_type = entity_data.get('entity_type', '')
+            
+            if not entity_name:
+                continue  # Skip entities with no name
+            
+            # Look up entity in database or create it
+            entity = db.query(Entity).filter(
+                func.lower(Entity.name) == func.lower(entity_name),
+                Entity.entity_type == entity_type
+            ).first()
+            
+            if not entity:
+                entity = Entity(
+                    name=entity_name,
+                    entity_type=entity_type,
+                    created_at=datetime.utcnow()
+                )
+                db.add(entity)
+                db.flush()  # Get the ID without committing
+            
+            # Create entity mention
+            mention = EntityMention(
+                entity_id=entity.id,
+                article_id=article.id,
+                power_score=entity_data.get('power_score', 0),
+                moral_score=entity_data.get('moral_score', 0),
+                mentions=entity_data.get('mentions', []),
+                created_at=datetime.utcnow()
+            )
+            db.add(mention)
+            
+            # Format for response
             formatted_entity = {
-                "name": entity.get('entity', ''),
-                "type": entity.get('entity_type', ''),
-                "power_score": entity.get('power_score', 0),
-                "moral_score": entity.get('moral_score', 0),
+                "name": entity_name,
+                "type": entity_type,
+                "power_score": entity_data.get('power_score', 0),
+                "moral_score": entity_data.get('moral_score', 0),
                 "national_significance": 0.3,  # Placeholder
                 "global_significance": 0.2,    # Placeholder
-                "mentions": entity.get('mentions', [])
+                "mentions": entity_data.get('mentions', [])
             }
             formatted_entities.append(formatted_entity)
+        
+        # Update article status to completed
+        article.analysis_status = "completed"
+        article.processed_at = datetime.utcnow()
+        
+        # Commit all changes to database
+        db.commit()
         
         # Generate a simple composite score based on entity sentiment
         composite_percentile = 50  # Default to median
@@ -508,7 +776,8 @@ async def analyze_article(request: ArticleAnalysisRequest):
                 "p_value": composite_p_value
             },
             "entities": formatted_entities,
-            "newly_analyzed": True
+            "newly_analyzed": True,
+            "saved_to_database": True
         }
         
         # Print the entities for debugging
@@ -518,17 +787,84 @@ async def analyze_article(request: ArticleAnalysisRequest):
             print(f"    Power: {entity['power_score']}, Moral: {entity['moral_score']}")
             print(f"    Mentions: {len(entity.get('mentions', []))}")
         
-        logger.info(f"Analysis completed for {request.url}")
+        logger.info(f"Analysis completed and saved for {request.url}")
         return api_response
     
     except Exception as e:
         logger.error(f"Error analyzing article: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
+# Trending entities endpoint for dashboard
+@app.get("/stats/trending_entities", response_model=List[Dict[str, Any]])
+async def get_trending_entities(
+    limit: int = Query(10, ge=1, le=100),
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db)
+):
+    """
+    Get trending entities with their sentiment scores.
+    These are entities that have been mentioned frequently in the recent past.
+    """
+    try:
+        # Get date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        # Query for trending entities based on mention count
+        trending_query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label('mention_count'),
+            func.avg(EntityMention.power_score).label('avg_power'),
+            func.avg(EntityMention.moral_score).label('avg_moral')
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id
+        ).join(
+            NewsArticle, EntityMention.article_id == NewsArticle.id
+        ).filter(
+            NewsArticle.publish_date >= start_date
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc()
+        ).limit(limit).all()
+        
+        # Format the results
+        result = []
+        for entity in trending_query:
+            # Calculate global percentile (simplified)
+            # In a real implementation, this would involve more sophisticated statistical analysis
+            global_percentile = 50  # Default to median
+            
+            # Get mentions count from all time for comparison
+            all_time_count = db.query(func.count(EntityMention.id)).filter(
+                EntityMention.entity_id == entity.id
+            ).scalar() or 0
+            
+            # Add to results
+            result.append({
+                'entity': entity.name,
+                'type': entity.entity_type,
+                'power_score': float(entity.avg_power) if entity.avg_power else 0,
+                'moral_score': float(entity.avg_moral) if entity.avg_moral else 0,
+                'global_percentile': global_percentile,
+                'mention_count': entity.mention_count,
+                'all_time_mentions': all_time_count
+            })
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching trending entities: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch trending entities: {str(e)}")
+
 # Include routers if available
 if has_article_router:
     app.include_router(article_router, prefix="/articles", tags=["Articles"])
 if has_stats_router:
+    # Override the database dependency in the stats router
+    from extension.api.statistical_endpoints import get_db_session
+    app.dependency_overrides[get_db_session] = get_db
     app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
 if has_similarity_router:
     app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])

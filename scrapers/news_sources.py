@@ -365,21 +365,21 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "Reuters",
-            "country": "International",
+            "name": "The Wall Street Journal",
+            "country": "USA",
             "language": "en",
             "rss_feeds": [
-                "https://www.reutersagency.com/feed/?best-topics=political-general&post_type=best",  # Invalid: HTTP error: 404
-                "https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best",  # Invalid: HTTP error: 404
-                "https://www.reutersagency.com/feed/?best-topics=environment&post_type=best",  # Invalid: HTTP error: 404
+                "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+                "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",
             ]
         },
         {
-            "name": "Associated Press",
-            "country": "International",
+            "name": "Politico",
+            "country": "USA", 
             "language": "en",
             "rss_feeds": [
-                "https://apnews.com/rss/world",  # Invalid: HTTP error: 404
+                "https://www.politico.com/rss/politics08.xml",
+                "https://www.politico.com/rss/world.xml",
             ]
         },
         {

@@ -120,14 +120,14 @@ start_api() {
 
 # Start the dashboard
 start_dashboard() {
-  cd "$PROJECT_ROOT/frontend/dashboard"
+  cd "$PROJECT_ROOT/frontend"
   echo -e "${GREEN}Starting Dashboard...${NC}"
   echo -e "${YELLOW}Note: You need to have Node.js installed${NC}"
   if [ ! -d "node_modules" ]; then
     echo -e "${BLUE}Installing dashboard dependencies...${NC}"
     npm install
   fi
-  npm start
+  npm run dev
 }
 
 # Build the extension
