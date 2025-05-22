@@ -136,6 +136,12 @@ async def get_sentiment_distribution(
         
         # 2. Get country data if requested and no source data available
         elif country:
+            logger.info(f"Filtering for country: '{country}'")
+            
+            # Debug: Check what countries are available in the database
+            available_countries = session.query(func.distinct(NewsSource.country)).all()
+            logger.info(f"Available countries in database: {[c[0] for c in available_countries]}")
+            
             # Join with NewsArticle and NewsSource to filter by country
             country_mentions = session.query(score_field).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
@@ -147,12 +153,17 @@ async def get_sentiment_distribution(
                 func.lower(NewsSource.country) == func.lower(country)
             ).all()
             
+            logger.info(f"Found {len(country_mentions)} country-specific mentions for '{country}'")
+            
             # Only include country data if we have enough values
             if len(country_mentions) >= 3:
                 comparison_data = {
                     country: [float(score[0]) for score in country_mentions]
                 }
                 comparison_label = country
+                logger.info(f"Created comparison data for '{country}' with {len(country_mentions)} mentions")
+            else:
+                logger.warning(f"Insufficient country data for '{country}': only {len(country_mentions)} mentions (need 3+)")
         
         # Get the count of distinct news sources for this entity
         source_count = session.query(func.count(func.distinct(NewsSource.id))).join(

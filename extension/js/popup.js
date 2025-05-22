@@ -1110,22 +1110,27 @@ document.addEventListener('DOMContentLoaded', () => {
           // Set the data in the histogram
           // The API now returns comparison_data directly
           const comparisonData = data.comparison_data || null;
+          
+          // Update dimension for semantic labeling
+          window.sentimentHistogram.setDimension(selectedDimension);
+          
           window.sentimentHistogram.setData(
             data.values, 
             data.current_value, 
             comparisonData
           );
           
-          // Update HTML title based on comparison data
+          // Update HTML title based on dimension and comparison data
           const titleElement = document.getElementById('distribution-title');
           if (titleElement) {
+            const dimensionTitle = selectedDimension === 'power' ? 'Power Distribution' : 'Moral Distribution';
             if (comparisonData) {
               const comparisonKey = Object.keys(comparisonData)[0];
               titleElement.textContent = comparisonKey ? 
-                `Sentiment Distribution with ${comparisonKey} Comparison` :
-                'Sentiment Distribution';
+                `${dimensionTitle} with ${comparisonKey} Comparison` :
+                dimensionTitle;
             } else {
-              titleElement.textContent = 'Sentiment Distribution';
+              titleElement.textContent = dimensionTitle;
             }
           }
           

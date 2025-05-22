@@ -32,6 +32,12 @@ from database.models import NewsArticle, NewsSource
 from scrapers.news_sources import get_news_sources
 from scrapers.parallel_scraper import scrape_feeds, scrape_feeds_generator
 
+# Create a mapping of source names to country information
+def get_source_country_mapping():
+    """Create a mapping of source names to their countries from the configuration."""
+    news_sources = get_news_sources()
+    return {source['name']: source.get('country', 'Unknown') for source in news_sources}
+
 # Global database session that can be accessed by signal handlers
 db_manager = None
 current_session = None
@@ -73,8 +79,9 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
     print(f"{'*' * 80}")
     logger.info(f"Preparing to insert batch of {len(articles)} articles")
     
-    # Cache source IDs to minimize queries
+    # Cache source IDs to minimize queries and get country mapping
     source_cache = {}
+    country_mapping = get_source_country_mapping()
     
     # Start transaction
     print(f"\n{'-' * 80}")
@@ -172,17 +179,28 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
             else:
                 source = session.query(NewsSource).filter_by(name=source_name).first()
                 if not source:
+                    # Get country from configuration mapping
+                    source_country = country_mapping.get(source_name, 'Unknown')
+                    
                     # Create new source
                     source = NewsSource(
                         name=source_name,
                         base_url=article.get('feed_url', ''),
-                        country=article.get('country', None),
+                        country=source_country,
                         language=article.get('language', None)
                     )
                     session.add(source)
                     session.flush()
-                    print(f"CREATED NEW SOURCE: {source_name}")
-                    logger.info(f"Created new source: {source_name}")
+                    print(f"CREATED NEW SOURCE: {source_name} (Country: {source_country})")
+                    logger.info(f"Created new source: {source_name} with country: {source_country}")
+                else:
+                    # Update existing source with country info if missing
+                    if not source.country or source.country == 'Unknown':
+                        source_country = country_mapping.get(source_name, 'Unknown')
+                        source.country = source_country
+                        session.flush()
+                        print(f"UPDATED SOURCE COUNTRY: {source_name} -> {source_country}")
+                        logger.info(f"Updated source country for: {source_name} -> {source_country}")
                     
                 source_id = source.id
                 source_cache[source_name] = source_id

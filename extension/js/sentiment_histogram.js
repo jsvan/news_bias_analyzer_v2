@@ -21,7 +21,8 @@ class SentimentHistogram {
       showPercentile: true,
       animate: true,
       country: null,  // Currently selected country (null = global)
-      isMockData: false // Flag to indicate if data is real or mock
+      isMockData: false, // Flag to indicate if data is real or mock
+      dimension: 'power' // Track current dimension (power or moral)
     }, options);
     
     this.data = null;
@@ -43,13 +44,19 @@ class SentimentHistogram {
     this.render();
   }
   
+  // Set dimension (power or moral)
+  setDimension(dimension) {
+    this.options.dimension = dimension;
+    this.render();
+  }
+  
   // Create bins from data
-  createBins(data, numBins = 10) {
+  createBins(data, numBins = 10, normalize = false) {
     if (!data || data.length === 0) return [];
     
-    // Find min and max values
-    const min = Math.min(...data);
-    const max = Math.max(...data);
+    // Fixed range for sentiment scores: -2 to +2
+    const min = -2;
+    const max = 2;
     const range = max - min;
     const binWidth = range / numBins;
     
@@ -58,22 +65,34 @@ class SentimentHistogram {
     
     // Count values in each bin
     data.forEach(value => {
+      // Clamp values to the -2 to +2 range
+      const clampedValue = Math.max(min, Math.min(max, value));
+      
       // Handle edge case for max value
-      if (value === max) {
+      if (clampedValue === max) {
         bins[numBins - 1]++;
       } else {
-        const binIndex = Math.floor((value - min) / binWidth);
+        const binIndex = Math.floor((clampedValue - min) / binWidth);
         bins[binIndex < 0 ? 0 : (binIndex >= numBins ? numBins - 1 : binIndex)]++;
       }
     });
+    
+    // Normalize to probabilities (softmax-like) if requested
+    let normalizedBins = bins;
+    if (normalize) {
+      const total = bins.reduce((sum, count) => sum + count, 0);
+      if (total > 0) {
+        normalizedBins = bins.map(count => count / total);
+      }
+    }
     
     // Calculate bin boundaries for labels
     const binBoundaries = Array(numBins + 1).fill(0).map((_, i) => min + i * binWidth);
     
     return {
-      counts: bins,
+      counts: normalizedBins,
       boundaries: binBoundaries,
-      max: Math.max(...bins)
+      max: Math.max(...normalizedBins)
     };
   }
   
@@ -100,22 +119,24 @@ class SentimentHistogram {
     this.ctx.clearRect(0, 0, width, height);
     this.currentBinInfo = null;
     
-    // Create bins for global data
-    const binData = this.createBins(this.data, bins);
-    const { counts, boundaries, max } = binData;
-    
-    // Create bins for comparison data if available
+    // Check if we have comparison data to determine normalization
     let comparisonBinData = null;
     let comparisonLabel = "";
+    let hasComparison = false;
     
     if (this.comparisonData) {
       const comparisonKey = Object.keys(this.comparisonData)[0];
       if (comparisonKey && this.comparisonData[comparisonKey] && this.comparisonData[comparisonKey].length >= 3) {
         const comparisonDataForBin = this.comparisonData[comparisonKey];
-        comparisonBinData = this.createBins(comparisonDataForBin, bins);
+        comparisonBinData = this.createBins(comparisonDataForBin, bins, true); // normalize comparison
         comparisonLabel = comparisonKey;
+        hasComparison = true;
       }
     }
+    
+    // Create bins for global data (normalize if we have comparison data)
+    const binData = this.createBins(this.data, bins, hasComparison);
+    const { counts, boundaries, max } = binData;
     
     // Find which bin contains the current value
     const currentBin = this.findBinForValue(this.currentValue, boundaries);
@@ -127,7 +148,13 @@ class SentimentHistogram {
     const barWidth = chartWidth / bins;
     
     // Determine maximum value for scaling
-    const maxValue = comparisonBinData ? Math.max(max, comparisonBinData.max) : max;
+    let maxValue;
+    if (hasComparison) {
+      // When normalized, max value should be 1.0
+      maxValue = 1.0;
+    } else {
+      maxValue = max;
+    }
     
     // Draw axes
     this.ctx.beginPath();
@@ -149,51 +176,61 @@ class SentimentHistogram {
       const barHeight = (count / maxValue) * chartHeight;
       const y = height - padding.bottom - barHeight;
 
-      // Draw bar
-      this.ctx.fillStyle = i === currentBin ? highlightColor : barColor;
+      // Draw bar (all bars are blue)
+      this.ctx.fillStyle = barColor;
       this.ctx.fillRect(x, y, barWidth - 0.1, barHeight);
 
       // Store current bin info for later drawing (after all bars)
       if (i === currentBin) {
-        this.currentBinInfo = { x, y, barWidth };
+        this.currentBinInfo = { x, y, barWidth, barHeight };
       }
 
-      // Draw bin boundary label (only show first, middle, and last for clarity)
+      // Draw semantic labels (only show first, middle, and last for clarity)
       if (i === 0 || i === Math.floor(bins/2) || i === bins - 1) {
         this.ctx.fillStyle = textColor;
         this.ctx.textAlign = 'center';
-        this.ctx.font = '10px Arial';
+        this.ctx.font = '11px Arial';
 
-        // For middle and last labels, rotate them slightly to avoid overlap
-        if (i !== 0) {
-          this.ctx.save();
-          this.ctx.translate(x + barWidth / 2, height - padding.bottom + 15);
-          this.ctx.rotate(Math.PI / 6); // 30 degrees rotation
-          this.ctx.fillText(boundaries[i].toFixed(1), 0, 0);
-          this.ctx.restore();
+        // Get semantic label based on dimension and position
+        let label = '';
+        const { dimension } = this.options;
+        
+        if (i === 0) {
+          // Left side (negative values)
+          label = dimension === 'power' ? 'Weak' : 'Evil';
+        } else if (i === Math.floor(bins/2)) {
+          // Center (neutral)
+          label = 'Neutral';
         } else {
-          // First label stays horizontal
-          this.ctx.fillText(
-            boundaries[i].toFixed(1),
-            x + barWidth / 2,
-            height - padding.bottom + 15
-          );
+          // Right side (positive values)
+          label = dimension === 'power' ? 'Strong' : 'Good';
         }
+
+        // All labels stay horizontal for better readability
+        this.ctx.fillText(
+          label,
+          x + barWidth / 2,
+          height - padding.bottom + 15
+        );
       }
     });
     
     // Draw comparison-specific bars if available
     if (comparisonBinData) {
       comparisonBinData.counts.forEach((count, i) => {
-        const x = padding.left + i * barWidth + barWidth / 4;
+        const x = padding.left + i * barWidth;
         const barHeight = (count / maxValue) * chartHeight;
         const y = height - padding.bottom - barHeight;
-        const narrowBarWidth = barWidth / 2;
         
-        // Draw comparison bar overlay
+        // Draw comparison bars as outlined bars (same width as main bars)
+        this.ctx.strokeStyle = countryColor;
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(x, y, barWidth - 0.1, barHeight);
+        
+        // Fill with semi-transparent comparison color
         this.ctx.fillStyle = countryColor;
-        this.ctx.globalAlpha = 0.7;
-        this.ctx.fillRect(x, y, narrowBarWidth, barHeight);
+        this.ctx.globalAlpha = 0.3;
+        this.ctx.fillRect(x, y, barWidth - 0.1, barHeight);
         this.ctx.globalAlpha = 1.0;
       });
     }
@@ -207,16 +244,33 @@ class SentimentHistogram {
     for (let i = 0; i <= 5; i++) {
       const value = maxValue * (i / 5);
       const y = height - padding.bottom - (chartHeight * (i / 5));
-      this.ctx.fillText(Math.round(value), padding.left - 5, y);
+      
+      if (hasComparison) {
+        // Show as probability (0.0 to 1.0)
+        this.ctx.fillText((value).toFixed(1), padding.left - 5, y);
+      } else {
+        // Show as count
+        this.ctx.fillText(Math.round(value), padding.left - 5, y);
+      }
     }
     
     // Draw current article indicator after all bars (so it's on top)
     if (this.currentBinInfo) {
-      const { x, y, barWidth } = this.currentBinInfo;
+      const { x, y, barWidth, barHeight } = this.currentBinInfo;
       
       // Calculate percentile for the second line of text
       const lowerCount = this.data.filter(v => v < this.currentValue).length;
       const percentile = Math.round((lowerCount / this.data.length) * 100);
+      
+      // Draw orange circle overlay on the bar (slightly narrower than bar)
+      const circleRadius = (barWidth - 0.1) * 0.4; // Circle slightly narrower than bar
+      const circleX = x + barWidth / 2;
+      const circleY = y + barHeight / 2; // Center vertically on the bar
+      
+      this.ctx.beginPath();
+      this.ctx.fillStyle = highlightColor;
+      this.ctx.arc(circleX, circleY, circleRadius, 0, 2 * Math.PI);
+      this.ctx.fill();
       
       // Draw marker triangle above the bar
       this.ctx.beginPath();
@@ -248,7 +302,7 @@ class SentimentHistogram {
     this.ctx.translate(15, height / 2);
     this.ctx.rotate(-Math.PI / 2);
     this.ctx.fillStyle = textColor;  // Reset to black for y-axis label
-    this.ctx.fillText('Frequency', 0, 0);
+    this.ctx.fillText(hasComparison ? 'Probability' : 'Frequency', 0, 0);
     this.ctx.restore();
     
     // Title is now handled in HTML, not drawn on canvas
