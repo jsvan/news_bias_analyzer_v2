@@ -275,22 +275,40 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Helper function to extract and analyze content
   function extractAndAnalyze(tab, forceReanalysis) {
-    // Use API for content extraction
-    tryExtractContent(tab)
-      .then(extractedContent => {
-        if (extractedContent) {
-          // Successfully extracted content from the API
-          currentArticle = extractedContent;
-          analyzeWithApi(currentArticle, forceReanalysis);
-        } else {
-          // Show error if API extraction fails
-          showError('Content extraction failed. Please make sure the API server is running.');
-        }
-      })
-      .catch(error => {
-        console.error("Error with content extraction API:", error);
-        showError('Server unreachable: Please make sure the API server is running at ' + API_ENDPOINT);
-      });
+    // First try to use content script for better extraction
+    chrome.tabs.sendMessage(tab.id, { action: 'getPageContent' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn('Content script not available:', chrome.runtime.lastError);
+        // Fall back to API extraction
+        tryExtractContent(tab)
+          .then(extractedContent => {
+            if (extractedContent) {
+              currentArticle = extractedContent;
+              analyzeWithApi(currentArticle, forceReanalysis);
+            } else {
+              showError('Content extraction failed. Please make sure the API server is running.');
+            }
+          })
+          .catch(error => {
+            console.error("Error with content extraction API:", error);
+            showError('Server unreachable: Please make sure the API server is running at ' + API_ENDPOINT);
+          });
+      } else if (response && response.content) {
+        // Successfully got content from content script
+        console.log('Content extracted via content script');
+        currentArticle = {
+          url: response.content.url,
+          source: response.content.source,
+          title: response.content.headline,
+          text: response.content.content
+        };
+        analyzeWithApi(currentArticle, forceReanalysis);
+      } else {
+        // Content script returned but no content
+        console.warn('Content script returned no content');
+        showError('Could not extract article content from this page.');
+      }
+    });
   }
 
   // Extract content using the /extract API endpoint
@@ -353,12 +371,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show loading state
     showState(loadingState);
     
+    // Ensure all required fields are present
+    const url = article.url || '';
+    const source = article.source || '';
+    const title = article.headline || article.title || '';
+    const text = article.content || article.text || '';
+    
+    // Validate required fields
+    if (!url || !source || !title || !text) {
+      console.error('Missing required fields:', { url: !!url, source: !!source, title: !!title, text: !!text });
+      showError('Missing required article data. Please try refreshing the page.');
+      return;
+    }
+    
     // Log the article data being sent
     console.log('Sending article to API:', {
-      url: article.url,
-      source: article.source,
-      title: article.headline,
-      textLength: article.content ? article.content.length : 0,
+      url: url,
+      source: source,
+      title: title,
+      textLength: text.length,
       forceReanalysis: forceReanalysis
     });
     
@@ -367,10 +398,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Create the request payload
     const payload = {
-      url: article.url,
-      source: article.source,
-      title: article.headline,
-      text: article.content,
+      url: url,
+      source: source,
+      title: title,
+      text: text,
       force_reanalysis: forceReanalysis
     };
     
@@ -1049,6 +1080,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const selectedCountry = countrySelector ? countrySelector.value : '';
       const selectedSource = sourceSelector ? sourceSelector.value : '';
       
+      console.log('🔍 DISTRIBUTION UPDATE:', {
+        entity: selectedEntity,
+        dimension: selectedDimension,
+        country: selectedCountry,
+        source: selectedSource
+      });
+      
       if (!selectedEntity) {
         window.sentimentHistogram.drawEmptyState('Please select an entity');
         return;
@@ -1078,8 +1116,12 @@ document.addEventListener('DOMContentLoaded', () => {
       // Only add one comparison filter - source takes precedence over country
       if (selectedSource) {
         apiUrl += `&source_id=${selectedSource}`;
+        console.log('📡 API URL (source filter):', apiUrl);
       } else if (selectedCountry) {
         apiUrl += `&country=${encodeURIComponent(selectedCountry)}`;
+        console.log('📡 API URL (country filter):', apiUrl);
+      } else {
+        console.log('📡 API URL (global):', apiUrl);
       }
       
       // Fetch distribution data from API
@@ -1096,7 +1138,14 @@ document.addEventListener('DOMContentLoaded', () => {
           return response.json();
         })
         .then(data => {
-          console.log('Distribution API response:', data);
+          console.log('📊 Distribution API response:', data);
+          console.log('🔍 Comparison data details:', {
+            has_comparison_data: !!data.comparison_data,
+            comparison_data: data.comparison_data,
+            comparison_label: data.comparison_label,
+            sample_size: data.sample_size,
+            values_count: data.values ? data.values.length : 0
+          });
           
           // Check if we have valid data
           if (!data.has_data || !data.values || data.values.length < 5) {
@@ -1110,6 +1159,14 @@ document.addEventListener('DOMContentLoaded', () => {
           // Set the data in the histogram
           // The API now returns comparison_data directly
           const comparisonData = data.comparison_data || null;
+          
+          console.log('🎯 Setting histogram data:', {
+            values_sample: data.values.slice(0, 5),
+            current_value: data.current_value,
+            has_comparison: !!comparisonData,
+            comparison_keys: comparisonData ? Object.keys(comparisonData) : [],
+            dimension: selectedDimension
+          });
           
           // Update dimension for semantic labeling
           window.sentimentHistogram.setDimension(selectedDimension);
@@ -1135,7 +1192,24 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           
           // Update sample size info
-          sampleSizeInfo.textContent = `Sample: ${data.sample_size} entity mentions across ${data.source_count} news sources`;
+          let sampleSizeText = `Sample: ${data.sample_size} entity mentions across ${data.source_count} news sources`;
+          
+          // Add info about comparison data if available
+          if (comparisonData) {
+            const comparisonKey = Object.keys(comparisonData)[0];
+            if (comparisonKey && comparisonData[comparisonKey]) {
+              const comparisonCount = comparisonData[comparisonKey].length;
+              // Extract the base country name (remove "(limited data)" suffix if present)
+              const baseKey = comparisonKey.replace(' (limited data)', '');
+              if (comparisonKey.includes('(limited data)') || comparisonCount < 3) {
+                sampleSizeText += ` | ${baseKey}: ${comparisonCount} mention${comparisonCount === 1 ? '' : 's'} (limited data)`;
+              } else {
+                sampleSizeText += ` | ${baseKey}: ${comparisonCount} mentions`;
+              }
+            }
+          }
+          
+          sampleSizeInfo.textContent = sampleSizeText;
           
           // Update available sources dropdown if we have source data
           if (data.available_sources && data.available_sources.length > 0 && sourceSelector) {
@@ -1191,38 +1265,83 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // Load similarity data
-  function loadSimilarityData() {
+  async function loadSimilarityData() {
     // Show loading state in similarity-results
     const container = document.getElementById('similarity-results');
     const canvasContainer = document.getElementById('similarity-canvas').parentNode;
     
     container.innerHTML = `
-      <div class="no-data-message">
-        <h3>Feature Not Available</h3>
-        <p>The Similar Articles feature requires additional data indexing that has not yet been implemented.</p>
-        <p>Please check back later when this feature is fully developed.</p>
+      <div class="loading">
+        <div class="loader"></div>
+        <p>Loading similarity data...</p>
       </div>
     `;
     
-    // Also show message in the canvas
-    if (window.similarityCluster) {
+    try {
+      // First, get the source info for the current article
+      if (!analysisResult || !analysisResult.source) {
+        throw new Error('No source information available');
+      }
+      
+      // Get source ID from source name
+      const sourceInfo = await window.sourceSimilarity.getSourceByName(analysisResult.source);
+      if (!sourceInfo) {
+        throw new Error(`Source "${analysisResult.source}" not found in database`);
+      }
+      
+      // Load similar sources
+      const similarSources = await window.sourceSimilarity.loadSourceSimilarityData(sourceInfo.id);
+      
+      // Display similar sources
+      container.innerHTML = window.sourceSimilarity.createSimilarSourcesHTML(
+        similarSources, 
+        analysisResult.source
+      );
+      
+      // Also load volatile entities
+      const volatileEntities = await window.sourceSimilarity.loadVolatileEntities(10);
+      
+      // Add volatile entities section
+      container.innerHTML += window.sourceSimilarity.createVolatileEntitiesHTML(volatileEntities);
+      
+      // Load and visualize source clusters
+      const clusterData = await window.sourceSimilarity.loadSourceClusters(sourceInfo.country);
+      window.sourceSimilarity.visualizeSourceClusters(clusterData, 'similarity-canvas');
+      
+      // Enable the form controls
+      const thresholdSelect = document.getElementById('similarity-threshold');
+      const maxResultsSelect = document.getElementById('max-results');
+      
+      if (thresholdSelect) thresholdSelect.disabled = false;
+      if (maxResultsSelect) maxResultsSelect.disabled = false;
+      
+      // Add event listeners for controls
+      if (thresholdSelect && !thresholdSelect.hasListener) {
+        thresholdSelect.addEventListener('change', () => loadSimilarityData());
+        thresholdSelect.hasListener = true;
+      }
+      
+    } catch (error) {
+      console.error('Error loading similarity data:', error);
+      
+      // Show error message
+      container.innerHTML = `
+        <div class="no-data-message">
+          <h3>Unable to Load Similarity Data</h3>
+          <p>${error.message}</p>
+          <p>This feature requires the weekly similarity computation to have run at least once.</p>
+        </div>
+      `;
+      
+      // Clear canvas
       const canvas = document.getElementById('similarity-canvas');
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#666';
       ctx.textAlign = 'center';
-      ctx.font = '14px Arial';
-      ctx.fillText('Similar Articles Feature Not Available', canvas.width/2, canvas.height/2 - 10);
       ctx.font = '12px Arial';
-      ctx.fillText('This feature requires additional data infrastructure', canvas.width/2, canvas.height/2 + 15);
+      ctx.fillText('No cluster data available', canvas.width/2, canvas.height/2);
     }
-    
-    // Disable the form controls
-    const thresholdSelect = document.getElementById('similarity-threshold');
-    const maxResultsSelect = document.getElementById('max-results');
-    
-    if (thresholdSelect) thresholdSelect.disabled = true;
-    if (maxResultsSelect) maxResultsSelect.disabled = true;
   }
   
   // Load entity tracking data
@@ -1269,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load initial data
     updateEntityTracking();
     
-    function updateEntityTracking() {
+    async function updateEntityTracking() {
       const selectedEntity = entitySelector.value;
       const timeRange = parseInt(timeRangeSelect.value);
       const windowSize = 7; // 7-day sliding window
@@ -1296,8 +1415,22 @@ document.addEventListener('DOMContentLoaded', () => {
       insightBox.textContent = 'Loading entity tracking data...';
       dataInfoContainer.textContent = '';
       
+      // Get source ID if available
+      let sourceIdParam = '';
+      if (analysisResult && analysisResult.source) {
+        try {
+          const sourceInfo = await window.sourceSimilarity.getSourceByName(analysisResult.source);
+          if (sourceInfo && sourceInfo.id) {
+            sourceIdParam = `&source_id=${sourceInfo.id}`;
+          }
+        } catch (error) {
+          console.warn('Could not get source ID:', error);
+          // Continue without source ID - will show global data
+        }
+      }
+      
       // Fetch tracking data from API
-      fetch(`${API_ENDPOINT}/stats/entity/tracking?entity_name=${encodeURIComponent(selectedEntity)}&days=${timeRange}&window_size=${windowSize}`)
+      fetch(`${API_ENDPOINT}/stats/entity/tracking?entity_name=${encodeURIComponent(selectedEntity)}&days=${timeRange}&window_size=${windowSize}${sourceIdParam}`)
         .then(response => {
           if (!response.ok) {
             throw new Error(`API request failed: ${response.status}`);
@@ -1324,16 +1457,17 @@ document.addEventListener('DOMContentLoaded', () => {
           );
           
           // Show data info with warning for limited data
+          const sourceSpecific = sourceIdParam ? ` (${analysisResult.source} + global averages)` : '';
           if (limitedData) {
             dataInfoContainer.innerHTML = `
               <div class="data-warning">Limited data available: analysis may not be statistically significant</div>
-              <div>Data from ${data.sample_size} mentions across ${data.source_count} sources over the past ${data.time_period || timeRange + ' days'}</div>
+              <div>Data from ${data.sample_size} mentions across ${data.source_count} source${data.source_count === 1 ? '' : 's'} over the past ${data.time_period || timeRange + ' days'}${sourceSpecific}</div>
             `;
             dataInfoContainer.querySelector('.data-warning').style.color = '#e67e22';
             dataInfoContainer.querySelector('.data-warning').style.fontWeight = 'bold';
             dataInfoContainer.querySelector('.data-warning').style.marginBottom = '5px';
           } else {
-            dataInfoContainer.textContent = `Data from ${data.sample_size} mentions across ${data.source_count} sources over the past ${data.time_period || timeRange + ' days'}`;
+            dataInfoContainer.textContent = `Data from ${data.sample_size} mentions across ${data.source_count} source${data.source_count === 1 ? '' : 's'} over the past ${data.time_period || timeRange + ' days'}${sourceSpecific}`;
           }
           
           // Generate insight text based on the first and last data points

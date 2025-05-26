@@ -126,7 +126,7 @@ class SentimentHistogram {
     
     if (this.comparisonData) {
       const comparisonKey = Object.keys(this.comparisonData)[0];
-      if (comparisonKey && this.comparisonData[comparisonKey] && this.comparisonData[comparisonKey].length >= 3) {
+      if (comparisonKey && this.comparisonData[comparisonKey] && this.comparisonData[comparisonKey].length > 0) {
         const comparisonDataForBin = this.comparisonData[comparisonKey];
         comparisonBinData = this.createBins(comparisonDataForBin, bins, true); // normalize comparison
         comparisonLabel = comparisonKey;
@@ -137,6 +137,7 @@ class SentimentHistogram {
     // Create bins for global data (normalize if we have comparison data)
     const binData = this.createBins(this.data, bins, hasComparison);
     const { counts, boundaries, max } = binData;
+    
     
     // Find which bin contains the current value
     const currentBin = this.findBinForValue(this.currentValue, boundaries);
@@ -150,11 +151,12 @@ class SentimentHistogram {
     // Determine maximum value for scaling
     let maxValue;
     if (hasComparison) {
-      // When normalized, max value should be 1.0
+      // When normalized, max value should be 1.0 for consistent scaling
       maxValue = 1.0;
     } else {
       maxValue = max;
     }
+    
     
     // Draw axes
     this.ctx.beginPath();

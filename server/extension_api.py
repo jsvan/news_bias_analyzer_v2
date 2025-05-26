@@ -10,6 +10,7 @@ import os
 import sys
 import logging
 import time
+import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
@@ -111,24 +112,80 @@ def health_check():
 @app.get("/entities", response_model=List[Dict[str, Any]])
 def get_entities(
     entity_type: Optional[str] = None,
+    search: Optional[str] = Query(None, description="Search entities by name"),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
-    """Get list of entities, optionally filtered by type."""
-    query = db.query(Entity)
+    """Get list of entities, optionally filtered by type and search term, ordered by mention count."""
+    # Join with EntityMention to get mention counts and order by them
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).group_by(
+        Entity.id, Entity.name, Entity.entity_type
+    )
     
     if entity_type:
         query = query.filter(Entity.entity_type == entity_type)
     
-    entities = query.limit(limit).all()
+    if search:
+        # Case-insensitive search
+        query = query.filter(func.lower(Entity.name).like(f"%{search.lower()}%"))
+    
+    # Order by mention count descending, then by name
+    entities = query.order_by(
+        func.count(EntityMention.id).desc(),
+        Entity.name
+    ).limit(limit).all()
     
     return [
         {
             "id": entity.id,
             "name": entity.name,
-            "type": entity.entity_type
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
         }
         for entity in entities
+    ]
+
+@app.get("/entities/search", response_model=List[Dict[str, Any]])
+def search_entities(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """Search entities for autocomplete functionality."""
+    # Search by name with mention count ordering
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).filter(
+        func.lower(Entity.name).like(f"%{q.lower()}%")
+    ).group_by(
+        Entity.id, Entity.name, Entity.entity_type
+    ).order_by(
+        func.count(EntityMention.id).desc(),
+        Entity.name
+    ).limit(limit)
+    
+    results = query.all()
+    
+    return [
+        {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
+        }
+        for entity in results
     ]
 
 # Entity sentiment endpoint
@@ -349,70 +406,76 @@ async def extract_content(request: ExtractionRequest):
             else:
                 source_name = hostname.capitalize()
         
-        # For a real implementation, we would use a proper extraction library here
-        # such as trafilatura, newspaper3k, etc., but for demo purposes, we're creating
-        # a simple placeholder response
-        
-        # Try to fetch the page
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        # Extract title from HTML - very basic extraction
-        html = response.text
-        title = None
-        if '<title>' in html and '</title>' in html:
-            title_start = html.find('<title>') + 7
-            title_end = html.find('</title>', title_start)
-            title = html[title_start:title_end].strip()
+        # Use trafilatura for proper content extraction
+        try:
+            import trafilatura
             
-        # Extract text - this is a very basic implementation
-        # In a real system, use a proper HTML parser or extraction library
-        text = html
-        
-        # Remove script tags and their content
-        while '<script' in text and '</script>' in text:
-            script_start = text.find('<script')
-            script_end = text.find('</script>', script_start) + 9
-            text = text[:script_start] + text[script_end:]
+            logger.info("Using trafilatura for content extraction")
             
-        # Remove style tags and their content
-        while '<style' in text and '</style>' in text:
-            style_start = text.find('<style')
-            style_end = text.find('</style>', style_start) + 8
-            text = text[:style_start] + text[style_end:]
+            # Download the HTML
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                raise Exception("Failed to download content")
             
-        # Strip HTML tags - very basic, won't handle all cases
-        # In a real implementation, use BeautifulSoup or another HTML parser
-        text = text.replace('<', ' <').replace('>', '> ')
-        import re
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Normalize whitespace
-        text = ' '.join(text.split())
-        
+            # Extract article content
+            extracted = trafilatura.extract(downloaded, include_formatting=False, include_comments=False,
+                                          output_format='txt', favor_precision=True)
+            
+            if not extracted:
+                raise Exception("Failed to extract article content")
+            
+            text = extracted
+            
+            # Also extract metadata
+            metadata = trafilatura.extract_metadata(downloaded)
+            title = metadata.title if metadata else None
+            publish_date = metadata.date if metadata else None
+            
+            logger.info(f"Trafilatura extraction successful: {len(text)} characters")
+            
+        except (ImportError, Exception) as e:
+            logger.warning(f"Trafilatura extraction failed ({type(e).__name__}: {str(e)}), falling back to BeautifulSoup")
+            # Fall back to basic extraction
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # Use BeautifulSoup for better extraction
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Remove script and style elements
+            for script in soup(["script", "style", "nav", "aside", "footer", "header"]):
+                script.decompose()
+            
+            # Try to find article content
+            article = soup.find('article') or soup.find('main') or soup.find('div', class_='content')
+            if article:
+                text = article.get_text()
+            else:
+                text = soup.get_text()
+            
+            # Clean up text
+            lines = (line.strip() for line in text.splitlines())
+            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+            text = ' '.join(chunk for chunk in chunks if chunk)
+            
+            # Extract title
+            title_tag = soup.find('title')
+            title = title_tag.string if title_tag else None
+            
+            # Extract publish date
+            publish_date = None
+            time_tag = soup.find('time', {'datetime': True})
+            if time_tag:
+                publish_date = time_tag.get('datetime')
+            
         # Limit text length for response
         if len(text) > 15000:
             text = text[:15000] + '...'
-            
-        # Extract publish date - also very basic
-        publish_date = None
-        date_patterns = [
-            r'datetime="([^"]+)"',
-            r'pubdate="([^"]+)"',
-            r'publishdate="([^"]+)"',
-            r'date"? content="([^"]+)"',
-            r'article:published_time" content="([^"]+)"'
-        ]
-        
-        for pattern in date_patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                publish_date = match.group(1)
-                break
                 
         logger.info(f"Content extracted successfully from {url}")
         
@@ -545,6 +608,13 @@ async def get_analysis_by_url(
 # Article analysis endpoint
 @app.post("/analyze")
 async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends(get_db)):
+    """
+    Analyze article content for bias and sentiment using OpenAI.
+    
+    This endpoint calls the OpenAI API to perform entity extraction and sentiment analysis.
+    It extracts named entities from the article content and analyzes how they are portrayed
+    in terms of power and moral dimensions. Analysis results are saved to the database.
+    """
     # Validate required fields
     if not request.url or not request.title or not request.text or not request.source:
         logger.error("Missing required fields in analyze request")
@@ -557,13 +627,6 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
         error_message = f"Missing required fields: {', '.join(missing_fields)}"
         logger.error(error_message)
         raise HTTPException(status_code=422, detail=error_message)
-    """
-    Analyze article content for bias and sentiment using OpenAI.
-    
-    This endpoint calls the OpenAI API to perform entity extraction and sentiment analysis.
-    It extracts named entities from the article content and analyzes how they are portrayed
-    in terms of power and moral dimensions. Analysis results are saved to the database.
-    """
     logger.info(f"Analyzing article: {request.title} ({request.url})")
     logger.info(f"Force reanalysis: {request.force_reanalysis}")
     print(f"\n==== ANALYZING ARTICLE: {request.title} ====")
@@ -857,6 +920,85 @@ async def get_trending_entities(
     except Exception as e:
         logger.error(f"Error fetching trending entities: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch trending entities: {str(e)}")
+
+# Historical sentiment endpoint for dashboard
+@app.get("/stats/historical_sentiment", response_model=Dict[str, Any])
+async def get_historical_sentiment(
+    entity_id: int,
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db)
+):
+    """Get historical sentiment data for a specific entity."""
+    try:
+        # Check if entity exists
+        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        # Get daily sentiment averages
+        daily_sentiment = db.query(
+            func.date(EntityMention.created_at).label("date"),
+            func.avg(EntityMention.power_score).label("avg_power"),
+            func.avg(EntityMention.moral_score).label("avg_moral"),
+            func.count(EntityMention.id).label("mention_count")
+        ).filter(
+            EntityMention.entity_id == entity_id,
+            EntityMention.created_at >= start_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        ).group_by(
+            func.date(EntityMention.created_at)
+        ).order_by(
+            func.date(EntityMention.created_at)
+        ).all()
+        
+        # Get overall stats for the period
+        overall_stats = db.query(
+            func.avg(EntityMention.power_score).label("avg_power"),
+            func.avg(EntityMention.moral_score).label("avg_moral"),
+            func.count(EntityMention.id).label("total_mentions")
+        ).filter(
+            EntityMention.entity_id == entity_id,
+            EntityMention.created_at >= start_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        ).first()
+        
+        return {
+            "entity": {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.entity_type
+            },
+            "date_range": {
+                "start": start_date.date().isoformat(),
+                "end": end_date.date().isoformat(),
+                "days": days
+            },
+            "daily_data": [
+                {
+                    "date": result.date.isoformat(),
+                    "power_score": float(result.avg_power) if result.avg_power else 0,
+                    "moral_score": float(result.avg_moral) if result.avg_moral else 0,
+                    "mention_count": result.mention_count
+                }
+                for result in daily_sentiment
+            ],
+            "summary": {
+                "avg_power_score": float(overall_stats.avg_power) if overall_stats.avg_power else 0,
+                "avg_moral_score": float(overall_stats.avg_moral) if overall_stats.avg_moral else 0,
+                "total_mentions": overall_stats.total_mentions or 0
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching historical sentiment: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch historical sentiment: {str(e)}")
 
 # Include routers if available
 if has_article_router:

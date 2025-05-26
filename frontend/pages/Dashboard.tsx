@@ -15,7 +15,6 @@ import {
   InputLabel,
   MenuItem,
   Select,
-  Chip,
   Paper,
   Alert,
   Autocomplete,
@@ -57,7 +56,8 @@ const Dashboard: React.FC = () => {
   const [selectedEntity, setSelectedEntity] = useState<string>('');
   const [selectedSources, setSelectedSources] = useState<number[]>([]);
   const [selectedTimeRange, setSelectedTimeRange] = useState<number>(30); // days
-  const [selectedEntityTypes, setSelectedEntityTypes] = useState<string[]>(['person', 'country', 'organization']);
+  const [selectedTrendEntities, setSelectedTrendEntities] = useState<string[]>([]);
+  const [multiEntityTrends, setMultiEntityTrends] = useState<Record<string, any[]>>({});
   
   // UI state
   const [currentTab, setCurrentTab] = useState(0);
@@ -65,14 +65,6 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [refreshingData, setRefreshingData] = useState<boolean>(false);
 
-  // Entity type grouping (for easier filtering)
-  const entityTypes = {
-    'person': 'Individuals',
-    'country': 'Countries',
-    'organization': 'Organizations',
-    'political_party': 'Political Parties',
-    'company': 'Companies'
-  };
 
   // We'll fetch all data directly from the API
 
@@ -105,8 +97,8 @@ const Dashboard: React.FC = () => {
         setSelectedSources(sourcesData.slice(0, Math.min(3, sourcesData.length)).map(s => s.id));
       }
       
-      // Fetch entities
-      const entitiesResponse = await api.get('/entities');
+      // Fetch entities (sorted by mention count)
+      const entitiesResponse = await api.get('/entities?limit=200');
       const entitiesData = entitiesResponse.data || [];
       setEntities(entitiesData);
       
@@ -148,8 +140,8 @@ const Dashboard: React.FC = () => {
           { days: selectedTimeRange }
         );
         
-        if (trendsResponse) {
-          setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+        if (trendsResponse && trendsResponse.daily_data) {
+          setTrends(trendsResponse.daily_data);
         } else {
           setTrends([]);
         }
@@ -207,8 +199,8 @@ const Dashboard: React.FC = () => {
               { days: selectedTimeRange }
             );
             
-            if (trendsResponse) {
-              setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+            if (trendsResponse && trendsResponse.daily_data) {
+              setTrends(trendsResponse.daily_data);
             }
           }
         } catch (err) {
@@ -236,8 +228,8 @@ const Dashboard: React.FC = () => {
             { days: newRange }
           );
           
-          if (trendsResponse) {
-            setTrends(Array.isArray(trendsResponse.trends) ? trendsResponse.trends : []);
+          if (trendsResponse && trendsResponse.daily_data) {
+            setTrends(trendsResponse.daily_data);
           } else {
             setTrends([]);
           }
@@ -249,9 +241,6 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleEntityTypeChange = (event: React.ChangeEvent<{ value: unknown }>) => {
-    setSelectedEntityTypes(event.target.value as string[]);
-  };
 
   if (loading) {
     return (
@@ -281,23 +270,8 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  // Filter entities by selected types
-  const filteredEntities = entities.filter(entity => 
-    selectedEntityTypes.includes(entity.type)
-  );
+  // Entities are already sorted by mention count from the API
 
-  const getEntityTypeGrouping = () => {
-    const groupedEntities: Record<string, string[]> = {};
-    
-    entities.forEach(entity => {
-      if (!groupedEntities[entity.type]) {
-        groupedEntities[entity.type] = [];
-      }
-      groupedEntities[entity.type].push(entity.name);
-    });
-    
-    return groupedEntities;
-  };
 
   return (
     <Container maxWidth="xl">
@@ -350,33 +324,7 @@ const Dashboard: React.FC = () => {
         {/* Filters section */}
         <Paper sx={{ p: 2, mb: 4 }}>
           <Grid container spacing={3} alignItems="center">
-            <Grid item xs={12} sm={6} md={3}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="entity-type-label">Entity Types</InputLabel>
-                <Select
-                  labelId="entity-type-label"
-                  id="entity-type-select"
-                  multiple
-                  value={selectedEntityTypes}
-                  onChange={handleEntityTypeChange}
-                  renderValue={(selected) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {(selected as string[]).map((value) => (
-                        <Chip key={value} label={entityTypes[value as keyof typeof entityTypes] || value} size="small" />
-                      ))}
-                    </Box>
-                  )}
-                >
-                  {Object.entries(entityTypes).map(([type, label]) => (
-                    <MenuItem key={type} value={type}>
-                      {label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={4}>
               <FormControl fullWidth size="small">
                 <InputLabel id="time-range-label">Time Range</InputLabel>
                 <Select
@@ -394,17 +342,18 @@ const Dashboard: React.FC = () => {
               </FormControl>
             </Grid>
             
-            <Grid item xs={12} sm={12} md={6}>
+            <Grid item xs={12} sm={6} md={8}>
               <Autocomplete
                 id="entity-autocomplete"
-                options={filteredEntities.map(e => e.name)}
-                value={selectedEntity}
+                options={entities.map(e => ({ label: `${e.name} (${e.mention_count || 0} mentions)`, value: e.name }))}
+                value={entities.find(e => e.name === selectedEntity) ? { label: `${selectedEntity} (${entities.find(e => e.name === selectedEntity)?.mention_count || 0} mentions)`, value: selectedEntity } : null}
                 onChange={(event, newValue) => {
-                  if (newValue) setSelectedEntity(newValue);
+                  if (newValue) setSelectedEntity(newValue.value);
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Select Entity" size="small" fullWidth />
+                  <TextField {...params} label="Select Entity (sorted by mention count)" size="small" fullWidth />
                 )}
+                isOptionEqualToValue={(option, value) => option.value === value?.value}
               />
             </Grid>
           </Grid>
@@ -429,7 +378,7 @@ const Dashboard: React.FC = () => {
                 <CardContent>
                   <SentimentChart 
                     data={highlightedEntities}
-                    entityTypes={getEntityTypeGrouping()}
+                    entityTypes={{}}
                     height={500}
                     showLabels={true}
                   />
@@ -511,7 +460,7 @@ const Dashboard: React.FC = () => {
                     <Box sx={{ height: 400 }}>
                       <EntityTrendChart 
                         entityName={selectedEntity}
-                        data={trends.find(t => t.name === selectedEntity)?.data || []}
+                        data={trends || []}
                         height={400}
                       />
                     </Box>
@@ -563,15 +512,39 @@ const Dashboard: React.FC = () => {
                 <Card>
                   <CardHeader 
                     title="Temporal Trend Analysis" 
-                    subheader={`Sentiment trends over the last ${selectedTimeRange} days`}
+                    subheader={`Sentiment trends for ${selectedEntity || 'selected entity'} over the last ${selectedTimeRange} days`}
                   />
                   <CardContent>
-                    <Box sx={{ height: 500 }}>
-                      {/* Would be implemented with a more sophisticated chart library */}
-                      <Typography color="text.secondary" sx={{ mb: 2 }}>
-                        This visualization would show sentiment trends for multiple entities over time.
-                      </Typography>
-                    </Box>
+                    {selectedEntity && trends.length > 0 ? (
+                      <Box sx={{ height: 500 }}>
+                        <EntityTrendChart 
+                          entityName={selectedEntity}
+                          data={trends}
+                          height={500}
+                        />
+                      </Box>
+                    ) : (
+                      <Box sx={{ 
+                        height: 500, 
+                        display: 'flex', 
+                        flexDirection: 'column',
+                        justifyContent: 'center', 
+                        alignItems: 'center',
+                        bgcolor: 'background.paper',
+                        borderRadius: 1,
+                        border: '1px dashed',
+                        borderColor: 'divider'
+                      }}>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                          {!selectedEntity ? 'Select an entity to view trends' : 'No trend data available'}
+                        </Typography>
+                        {selectedEntity && (
+                          <Typography color="text.secondary">
+                            No sentiment data found for {selectedEntity} in the last {selectedTimeRange} days
+                          </Typography>
+                        )}
+                      </Box>
+                    )}
                   </CardContent>
                 </Card>
               </Grid>

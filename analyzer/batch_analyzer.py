@@ -35,6 +35,7 @@ from sqlalchemy.exc import SQLAlchemyError
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
+from database.entity_pruning import prune_low_activity_entities, get_pruning_stats
 
 # Setup directories
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,7 +60,7 @@ logger = logging.getLogger("batch_analyzer")
 
 # Global variables
 BATCHES_FILE = os.path.join(ROOT_DIR, "analyzer", "batches.txt")
-MAX_ACTIVE_BATCHES = 5
+MAX_ACTIVE_BATCHES = 4  # Reduced from 5 to avoid overwhelming OpenAI
 BATCH_SIZE = 50  # Reduced from 100 to 50 for better manageability
 POLL_INTERVAL_SECONDS = 300  # 5 minutes
 LOCK_FILE = os.path.join(ROOT_DIR, "analyzer", "analyzer.lock")
@@ -595,6 +596,10 @@ def create_new_batch(session: Session):
         logger.info(f"Maximum active batches ({MAX_ACTIVE_BATCHES}) reached. Cannot create new batch.")
         return
     
+    # Add delay between batch submissions to avoid overwhelming OpenAI
+    logger.info("Adding 10-second delay before submitting new batch...")
+    time.sleep(10)
+    
     # Initialize OpenAI client
     try:
         api_key = os.environ.get("OPENAI_API_KEY")
@@ -795,6 +800,64 @@ def check_active_batches(session: Session):
         for _ in range(slots_available):
             create_new_batch(session)
 
+def reset_in_progress_articles(session: Session):
+    """Reset all in_progress articles back to unanalyzed on startup."""
+    try:
+        # Find all articles with in_progress status
+        in_progress_articles = session.query(NewsArticle).filter(
+            NewsArticle.analysis_status == "in_progress"
+        ).all()
+        
+        count = len(in_progress_articles)
+        if count > 0:
+            logger.info(f"Found {count} articles stuck in 'in_progress' status")
+            
+            # Reset them to unanalyzed
+            for article in in_progress_articles:
+                article.analysis_status = "unanalyzed"
+                article.batch_id = None
+            
+            session.commit()
+            logger.info(f"Reset {count} in_progress articles back to unanalyzed")
+        else:
+            logger.info("No in_progress articles found")
+            
+    except Exception as e:
+        logger.error(f"Error resetting in_progress articles: {e}")
+        session.rollback()
+
+def clear_batches_directory():
+    """Clear all files from the batches directory on startup."""
+    try:
+        if not os.path.exists(BATCH_DIR):
+            os.makedirs(BATCH_DIR)
+            logger.info("Created batches directory")
+            return
+            
+        # Count files before deletion
+        files = os.listdir(BATCH_DIR)
+        file_count = len(files)
+        
+        if file_count > 0:
+            logger.info(f"Clearing {file_count} files from batches directory...")
+            
+            # Delete all files in the directory
+            for filename in files:
+                file_path = os.path.join(BATCH_DIR, filename)
+                try:
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                        logger.debug(f"Deleted: {filename}")
+                except Exception as e:
+                    logger.error(f"Error deleting {filename}: {e}")
+            
+            logger.info("Batches directory cleared")
+        else:
+            logger.info("Batches directory is already empty")
+            
+    except Exception as e:
+        logger.error(f"Error clearing batches directory: {e}")
+
 def cleanup_old_batch_files():
     """
     Cleanup old batch files that might have been left behind.
@@ -868,14 +931,37 @@ def run_analyzer(daemon_mode=False):
         # Setup database
         session = setup_database()
         
-        # Clean up old batch files on startup
-        cleanup_old_batch_files()
+        # Startup cleanup
+        logger.info("=== Starting batch analyzer cleanup ===")
+        
+        # Reset any stuck in_progress articles
+        reset_in_progress_articles(session)
+        
+        # Clear the batches directory
+        clear_batches_directory()
+        
+        # Clear the tracking file
+        logger.info("Clearing batch tracking file...")
+        write_batches_file([])
+        logger.info("Batch tracking file cleared")
+        
+        logger.info("=== Cleanup complete, starting fresh ===")
         
         if daemon_mode:
             logger.info("Starting analyzer in daemon mode. Press Ctrl+C to exit.")
             
             def signal_handler(sig, frame):
                 logger.info("Received signal to exit. Cleaning up...")
+                
+                # Run entity pruning before exit
+                try:
+                    logger.info("Running entity pruning...")
+                    get_pruning_stats(session)
+                    pruned_count = prune_low_activity_entities(session, dry_run=False)
+                    logger.info(f"Pruned {pruned_count} low-activity entities")
+                except Exception as e:
+                    logger.error(f"Error during entity pruning: {e}")
+                
                 release_lock(lock_file)
                 sys.exit(0)
             

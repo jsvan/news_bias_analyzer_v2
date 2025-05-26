@@ -1,0 +1,183 @@
+# News Bias Analyzer - Implementation TODOs
+
+## High Priority
+
+### 1. Implement Pearson correlation similarity for news sources
+- [ ] Create function: pearson_similarity_on_common_entities(source1_id, source2_id, start_date, end_date)
+- [ ] Query: Get all entity mentions for both sources in time window
+- [ ] Filter: Only include entities mentioned by BOTH sources (intersection)
+- [ ] For each common entity: calculate average sentiment per source
+- [ ] Create vectors: source1_sentiments[], source2_sentiments[] (aligned by entity)
+- [ ] Apply scipy.stats.pearsonr() to get correlation coefficient
+- [ ] Handle edge cases: <5 common entities returns None
+- [ ] Return: {score, p_value, common_entity_count, entity_list}
+
+### 2. Create temporal sentiment similarity function
+- [ ] Function: temporal_correlation(source1_id, source2_id, entity_id, granularity='daily')
+- [ ] Query: Get daily sentiment averages for entity from both sources
+- [ ] Calculate daily changes: diff(sentiments[t], sentiments[t-1])
+- [ ] Align time series (handle missing days with forward-fill)
+- [ ] Compute: pearsonr(changes_source1, changes_source2)
+- [ ] Also compute: Dynamic Time Warping distance for async reactions
+- [ ] Return: {correlation, lag_days, dtw_distance}
+
+### 3. Run database migration to add source similarity tables
+- [ ] Command: ./run.sh sql 'alembic upgrade head'
+- [ ] Verify tables created: source_similarity_matrix, source_temporal_drift, entity_volatility
+- [ ] Add new table for hierarchical clustering:
+  ```sql
+  CREATE TABLE source_clusters (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES news_sources(id),
+    cluster_id VARCHAR(50),  -- e.g., "US_mainstream_1"
+    cluster_level INTEGER,   -- 1=major, 2=clustered, 3=minor
+    similarity_to_centroid FLOAT,
+    assigned_date DATE,
+    is_centroid BOOLEAN DEFAULT FALSE,
+    metadata JSONB  -- stores silhouette score, member count, etc.
+  );
+  ```
+- [ ] Add indexes:
+  - [ ] idx_source_clusters_lookup ON (source_id, assigned_date)
+  - [ ] idx_source_clusters_cluster ON (cluster_id, assigned_date)
+- [ ] Test foreign key constraints work properly
+
+### 4. Create source similarity computation module at /analyzer/source_similarity.py
+- [ ] Class: SourceSimilarityComputer with methods:
+  - [ ] compute_weekly_similarities(): Main orchestrator
+  - [ ] _get_week_boundaries(): ISO week calculation
+  - [ ] _compute_hierarchical_similarities(): New hierarchical approach
+  - [ ] _compute_source_clusters(): Monthly clustering within countries
+  - [ ] _compute_cluster_centroids(): Average sentiment vectors per cluster
+  - [ ] _compute_tier1_similarities(): Full pairwise for major sources
+  - [ ] _compute_cluster_similarities(): Between cluster centroids
+  - [ ] _store_similarity_matrix(): Bulk insert to DB
+  - [ ] _store_cluster_assignments(): Track which sources belong to which clusters
+  - [ ] _compute_drift_metrics(): Week-over-week changes
+- [ ] Implement hierarchical comparison strategy:
+  - [ ] Tier 1: Top 5 sources per country by readership (full pairwise)
+  - [ ] Tier 2: Remaining sources clustered with threshold > 0.7 similarity
+  - [ ] Tier 3: Small sources (<100 articles/week) only within-cluster
+  - [ ] Cluster-to-cluster comparisons for cross-country analysis
+- [ ] Source selection logic:
+  - [ ] If single country: max 20 sources (5 major + 15 diverse cluster representatives)
+  - [ ] If 2 countries: max 15 per country
+  - [ ] If global view: ~100 cluster centroids only
+- [ ] Use multiprocessing.Pool for parallel computation
+- [ ] Batch size: 100 source pairs at a time
+- [ ] Memory limit: Process in chunks if >1000 sources
+
+### 5. Create weekly similarity computation cron job
+- [ ] Script: /analyzer/compute_weekly_similarities.py
+- [ ] Schedule: Every Sunday 2 AM UTC
+- [ ] Pipeline:
+  1. Get previous Sunday-Saturday window
+  2. Compute all pairwise source similarities
+  3. Calculate drift from previous week
+  4. Identify high-volatility entities
+  5. Store results in DB tables
+  6. Warm Redis cache for top 100 sources
+  7. Send completion metrics to logs
+- [ ] Add to docker-compose with restart policy
+
+## Medium Priority
+
+### 6. Update extension API endpoints at /extension/api/similarity_endpoints.py
+- [ ] GET /api/source/{source_id}/similarity
+  - [ ] Query: Latest similarities from source_similarity_matrix
+  - [ ] Return: [{target_source, score, common_entities, last_updated}]
+- [ ] GET /api/source/{source_id}/drift?weeks=4
+  - [ ] Query: source_temporal_drift for trend data
+  - [ ] Return: {entity_trends: [{entity, weekly_sentiments, total_change}]}
+- [ ] GET /api/article/{article_id}/source_comparison
+  - [ ] Get article's source, find similar sources
+  - [ ] Return alternative perspectives on same entities
+
+### 7. Add Redis caching layer for similarity computations
+- [ ] Cache key pattern: 'similarity:{source1}:{source2}:{week}'
+- [ ] TTL: 1 hour for current week, 1 week for past weeks
+- [ ] Implement cache-aside pattern in API endpoints
+- [ ] Add cache warming job after weekly computation
+- [ ] Monitor cache hit rates in logs
+
+### 8. Implement entity volatility detection algorithm
+- [ ] Function: compute_entity_volatility(entity_id, time_window)
+- [ ] For each entity in time window:
+  - [ ] Get all mentions with sentiment scores
+  - [ ] Group by source and day
+  - [ ] Calculate: cross_source_variance (how much sources disagree)
+  - [ ] Calculate: temporal_variance (how much sentiment changes)
+  - [ ] Calculate: mention_volume_variance
+  - [ ] Volatility score = weighted_sum([cross_source_var * 0.5, temporal_var * 0.3, volume_var * 0.2])
+- [ ] Store top 1000 volatile entities per week
+- [ ] Flag entities with volatility > 2 std devs above mean
+
+### 9. Build source drift detection system
+- [ ] Function: detect_editorial_shifts(source_id, sensitivity=2.0)
+- [ ] Algorithm:
+  1. Get 12 weeks of source_temporal_drift data
+  2. For each major entity (>50 mentions):
+     - Fit linear regression to sentiment over time
+     - Calculate residuals from trend
+     - Detect breakpoints using Pettitt test
+     - Flag if change > sensitivity * historical_std_dev
+  3. Identify coordinated shifts (multiple sources move together)
+  4. Generate alerts for major editorial pivots
+- [ ] Store detected shifts with timestamp and magnitude
+
+### 10. Create analysis_results folder structure for persistent storage
+- [ ] Create directories:
+  - [ ] /analysis_results/weekly_snapshots/
+  - [ ] /analysis_results/drift_tracking/
+  - [ ] /analysis_results/comparisons/
+- [ ] Implement backup rotation (keep 12 weeks)
+
+## Low Priority
+
+### 11. Create source clustering visualization pipeline
+- [ ] Implement monthly clustering job:
+  - [ ] For each country: compute within-country source similarities
+  - [ ] Apply hierarchical clustering (scipy.cluster.hierarchy.linkage with 'average' method)
+  - [ ] Cut dendrogram at height for 0.7 similarity threshold
+  - [ ] Validate clusters have at least 2 members (singletons join nearest cluster)
+  - [ ] Store cluster assignments in new table: source_clusters
+- [ ] Create cluster quality metrics:
+  - [ ] Intra-cluster similarity (should be > 0.7)
+  - [ ] Inter-cluster similarity (should be < 0.5)
+  - [ ] Silhouette score for each source
+- [ ] Generate visualization data:
+  - [ ] Dendrogram data for D3.js tree visualization
+  - [ ] UMAP 2D embedding of cluster centroids
+  - [ ] Force-directed graph layout with clusters as supernodes
+- [ ] API endpoints:
+  - [ ] /api/sources/clusters?week=2025-W21&country=US
+  - [ ] /api/sources/cluster/{cluster_id}/members
+  - [ ] /api/sources/cluster-map?level=country|global
+- [ ] Update cluster assignments monthly (more stable than weekly)
+
+### 12. Optimize similarity computation performance
+- [ ] Profile current implementation with cProfile
+- [ ] Implement sparse matrix operations using scipy.sparse
+- [ ] Use numba JIT compilation for inner loops
+- [ ] With hierarchical approach, new performance targets:
+  - [ ] Tier 1 (major sources): <10 seconds for 50 sources globally
+  - [ ] Within-country clustering: <30 seconds per country
+  - [ ] Cluster centroid comparisons: <1 minute for 100 clusters
+  - [ ] Total weekly run: <10 minutes for all countries
+- [ ] Optimization techniques:
+  - [ ] Pre-compute entity vectors in batches
+  - [ ] Use matrix multiplication instead of loops where possible
+  - [ ] Cache partial results (entity averages per source)
+  - [ ] Skip sources with <10 articles in time window
+- [ ] Add progress logging:
+  - [ ] Log every country completed
+  - [ ] Log every 10 cluster comparisons
+  - [ ] ETA estimation based on completed work
+- [ ] Implement incremental updates:
+  - [ ] Only recompute similarities for sources with new articles
+  - [ ] Keep running average for cluster centroids
+  - [ ] Mark clusters as "dirty" when members change significantly
+
+## Completed
+- [x] Design database schema for storing weekly similarity snapshots (2025-05-24)
+- [x] Implement entity pruning with dynamic thresholds (2025-05-24)

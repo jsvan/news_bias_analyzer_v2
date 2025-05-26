@@ -145,6 +145,14 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "name": "Sputnik News",
+            "country": "Russia",
+            "language": "en",
+            "rss_feeds": [
+                "https://sputniknews.com/export/rss2/world/index.xml",  # Russian state media
+            ]
+        },
+        {
             "name": "Euronews",
             "country": "EU",
             "language": "en",
@@ -281,6 +289,38 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://www.globaltimes.cn/rss/world.xml",  # Invalid: HTTP error: 404
+            ]
+        },
+        {
+            "name": "Xinhua News",
+            "country": "China",
+            "language": "en",
+            "rss_feeds": [
+                "http://www.xinhuanet.com/english/rss/worldrss.xml",  # Official state news agency
+            ]
+        },
+        {
+            "name": "People's Daily",
+            "country": "China",
+            "language": "en",
+            "rss_feeds": [
+                "http://en.people.cn/rss/World.xml",  # CCP official newspaper
+            ]
+        },
+        {
+            "name": "CGTN",
+            "country": "China",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.cgtn.com/subscribe/rss/section/world.xml",  # China Global Television Network
+            ]
+        },
+        {
+            "name": "China News Service",
+            "country": "China", 
+            "language": "en",
+            "rss_feeds": [
+                "http://www.ecns.cn/rss/news.xml",  # China News Service English
             ]
         },
         {

@@ -79,6 +79,8 @@ show_help() {
   echo "                         Types: sources - Show detailed source statistics"
   echo "  restore_openai [ARGS]  Restore OpenAI batch data to database with source detection"
   echo "                         Run without args for more information"
+  echo "  progress_batches       Process completed batch files from batches/ directory"
+  echo "                         Use --dry-run to see what would be processed"
   echo "  sql \"QUERY\"           Run a SQL query on the database"
   echo "  custom <FILE>          Run a custom Python script file"
   echo "  help                   Show this help message"
@@ -99,7 +101,7 @@ run_analyzer() {
   cd "$PROJECT_ROOT"
   LIMIT=${1:-10}  # Default to 10 articles if not specified
   echo -e "${GREEN}Running Article Analyzer (limit: $LIMIT articles)...${NC}"
-  python -m processors.direct_analysis --limit $LIMIT
+  python -m analyzer.batch_analyzer --limit $LIMIT
 }
 
 # Run the batch analyzer
@@ -258,6 +260,17 @@ start_servers() {
   python -m server.server_manager --type "$SERVER_TYPE"
 }
 
+# Process local batch files with custom naming patterns
+process_local_batches() {
+  setup_python_env
+  cd "$PROJECT_ROOT"
+  echo -e "${GREEN}Processing completed batch files from batches/ directory...${NC}"
+  echo -e "${BLUE}This continues the work of the batch analyzer daemon${NC}"
+  
+  # Pass any arguments to the script
+  python -m analyzer.process_local_batches "$@"
+}
+
 # Restore OpenAI data to database for incomplete articles (recovery script)
 restore_openai_data() {
   setup_python_env
@@ -268,8 +281,8 @@ restore_openai_data() {
   if [ -n "$1" ]; then
     python -m analyzer.tools.recover_openai_batches "$@"
   else
-    # Default to using May 18th, 2025 specifically
-    echo -e "${BLUE}Using default settings with hardcoded date (May 18, 2025).${NC}"
+    # Default to processing all batches after May 18th, 2025
+    echo -e "${BLUE}Using default settings: processing all batches after May 18, 2025.${NC}"
     echo "  --batch-dir DIR            Directory with batch files (default: temporary directory)"
     echo "  --skip-download            Skip downloading batches, just process existing files in batch-dir"
     echo "  --dry-run                  Don't modify database, just show what would happen"
@@ -284,7 +297,7 @@ restore_openai_data() {
     echo -e "${YELLOW}It will NEVER create new articles or use placeholder URLs.${NC}"
     echo -e "${YELLOW}Articles not found in the database will be skipped.${NC}"
     echo ""
-    python -m analyzer.tools.recover_openai_batches --date 2025-05-18
+    python -m analyzer.tools.recover_openai_batches --after-date 2025-05-18
   fi
 }
 
@@ -400,6 +413,10 @@ case "$1" in
   restore_openai)
     shift  # Remove the 'restore_openai' command, leaving any arguments
     restore_openai_data "$@"
+    ;;
+  progress_batches)
+    shift  # Remove the 'progress_batches' command, leaving any arguments
+    process_local_batches "$@"
     ;;
   sql)
     shift  # Remove the 'sql' command, leaving the query

@@ -88,24 +88,80 @@ def health_check():
 @app.get("/entities", response_model=List[Dict[str, Any]])
 def get_entities(
     entity_type: Optional[str] = None,
+    search: Optional[str] = Query(None, description="Search entities by name"),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
-    """Get list of entities, optionally filtered by type."""
-    query = db.query(Entity)
+    """Get list of entities, optionally filtered by type and search term, ordered by mention count."""
+    # Join with EntityMention to get mention counts and order by them
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).group_by(
+        Entity.id, Entity.name, Entity.entity_type
+    )
     
     if entity_type:
         query = query.filter(Entity.entity_type == entity_type)
     
-    entities = query.limit(limit).all()
+    if search:
+        # Case-insensitive search
+        query = query.filter(func.lower(Entity.name).like(f"%{search.lower()}%"))
+    
+    # Order by mention count descending, then by name
+    entities = query.order_by(
+        func.count(EntityMention.id).desc(),
+        Entity.name
+    ).limit(limit).all()
     
     return [
         {
             "id": entity.id,
             "name": entity.name,
-            "type": entity.entity_type
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
         }
         for entity in entities
+    ]
+
+@app.get("/entities/search", response_model=List[Dict[str, Any]])
+def search_entities(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """Search entities for autocomplete functionality."""
+    # Search by name with mention count ordering
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).filter(
+        func.lower(Entity.name).like(f"%{q.lower()}%")
+    ).group_by(
+        Entity.id, Entity.name, Entity.entity_type
+    ).order_by(
+        func.count(EntityMention.id).desc(),
+        Entity.name
+    ).limit(limit)
+    
+    results = query.all()
+    
+    return [
+        {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
+        }
+        for entity in results
     ]
 
 # Entity details endpoint
@@ -393,6 +449,128 @@ def get_source_sentiment(
         },
         "timeseries": timeseries,
         "entities": entities
+    }
+
+# Stats endpoints for dashboard
+@app.get("/stats/trending_entities", response_model=List[Dict[str, Any]])
+def get_trending_entities(
+    days: int = Query(7, ge=1, le=30),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    """Get trending entities based on recent mention frequency."""
+    # Calculate date range
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+    
+    # Query for entities with most mentions in time period
+    trending_query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.count(EntityMention.id).label("mention_count"),
+        func.avg(EntityMention.power_score).label("avg_power"),
+        func.avg(EntityMention.moral_score).label("avg_moral")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id
+    ).join(
+        NewsArticle, EntityMention.article_id == NewsArticle.id
+    ).filter(
+        EntityMention.created_at >= start_date,
+        EntityMention.power_score.isnot(None),
+        EntityMention.moral_score.isnot(None)
+    ).group_by(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type
+    ).order_by(
+        func.count(EntityMention.id).desc()
+    ).limit(limit)
+    
+    results = trending_query.all()
+    
+    return [
+        {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count,
+            "power_score": float(entity.avg_power) if entity.avg_power else 0,
+            "moral_score": float(entity.avg_moral) if entity.avg_moral else 0
+        }
+        for entity in results
+    ]
+
+@app.get("/stats/historical_sentiment", response_model=Dict[str, Any])
+def get_historical_sentiment(
+    entity_id: int,
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db)
+):
+    """Get historical sentiment data for a specific entity."""
+    # Check if entity exists
+    entity = db.query(Entity).filter(Entity.id == entity_id).first()
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
+    
+    # Calculate date range
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+    
+    # Get daily sentiment averages
+    daily_sentiment = db.query(
+        func.date(EntityMention.created_at).label("date"),
+        func.avg(EntityMention.power_score).label("avg_power"),
+        func.avg(EntityMention.moral_score).label("avg_moral"),
+        func.count(EntityMention.id).label("mention_count")
+    ).filter(
+        EntityMention.entity_id == entity_id,
+        EntityMention.created_at >= start_date,
+        EntityMention.power_score.isnot(None),
+        EntityMention.moral_score.isnot(None)
+    ).group_by(
+        func.date(EntityMention.created_at)
+    ).order_by(
+        func.date(EntityMention.created_at)
+    ).all()
+    
+    # Get overall stats for the period
+    overall_stats = db.query(
+        func.avg(EntityMention.power_score).label("avg_power"),
+        func.avg(EntityMention.moral_score).label("avg_moral"),
+        func.count(EntityMention.id).label("total_mentions")
+    ).filter(
+        EntityMention.entity_id == entity_id,
+        EntityMention.created_at >= start_date,
+        EntityMention.power_score.isnot(None),
+        EntityMention.moral_score.isnot(None)
+    ).first()
+    
+    return {
+        "entity": {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type
+        },
+        "date_range": {
+            "start": start_date.date().isoformat(),
+            "end": end_date.date().isoformat(),
+            "days": days
+        },
+        "daily_data": [
+            {
+                "date": result.date.isoformat(),
+                "power_score": float(result.avg_power) if result.avg_power else 0,
+                "moral_score": float(result.avg_moral) if result.avg_moral else 0,
+                "mention_count": result.mention_count
+            }
+            for result in daily_sentiment
+        ],
+        "summary": {
+            "avg_power_score": float(overall_stats.avg_power) if overall_stats.avg_power else 0,
+            "avg_moral_score": float(overall_stats.avg_moral) if overall_stats.avg_moral else 0,
+            "total_mentions": overall_stats.total_mentions or 0
+        }
     }
 
 # Include routers if available

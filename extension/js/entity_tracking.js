@@ -257,12 +257,56 @@ class EntityTrackingViz {
     
     if (visibleData.length < 2) return;
     
-    // Draw confidence intervals first (if available and enabled)
-    if (showConfidenceIntervals && visibleData[0].power_ci_lower !== undefined) {
-      this.drawConfidenceIntervals(visibleData);
+    // Draw global confidence intervals first (if available and enabled)
+    if (showConfidenceIntervals && visibleData[0].global_power_ci_lower !== undefined) {
+      this.drawGlobalConfidenceIntervals(visibleData);
     }
     
-    // Draw power score line
+    // Draw global average lines if available
+    if (visibleData[0].global_power_avg !== undefined) {
+      // Global power average (dashed line)
+      this.ctx.strokeStyle = powerColor;
+      this.ctx.lineWidth = 1;
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.globalAlpha = 0.5;
+      this.ctx.beginPath();
+      
+      visibleData.forEach((dataPoint, index) => {
+        const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+        const yPos = y + chartHeight - ((dataPoint.global_power_avg + 2) / 4) * chartHeight;
+        
+        if (index === 0) {
+          this.ctx.moveTo(xPos, yPos);
+        } else {
+          this.ctx.lineTo(xPos, yPos);
+        }
+      });
+      
+      this.ctx.stroke();
+      
+      // Global moral average (dashed line)
+      this.ctx.strokeStyle = moralColor;
+      this.ctx.beginPath();
+      
+      visibleData.forEach((dataPoint, index) => {
+        const xPos = x + (index / (this.data.length - 1)) * chartWidth;
+        const yPos = y + chartHeight - ((dataPoint.global_moral_avg + 2) / 4) * chartHeight;
+        
+        if (index === 0) {
+          this.ctx.moveTo(xPos, yPos);
+        } else {
+          this.ctx.lineTo(xPos, yPos);
+        }
+      });
+      
+      this.ctx.stroke();
+      
+      // Reset line style
+      this.ctx.setLineDash([]);
+      this.ctx.globalAlpha = 1;
+    }
+    
+    // Draw source-specific power score line (solid)
     this.ctx.strokeStyle = powerColor;
     this.ctx.lineWidth = 2;
     this.ctx.beginPath();
@@ -280,7 +324,7 @@ class EntityTrackingViz {
     
     this.ctx.stroke();
     
-    // Draw moral score line
+    // Draw source-specific moral score line (solid)
     this.ctx.strokeStyle = moralColor;
     this.ctx.lineWidth = 2;
     this.ctx.beginPath();
@@ -323,8 +367,8 @@ class EntityTrackingViz {
     }
   }
   
-  // Draw confidence intervals as shaded areas
-  drawConfidenceIntervals(visibleData) {
+  // Draw confidence intervals for global averages as shaded areas
+  drawGlobalConfidenceIntervals(visibleData) {
     const { confidenceColor } = this.options;
     const { x, y, width: chartWidth, height: chartHeight } = this.chartDimensions;
     
@@ -335,8 +379,9 @@ class EntityTrackingViz {
     
     // Draw upper boundary
     visibleData.forEach((dataPoint, index) => {
+      if (dataPoint.global_power_ci_upper === undefined) return;
       const xPos = x + (index / (this.data.length - 1)) * chartWidth;
-      const yPos = y + chartHeight - ((dataPoint.power_ci_upper + 2) / 4) * chartHeight;
+      const yPos = y + chartHeight - ((dataPoint.global_power_ci_upper + 2) / 4) * chartHeight;
       
       if (index === 0) {
         this.ctx.moveTo(xPos, yPos);
@@ -348,8 +393,9 @@ class EntityTrackingViz {
     // Draw lower boundary (in reverse order to close the path)
     for (let index = visibleData.length - 1; index >= 0; index--) {
       const dataPoint = visibleData[index];
+      if (dataPoint.global_power_ci_lower === undefined) continue;
       const xPos = x + (index / (this.data.length - 1)) * chartWidth;
-      const yPos = y + chartHeight - ((dataPoint.power_ci_lower + 2) / 4) * chartHeight;
+      const yPos = y + chartHeight - ((dataPoint.global_power_ci_lower + 2) / 4) * chartHeight;
       this.ctx.lineTo(xPos, yPos);
     }
     
@@ -361,8 +407,9 @@ class EntityTrackingViz {
     
     // Draw upper boundary
     visibleData.forEach((dataPoint, index) => {
+      if (dataPoint.global_moral_ci_upper === undefined) return;
       const xPos = x + (index / (this.data.length - 1)) * chartWidth;
-      const yPos = y + chartHeight - ((dataPoint.moral_ci_upper + 2) / 4) * chartHeight;
+      const yPos = y + chartHeight - ((dataPoint.global_moral_ci_upper + 2) / 4) * chartHeight;
       
       if (index === 0) {
         this.ctx.moveTo(xPos, yPos);
@@ -374,8 +421,9 @@ class EntityTrackingViz {
     // Draw lower boundary (in reverse order to close the path)
     for (let index = visibleData.length - 1; index >= 0; index--) {
       const dataPoint = visibleData[index];
+      if (dataPoint.global_moral_ci_lower === undefined) continue;
       const xPos = x + (index / (this.data.length - 1)) * chartWidth;
-      const yPos = y + chartHeight - ((dataPoint.moral_ci_lower + 2) / 4) * chartHeight;
+      const yPos = y + chartHeight - ((dataPoint.global_moral_ci_lower + 2) / 4) * chartHeight;
       this.ctx.lineTo(xPos, yPos);
     }
     
@@ -488,40 +536,72 @@ class EntityTrackingViz {
     
     // Draw legend if enabled
     if (this.options.showLegend) {
-      const legendY = this.options.height - 15;
-      const legendX1 = width / 2 - 100;
-      const legendX2 = width / 2 - 20;
-      const legendX3 = width / 2 + 60;
+      const legendY = this.options.height - 25;
+      const legendY2 = this.options.height - 10;
+      const legendX1 = width / 2 - 140;
+      const legendX2 = width / 2 - 50;
+      const legendX3 = width / 2 + 40;
+      const legendX4 = width / 2 + 120;
       
-      // Power score legend
-      this.ctx.fillStyle = powerColor;
-      this.ctx.fillRect(legendX1, legendY, 10, 2);
+      // Source Power score legend (solid line)
+      this.ctx.strokeStyle = powerColor;
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([]);
       this.ctx.beginPath();
-      this.ctx.arc(legendX1 + 5, legendY + 1, 3, 0, Math.PI * 2);
-      this.ctx.fill();
+      this.ctx.moveTo(legendX1, legendY);
+      this.ctx.lineTo(legendX1 + 12, legendY);
+      this.ctx.stroke();
       
       this.ctx.fillStyle = textColor;
       this.ctx.textAlign = 'left';
       this.ctx.font = '9px Arial';
-      this.ctx.fillText('Power', legendX1 + 15, legendY + 4);
+      this.ctx.fillText('Source Power', legendX1 + 15, legendY + 3);
       
-      // Moral score legend
-      this.ctx.fillStyle = moralColor;
-      this.ctx.fillRect(legendX2, legendY, 10, 2);
+      // Source Moral score legend (solid line)
+      this.ctx.strokeStyle = moralColor;
+      this.ctx.lineWidth = 2;
       this.ctx.beginPath();
-      this.ctx.arc(legendX2 + 5, legendY + 1, 3, 0, Math.PI * 2);
-      this.ctx.fill();
+      this.ctx.moveTo(legendX2, legendY);
+      this.ctx.lineTo(legendX2 + 12, legendY);
+      this.ctx.stroke();
       
       this.ctx.fillStyle = textColor;
-      this.ctx.fillText('Moral', legendX2 + 15, legendY + 4);
+      this.ctx.fillText('Source Moral', legendX2 + 15, legendY + 3);
       
-      // Confidence interval legend (if enabled)
-      if (this.options.showConfidenceIntervals && this.data.length > 0 && this.data[0].power_ci_lower !== undefined) {
-        this.ctx.fillStyle = this.options.confidenceColor;
-        this.ctx.fillRect(legendX3, legendY, 10, 8);
-        
+      // Global Power legend (dashed line)
+      this.ctx.strokeStyle = powerColor;
+      this.ctx.lineWidth = 1;
+      this.ctx.setLineDash([5, 3]);
+      this.ctx.globalAlpha = 0.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX3, legendY);
+      this.ctx.lineTo(legendX3 + 12, legendY);
+      this.ctx.stroke();
+      this.ctx.globalAlpha = 1;
+      
+      this.ctx.fillStyle = textColor;
+      this.ctx.fillText('Global Power', legendX3 + 15, legendY + 3);
+      
+      // Global Moral legend (dashed line)
+      this.ctx.strokeStyle = moralColor;
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX4, legendY);
+      this.ctx.lineTo(legendX4 + 12, legendY);
+      this.ctx.stroke();
+      
+      this.ctx.fillStyle = textColor;
+      this.ctx.fillText('Global Moral', legendX4 + 15, legendY + 3);
+      
+      // Reset line style
+      this.ctx.setLineDash([]);
+      
+      // Add source info if available
+      if (this.options.sourceName) {
         this.ctx.fillStyle = textColor;
-        this.ctx.fillText('95% CI', legendX3 + 15, legendY + 4);
+        this.ctx.textAlign = 'center';
+        this.ctx.font = '8px Arial';
+        this.ctx.fillText(`Source: ${this.options.sourceName}`, width / 2, legendY2 + 3);
       }
     }
   }
