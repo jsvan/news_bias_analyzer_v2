@@ -6,33 +6,38 @@ This file contains various prompts for different analysis tasks.
 # Core entity extraction and sentiment scoring prompt
 # Focuses on objective extraction without making evaluative judgments
 ENTITY_SENTIMENT_PROMPT = """
-You are a cultural orientation analyzer for news articles. Your task is to identify how news sources portray political and cultural entities that people naturally form opinions about.
+You analyze how news articles make readers feel about political entities. Different news sources portray the same people, countries, and organizations differently, and we want to measure this.
 
-Extract entities where it makes sense to say "this entity is being portrayed positively/negatively" - countries, major political figures, real political organizations, etc. Skip demographic groups, professions, and minor players that don't warrant political judgment.
+Find the main political entities that readers naturally form opinions about - countries, leaders, major organizations, etc. For each entity, answer two simple questions:
 
-1. POWER DIMENSION: How the entity is portrayed in terms of power, strength, or agency
-   * -2: Very weak, vulnerable, helpless, or powerless
-   * -1: Somewhat weak or vulnerable
-   * 0: Neutral portrayal of power
-   * +1: Somewhat powerful or influential
-   * +2: Very powerful, strong, influential, or dominant
+1. How strong/weak does this entity seem?
+2. Would readers like this entity more or less after reading this article?
 
-2. MORAL DIMENSION: How the entity is portrayed in terms of moral character and actions
-   * -2: Portrayed as clearly malicious, evil, or intentionally harmful to others
-   * -1: Portrayed as somewhat problematic, causing harm, or acting badly
-   * 0: Neutral moral portrayal - neither particularly good nor bad
-   * +1: Portrayed as somewhat positive, helpful, or acting morally well
-   * +2: Portrayed as clearly virtuous, heroic, or highly beneficial to others
+Skip minor players, demographic groups, and entities that don't warrant political judgment.
 
-   CRITICAL: Being a victim of violence, suffering, or in need does NOT make an entity morally negative. Victims should typically score 0 or positive unless they are simultaneously portrayed as bad actors.
+1. POWER DIMENSION: How strong or weak does this entity appear?
+   * -2: Very weak, powerless, helpless
+   * -1: Somewhat weak or vulnerable  
+   * 0: Neutral - neither strong nor weak
+   * +1: Somewhat strong or influential
+   * +2: Very strong, powerful, dominant
+
+2. MORAL DIMENSION: Who does the article want you to root for?
+   * -2: Article wants you to strongly oppose this entity
+   * -1: Article wants you to somewhat oppose this entity  
+   * 0: Article doesn't want you to take sides about this entity
+   * +1: Article wants you to somewhat support this entity
+   * +2: Article wants you to strongly support this entity
+
+Step 1: Ask "Who is the article painting as the victim/hero vs. the aggressor/villain?"
+Step 2: Victims and heroes get positive scores. Aggressors and villains get negative scores.
+Step 3: If [Entity A] is portrayed as victim of [Entity B] aggression → [Entity A] gets +2, [Entity B] gets -2.
 
 For each key entity, provide:
 1. A precise score on each dimension using the -2 to +2 scale (decimal values are allowed)
 2. 1-2 KEY PHRASES (not full sentences) that demonstrate sentiment toward it
 3. The entity type from the valid categories listed below
 
-ENTITY SELECTION CRITERIA:
-Extract entities that people naturally form political opinions about. Apply the "makes sense" test: if you can say "this entity is being portrayed positively/negatively" and it sounds reasonable, extract it. Skip demographic groups, professions, and minor mentions.
 
 VALID ENTITY TYPES WITH EXAMPLES:
 
@@ -70,63 +75,30 @@ VALID ENTITY TYPES WITH EXAMPLES:
 **EMERGING SYMBOLIC INDIVIDUALS**:
 20. **symbolic_individual**: People positioned as representatives of larger issues (George Floyd, Derek Chauvin, Kyle Rittenhouse, specific victims, whistleblowers, viral incident protagonists)
 
-AGGREGATION RULES - ALWAYS ROLL UP TO MAJOR ENTITIES:
+AGGREGATION RULES:
+- Roll up to major entities: "[Country] police" → [Country], "[Leader] officials" → [Leader], "[Company] teams" → [Company]
+- NEVER create combo entities like "[Country] (government and Foreign Minister)" - extract as separate entities: [Country], [Foreign Minister]
+- Only preserve granularity when sub-entity is explicitly contrasted with parent or is the main story focus
 
-**ALWAYS AGGREGATE TO PARENT ENTITY:**
-- Government forces/officials → Country (e.g., "Israeli police" → Israel, "FBI" → USA)
-- Political sub-groups → Main entity (e.g., "Jewish ultranationalists" → Israel, "MAGA supporters" → Trump/GOP)
-- Demographic sub-groups → Not extracted unless they ARE the main story (e.g., skip "Arab shopkeepers")
-- Minor officials → Main leader (e.g., "Biden administration officials" → Biden)
-- Company divisions → Parent company (e.g., "Meta's Instagram team" → Meta)
+**FOCUS ON MAJOR ENTITIES:**
+- Extract 4-8 entities that are central to the story and culturally significant
+- Skip minor players, passing mentions, generic demographic references
+- Extract individuals only if they're the primary subject or positioned as symbols of broader issues
 
-**ONLY PRESERVE GRANULARITY WHEN:**
-- Sub-entity is EXPLICITLY contrasted with parent entity in the article
-- Sub-entity is the PRIMARY subject of the article (headline focus)
-- Sub-entity has major cultural significance independent of parent
-
-**AGGREGATION EXAMPLES:**
-- "Israeli forces", "Israeli police", "Israeli settlers" → Israel
-- "Palestinian protesters", "Palestinian civilians" → Palestinians  
-- "Chinese officials", "Chinese military" → China
-- "Republican lawmakers", "GOP leadership" → GOP/Republicans
-- "Tech executives", "Silicon Valley leaders" → Big Tech (industry_sector)
-- "UN officials", "UN peacekeepers" → UN
-
-**DO NOT EXTRACT:**
-- Minor demographic groups mentioned in passing
-- Specific professions unless they're the main subject
-- Individual citizens unless they're symbolic/central to story
-- Generic references to "people", "residents", "workers"
-
-**WHEN TO EXTRACT SYMBOLIC INDIVIDUALS:**
-- ALWAYS if person is primary subject of article (headline or first paragraph focus)
-- Individual's story is central to article's narrative
-- Person explicitly positioned as representative of broader issue
-- Individual's name appears multiple times with emotional framing
-- Article treats person as symbol, not just incident participant
-- Named individuals in viral incidents, police encounters, trials, protests
-- Examples: 
-  - "George Floyd's death..." = extract Floyd (subject of story)
-  - "Daniel Shaver was shot..." = extract Shaver (primary subject)
-  - "A man was arrested..." = don't extract (anonymous)
-  - "John Doe, 45, filed whistleblower complaint..." = extract Doe (named subject)
+**THINK DEEPER ABOUT ATTRIBUTION:**
+- When abstract concepts are mentioned, ask: "Who is actually responsible for this?"
+- Replace vague forces with the specific entities behind them:
+  - "[Geopolitical] sanctions" → extract separate entities: [Country A], [Regional Bloc], [Leader]
+  - "Military strategy" → extract separate entities: [Defense Department], specific generals, defense officials
+  - "[Policy type] policies" → extract separate entities: specific governments, individual leaders
+- If the abstract force succeeds/fails, those responsible look good/bad
+- Extract each decision-maker as a separate entity - don't group them with "and"
 
 IMPORTANT GUIDELINES:
-- Extract 4-8 MAJOR entities only - quality over quantity for robust data
-- Focus on entities that are central to the story and culturally significant
-- ALWAYS extract any individual who is the PRIMARY SUBJECT of the article 
-- Aggregate sub-groups to their parent entities unless explicitly contrasted
-- Skip minor players, demographic cohorts, and passing mentions
 - Base analysis solely on how entities are portrayed in THIS SPECIFIC article
 - Provide precise scores based strictly on the text's portrayal
-- When in doubt about granularity, err on side of aggregation to major entities
 
-MORAL SCORING GUIDELINES:
-- Suffering, victimization, or being in need does NOT make an entity morally negative
-- Civilians in war zones should typically score 0 to +1 (victims deserve sympathy)
-- Only score negatively if the entity is explicitly portrayed as doing bad things
-- Focus on ACTIONS and CHARACTER, not circumstances beyond their control
-- Avoid confusing "opposition to your preferred outcome" with "moral badness"
+KEY PRINCIPLE: Score based on how the article makes you feel about the entity, not your personal politics. If the article credits someone with good outcomes or blames them for bad outcomes, that affects how readers feel about them.
 
 FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
 {

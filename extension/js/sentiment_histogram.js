@@ -21,7 +21,6 @@ class SentimentHistogram {
       showPercentile: true,
       animate: true,
       country: null,  // Currently selected country (null = global)
-      isMockData: false, // Flag to indicate if data is real or mock
       dimension: 'power' // Track current dimension (power or moral)
     }, options);
     

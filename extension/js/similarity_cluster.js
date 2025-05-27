@@ -78,46 +78,33 @@ class SimilarityClusterViz {
     this.articles = articles;
     this.currentArticleId = currentArticleId;
     
-    // If no coordinate data, generate random positions for demo
-    const hasCoordinates = articles.some(a => a.x !== undefined && a.y !== undefined);
+    // Validate that all articles have coordinate data
+    const hasCoordinates = articles.every(a => a.x !== undefined && a.y !== undefined);
     if (!hasCoordinates) {
-      this.generateDemoPositions();
+      console.error('SimilarityClusterViz: Articles missing coordinate data. Real clustering algorithm required.');
+      this.showError('Clustering data missing coordinates. Real dimensionality reduction algorithm needed.');
+      return;
     }
     
     this.render();
   }
   
-  generateDemoPositions() {
-    // Generate random positions for demo visualization
-    // Current article in the center
-    const centerX = this.options.width / 2;
-    const centerY = this.options.height / 2;
+  showError(message) {
+    const { width, height, backgroundColor } = this.options;
     
-    // Get current article
-    const currentArticle = this.articles.find(a => a.id === this.currentArticleId) || 
-                          this.articles[0];
+    // Clear canvas
+    this.ctx.fillStyle = backgroundColor;
+    this.ctx.fillRect(0, 0, width, height);
     
-    if (currentArticle) {
-      currentArticle.x = centerX;
-      currentArticle.y = centerY;
-      
-      // Position other articles around the current one based on similarity
-      this.articles.forEach(article => {
-        if (article.id === this.currentArticleId) return;
-        
-        const similarity = article.similarity || 0.5;
-        const distance = 100 * (1 - similarity);
-        const angle = Math.random() * Math.PI * 2;
-        
-        article.x = centerX + distance * Math.cos(angle);
-        article.y = centerY + distance * Math.sin(angle);
-        
-        // Get cluster if available or assign random cluster
-        if (article.cluster === undefined) {
-          article.cluster = Math.floor(Math.random() * 3);
-        }
-      });
-    }
+    // Draw error message
+    this.ctx.fillStyle = '#e74c3c';
+    this.ctx.textAlign = 'center';
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.fillText('Clustering Visualization Error', width / 2, height / 2 - 20);
+    
+    this.ctx.fillStyle = '#333';
+    this.ctx.font = '12px Arial';
+    this.ctx.fillText(message, width / 2, height / 2 + 10);
   }
   
   getArticleColor(article) {

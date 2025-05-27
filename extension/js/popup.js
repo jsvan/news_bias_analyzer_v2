@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const forceAnalyzeBtn = document.getElementById('force-analyze-btn');
   const retryBtn = document.getElementById('retry-btn');
   const viewDetailsBtn = document.getElementById('view-details-btn');
-  const analyzeAgainBtn = document.getElementById('analyze-again-btn');
   const backBtn = document.getElementById('back-btn');
   
   const sourceEl = document.querySelector('#article-source span');
@@ -58,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
     startAnalysis(false); // Explicitly pass false for forceReanalysis
   });
   viewDetailsBtn.addEventListener('click', showDetailedView);
-  analyzeAgainBtn.addEventListener('click', resetToInitialState);
   backBtn.addEventListener('click', hideDetailedView);
   
   // Tab navigation
@@ -1324,23 +1322,42 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Error loading similarity data:', error);
       
-      // Show error message
+      // Show specific error messages based on error type
+      let errorTitle = 'Similarity Feature Error';
+      let errorMessage = error.message;
+      let helpText = '';
+      
+      if (error.message.includes('501') || error.message.includes('not yet implemented')) {
+        errorTitle = 'Feature Not Implemented';
+        errorMessage = 'Article similarity clustering is not yet implemented.';
+        helpText = 'This feature requires semantic similarity algorithms and dimensionality reduction (t-SNE/UMAP).';
+      } else if (error.message.includes('404') || error.message.includes('not found')) {
+        errorTitle = 'Source Not Found';
+        errorMessage = `Source "${analysisResult.source}" not found in similarity database.`;
+        helpText = 'The similarity computation may not have processed this source yet.';
+      } else {
+        helpText = 'Check that the similarity computation services are running and have processed recent data.';
+      }
+      
       container.innerHTML = `
         <div class="no-data-message">
-          <h3>Unable to Load Similarity Data</h3>
-          <p>${error.message}</p>
-          <p>This feature requires the weekly similarity computation to have run at least once.</p>
+          <h3>${errorTitle}</h3>
+          <p><strong>Error:</strong> ${errorMessage}</p>
+          <p><em>${helpText}</em></p>
         </div>
       `;
       
-      // Clear canvas
+      // Clear canvas with specific error
       const canvas = document.getElementById('similarity-canvas');
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#666';
+      ctx.fillStyle = '#e74c3c';
       ctx.textAlign = 'center';
-      ctx.font = '12px Arial';
-      ctx.fillText('No cluster data available', canvas.width/2, canvas.height/2);
+      ctx.font = 'bold 12px Arial';
+      ctx.fillText('Similarity Feature Error', canvas.width/2, canvas.height/2 - 10);
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Arial';
+      ctx.fillText('Check console for details', canvas.width/2, canvas.height/2 + 10);
     }
   }
   

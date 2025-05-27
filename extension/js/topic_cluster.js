@@ -499,59 +499,6 @@ class TopicClusterViz {
     });
   }
   
-  // Generate demo data (for testing)
-  static generateDemoData(numTopics = 4, entitiesPerTopic = 8) {
-    const nodes = [];
-    const links = [];
-    const topicNames = ['Politics', 'Economy', 'Technology', 'Health', 'Environment', 'Culture'];
-    
-    // Generate topic nodes
-    for (let i = 0; i < numTopics; i++) {
-      const nodeId = `topic_${i}`;
-      nodes.push({
-        id: nodeId,
-        label: topicNames[i % topicNames.length],
-        group: i,
-        cluster: i,
-        size: 1.5, // Topics are larger
-        count: Math.floor(Math.random() * 10) + 5
-      });
-      
-      // Generate entity nodes for this topic
-      for (let j = 0; j < entitiesPerTopic; j++) {
-        const entityId = `entity_${i}_${j}`;
-        nodes.push({
-          id: entityId,
-          label: `Entity ${i}.${j}`,
-          group: i,
-          cluster: i,
-          size: 0.8 + (Math.random() * 0.4) // Random size variation
-        });
-        
-        // Link entity to its topic
-        links.push({
-          source: nodeId,
-          target: entityId,
-          weight: 0.8 + (Math.random() * 0.2)
-        });
-        
-        // Add some cross-topic links (less frequent)
-        if (Math.random() < 0.2 && i > 0) {
-          // Link to a random entity in a different topic
-          const otherTopic = Math.floor(Math.random() * i);
-          const otherEntity = `entity_${otherTopic}_${Math.floor(Math.random() * entitiesPerTopic)}`;
-          
-          links.push({
-            source: entityId,
-            target: otherEntity,
-            weight: 0.2 + (Math.random() * 0.3) // Weaker links
-          });
-        }
-      }
-    }
-    
-    return { nodes, links };
-  }
 }
 
 // Add to window object for use in popup.js
