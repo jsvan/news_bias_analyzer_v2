@@ -14,12 +14,12 @@ import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, Body
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, Body, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, cast, Float
+from sqlalchemy import func, and_, cast, Float, text
 import requests
 from urllib.parse import urlparse
 import re
@@ -582,6 +582,27 @@ async def get_analysis_by_url(
         # Convert to list
         formatted_entities = list(unique_entities.values())
         
+        # Calculate percentile based on Hotelling T² score
+        composite_percentile = 50  # Default if no T² score
+        if hasattr(article, 'hotelling_t2_score') and article.hotelling_t2_score is not None:
+            # Get percentile rank for this article's T² score in past week
+            percentile_query = text("""
+                WITH weekly_articles AS (
+                    SELECT id, hotelling_t2_score
+                    FROM news_articles  
+                    WHERE processed_at > NOW() - INTERVAL '7 days'
+                      AND hotelling_t2_score IS NOT NULL
+                )
+                SELECT 
+                    PERCENT_RANK() OVER (ORDER BY hotelling_t2_score) * 100 as percentile
+                FROM weekly_articles
+                WHERE id = :article_id
+            """)
+            
+            result = db.execute(percentile_query, {"article_id": article.id}).fetchone()
+            if result:
+                composite_percentile = round(result.percentile, 1)
+        
         # Create response
         response = {
             "url": url,
@@ -591,7 +612,11 @@ async def get_analysis_by_url(
             "publish_date": article.publish_date,
             "entities": formatted_entities,
             "analysis_date": article.processed_at,
-            "from_database": True
+            "from_database": True,
+            "composite_score": {
+                "percentile": composite_percentile,
+                "interpretation": f"More extreme than {composite_percentile:.0f}% of articles this week"
+            }
         }
         
         return response
@@ -684,9 +709,26 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
                 # Convert to list
                 formatted_entities = list(unique_entities.values())
                 
-                # Generate a simple composite score
-                composite_percentile = 50  # Default to median
-                composite_p_value = 0.5    # Default p-value
+                # Calculate percentile based on Hotelling T² score
+                composite_percentile = 50  # Default if no T² score
+                if hasattr(article, 'hotelling_t2_score') and article.hotelling_t2_score is not None:
+                    # Get percentile rank for this article's T² score in past week
+                    percentile_query = text("""
+                        WITH weekly_articles AS (
+                            SELECT id, hotelling_t2_score
+                            FROM news_articles  
+                            WHERE processed_at > NOW() - INTERVAL '7 days'
+                              AND hotelling_t2_score IS NOT NULL
+                        )
+                        SELECT 
+                            PERCENT_RANK() OVER (ORDER BY hotelling_t2_score) * 100 as percentile
+                        FROM weekly_articles
+                        WHERE id = :article_id
+                    """)
+                    
+                    result = db.execute(percentile_query, {"article_id": article.id}).fetchone()
+                    if result:
+                        composite_percentile = round(result.percentile, 1)
                 
                 # Create response
                 api_response = {
@@ -696,7 +738,7 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
                     "publish_date": article.publish_date,
                     "composite_score": {
                         "percentile": composite_percentile,
-                        "p_value": composite_p_value
+                        "interpretation": f"More extreme than {composite_percentile:.0f}% of articles this week"
                     },
                     "entities": formatted_entities,
                     "newly_analyzed": False,
@@ -766,6 +808,13 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
         print("Calling OpenAI for analysis...")
         analysis_result = analyzer.analyze_article(article_data)
         
+        # Update source country if LLM provided one
+        llm_source_country = analysis_result.get('source_country')
+        if llm_source_country and source and (source.country == "Unknown" or source.country is None):
+            print(f"LLM determined source country: {llm_source_country}")
+            source.country = llm_source_country
+            logger.info(f"Updated source '{source.name}' country from Unknown to '{llm_source_country}'")
+        
         # Extract entities from the analysis result
         entities = analysis_result.get('entities', [])
         print(f"OpenAI found {len(entities)} entities in the article")
@@ -801,7 +850,7 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
                 power_score=entity_data.get('power_score', 0),
                 moral_score=entity_data.get('moral_score', 0),
                 mentions=entity_data.get('mentions', []),
-                created_at=datetime.utcnow()
+                created_at=article.publish_date or article.scraped_at
             )
             db.add(mention)
             
@@ -824,9 +873,9 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
         # Commit all changes to database
         db.commit()
         
-        # Generate a simple composite score based on entity sentiment
-        composite_percentile = 50  # Default to median
-        composite_p_value = 0.5    # Default p-value
+        # Calculate T² score for the new article
+        # Note: This is a temporary calculation until the batch analyzer computes it
+        composite_percentile = 50  # Default, will be computed by batch analyzer
         
         # Create response
         api_response = {
@@ -836,7 +885,7 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
             "publish_date": request.publish_date,
             "composite_score": {
                 "percentile": composite_percentile,
-                "p_value": composite_p_value
+                "interpretation": f"Analysis in progress - check back for extremeness score"
             },
             "entities": formatted_entities,
             "newly_analyzed": True,
@@ -921,6 +970,128 @@ async def get_trending_entities(
         logger.error(f"Error fetching trending entities: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch trending entities: {str(e)}")
 
+# Entity distribution endpoint for dashboard
+@app.get("/stats/entity_distribution/{entity_id}", response_model=Dict[str, Any])
+async def get_entity_distribution(
+    entity_id: int,
+    country: Optional[str] = Query(None),
+    source_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get sentiment distribution data for a specific entity."""
+    try:
+        # Check if entity exists
+        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
+        
+        # Get entity mentions for the last 90 days
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=90)
+        
+        # Base query for entity mentions
+        query = db.query(
+            EntityMention.power_score,
+            EntityMention.moral_score,
+            NewsSource.name.label("source_name"),
+            NewsSource.country
+        ).join(
+            NewsArticle, EntityMention.article_id == NewsArticle.id
+        ).join(
+            NewsSource, NewsArticle.source_id == NewsSource.id
+        ).filter(
+            EntityMention.entity_id == entity_id,
+            NewsArticle.publish_date >= start_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        )
+        
+        # Apply filters
+        if country:
+            query = query.filter(NewsSource.country == country)
+        if source_id:
+            query = query.filter(NewsSource.id == source_id)
+        
+        # Execute query
+        mentions = query.all()
+        
+        if not mentions:
+            return {
+                "entity": {
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": entity.entity_type
+                },
+                "distributions": {},
+                "message": "No sentiment data found for this entity"
+            }
+        
+        # Calculate statistics
+        power_scores = [m.power_score for m in mentions]
+        moral_scores = [m.moral_score for m in mentions]
+        
+        import numpy as np
+        
+        power_mean = np.mean(power_scores)
+        power_std = np.std(power_scores)
+        moral_mean = np.mean(moral_scores)
+        moral_std = np.std(moral_scores)
+        
+        # Generate PDF data points for visualization (simple histogram approach)
+        try:
+            from scipy import stats
+            power_range = np.linspace(min(power_scores) - power_std, max(power_scores) + power_std, 100)
+            moral_range = np.linspace(min(moral_scores) - moral_std, max(moral_scores) + moral_std, 100)
+            power_pdf = stats.norm.pdf(power_range, power_mean, power_std)
+            moral_pdf = stats.norm.pdf(moral_range, moral_mean, moral_std)
+        except ImportError:
+            # Fallback to simple histogram if scipy not available
+            power_range = np.linspace(min(power_scores), max(power_scores), 50)
+            moral_range = np.linspace(min(moral_scores), max(moral_scores), 50)
+            power_pdf = np.histogram(power_scores, bins=50, density=True)[0]
+            moral_pdf = np.histogram(moral_scores, bins=50, density=True)[0]
+        
+        # Format response
+        result = {
+            "entity": {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.entity_type
+            },
+            "distributions": {
+                "global": {
+                    "power": {
+                        "mean": float(power_mean),
+                        "std": float(power_std),
+                        "count": len(mentions),
+                        "pdf": [{"x": float(x), "y": float(y)} for x, y in zip(power_range, power_pdf)]
+                    },
+                    "moral": {
+                        "mean": float(moral_mean),
+                        "std": float(moral_std),
+                        "count": len(mentions),
+                        "pdf": [{"x": float(x), "y": float(y)} for x, y in zip(moral_range, moral_pdf)]
+                    }
+                }
+            }
+        }
+        
+        # Add country-specific distribution if country filter was applied
+        if country:
+            result["distributions"]["national"] = {
+                "country": country,
+                "power": result["distributions"]["global"]["power"],
+                "moral": result["distributions"]["global"]["moral"]
+            }
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching entity distribution: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch entity distribution: {str(e)}")
+
 # Historical sentiment endpoint for dashboard
 @app.get("/stats/historical_sentiment", response_model=Dict[str, Any])
 async def get_historical_sentiment(
@@ -1000,14 +1171,198 @@ async def get_historical_sentiment(
         logger.error(f"Error fetching historical sentiment: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch historical sentiment: {str(e)}")
 
+# Source-specific historical sentiment endpoint
+@app.get("/stats/source_historical_sentiment", response_model=Dict[str, Any])
+async def get_source_historical_sentiment(
+    entity_id: int,
+    days: int = Query(30, ge=1, le=365),
+    countries: Optional[List[str]] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """Get historical sentiment data for a specific entity broken down by news source."""
+    try:
+        logger.info(f"Source historical sentiment request: entity_id={entity_id}, days={days}, countries={countries}")
+        # Check if entity exists
+        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        # Base query for source-specific daily sentiment averages
+        query = db.query(
+            func.date(EntityMention.created_at).label("date"),
+            NewsSource.name.label("source_name"),
+            NewsSource.country,
+            NewsSource.id.label("source_id"),
+            func.avg(EntityMention.power_score).label("avg_power"),
+            func.avg(EntityMention.moral_score).label("avg_moral"),
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            NewsArticle, EntityMention.article_id == NewsArticle.id
+        ).join(
+            NewsSource, NewsArticle.source_id == NewsSource.id
+        ).filter(
+            EntityMention.entity_id == entity_id,
+            EntityMention.created_at >= start_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        )
+        
+        # Apply country filter if provided
+        if countries:
+            logger.info(f"Filtering by countries: {countries}")
+            query = query.filter(NewsSource.country.in_(countries))
+        
+        # Group by date, source, and country
+        query = query.group_by(
+            func.date(EntityMention.created_at),
+            NewsSource.name,
+            NewsSource.country,
+            NewsSource.id
+        ).having(
+            func.count(EntityMention.id) >= 3  # Only include sources with at least 3 mentions
+        ).order_by(
+            NewsSource.name,
+            func.date(EntityMention.created_at)
+        )
+        
+        # Execute query
+        results = query.all()
+        
+        # Organize data by source
+        source_data = {}
+        for result in results:
+            source_key = f"{result.source_name} ({result.country})"
+            
+            if source_key not in source_data:
+                source_data[source_key] = {
+                    "source_name": result.source_name,
+                    "country": result.country,
+                    "source_id": result.source_id,
+                    "daily_data": []
+                }
+            
+            source_data[source_key]["daily_data"].append({
+                "date": result.date.isoformat(),
+                "power_score": float(result.avg_power) if result.avg_power else 0,
+                "moral_score": float(result.avg_moral) if result.avg_moral else 0,
+                "mention_count": result.mention_count
+            })
+        
+        # Calculate summary statistics for each source
+        for source_key, data in source_data.items():
+            if data["daily_data"]:
+                power_scores = [d["power_score"] for d in data["daily_data"]]
+                moral_scores = [d["moral_score"] for d in data["daily_data"]]
+                total_mentions = sum(d["mention_count"] for d in data["daily_data"])
+                
+                data["summary"] = {
+                    "avg_power_score": sum(power_scores) / len(power_scores),
+                    "avg_moral_score": sum(moral_scores) / len(moral_scores),
+                    "total_mentions": total_mentions,
+                    "days_with_data": len(data["daily_data"])
+                }
+        
+        # Limit to top 10 sources by total mentions to avoid cluttered visualization
+        if len(source_data) > 10:
+            logger.info(f"Limiting from {len(source_data)} sources to top 10 by mentions")
+            sorted_sources = sorted(
+                source_data.items(), 
+                key=lambda x: x[1]["summary"]["total_mentions"] if x[1].get("summary") else 0, 
+                reverse=True
+            )
+            source_data = dict(sorted_sources[:10])
+            logger.info(f"Top sources: {list(source_data.keys())}")
+        
+        return {
+            "entity": {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.entity_type
+            },
+            "date_range": {
+                "start": start_date.date().isoformat(),
+                "end": end_date.date().isoformat(),
+                "days": days
+            },
+            "countries_filter": countries,
+            "sources": source_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching source historical sentiment: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch source historical sentiment: {str(e)}")
+
 # Include routers if available
 if has_article_router:
     app.include_router(article_router, prefix="/articles", tags=["Articles"])
 if has_stats_router:
-    # Override the database dependency in the stats router
-    from extension.api.statistical_endpoints import get_db_session
-    app.dependency_overrides[get_db_session] = get_db
-    app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
+    # Import and reconfigure stats router with our database dependency
+    try:
+        # Import all the endpoint functions and models from the stats module
+        from extension.api.statistical_endpoints import (
+            get_sentiment_distribution, get_entity_tracking, get_available_countries_for_entity,
+            get_global_entity_counts, get_similar_articles,
+            SentimentDistributionResponse, EntityTrackingResponse, AvailableCountriesResponse,
+            SimilarArticlesResponse
+        )
+        
+        # Create a new router specifically for this app with our database dependency
+        stats_router_local = APIRouter()
+        
+        # Re-register endpoints with our database dependency
+        @stats_router_local.get("/sentiment/distribution", response_model=SentimentDistributionResponse)
+        async def sentiment_distribution_endpoint(
+            entity_name: str,
+            dimension: str = Query("power", regex="^(power|moral)$"),
+            country: Optional[str] = None,
+            source_id: Optional[int] = None,
+            session: Session = Depends(get_db)
+        ):
+            return await get_sentiment_distribution(entity_name, dimension, country, source_id, session)
+        
+        @stats_router_local.get("/entity/tracking", response_model=EntityTrackingResponse)
+        async def entity_tracking_endpoint(
+            entity_name: str,
+            days: int = Query(30, ge=1, le=365),
+            window_size: int = Query(7, ge=1, le=30),
+            source_id: Optional[int] = Query(None, description="Optional source ID to filter mentions"),
+            session: Session = Depends(get_db)
+        ):
+            return await get_entity_tracking(entity_name, days, window_size, source_id, session)
+        
+        @stats_router_local.get("/entity/available-countries", response_model=AvailableCountriesResponse)
+        async def available_countries_endpoint(
+            entity_name: str,
+            dimension: str = Query("power", regex="^(power|moral)$"),
+            min_mentions: int = Query(3, ge=1),
+            session: Session = Depends(get_db)
+        ):
+            return await get_available_countries_for_entity(entity_name, dimension, min_mentions, session)
+        
+        @stats_router_local.get("/entity/global-counts")
+        def global_counts_endpoint(session: Session = Depends(get_db)):
+            return get_global_entity_counts(session)
+        
+        @stats_router_local.get("/article/{article_id}/similar", response_model=SimilarArticlesResponse)
+        def similar_articles_endpoint(
+            article_id: str,
+            limit: int = Query(10, ge=1, le=50),
+            days_window: int = Query(3, ge=1, le=7),
+            min_entity_overlap: float = Query(0.3, ge=0.1, le=1.0),
+            session: Session = Depends(get_db)
+        ):
+            return get_similar_articles(article_id, limit, days_window, min_entity_overlap, session)
+        
+        app.include_router(stats_router_local, prefix="/stats", tags=["Statistics"])
+    except Exception as e:
+        logger.error(f"Failed to configure stats router: {e}")
+        # Fall back to original approach if imports fail
+        app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
 if has_similarity_router:
     app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
 

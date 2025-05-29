@@ -29,6 +29,7 @@ from sqlalchemy.orm import sessionmaker
 from clustering.source_similarity import SourceSimilarityComputer
 from clustering.cluster_manager import ClusterManager
 from clustering.temporal_analyzer import TemporalAnalyzer
+from analyzer.hotelling_t2 import update_weekly_statistics
 
 # Setup logging
 LOG_DIR = ROOT_DIR / "logs"
@@ -158,6 +159,24 @@ def run_monthly_clustering():
         logger.error(f"Error in monthly clustering: {e}", exc_info=True)
 
 
+def update_sentiment_statistics():
+    """Update weekly sentiment statistics for T² calculations."""
+    logger.info("Starting weekly sentiment statistics update")
+    
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        
+        count = update_weekly_statistics(session)
+        
+        session.close()
+        logger.info(f"Updated sentiment statistics for {count} entities")
+        
+    except Exception as e:
+        logger.error(f"Error updating sentiment statistics: {e}", exc_info=True)
+
+
 def database_maintenance():
     """Run database maintenance tasks."""
     logger.info("Starting database maintenance")
@@ -181,6 +200,9 @@ def setup_schedule():
     schedule.every(30).minutes.do(run_scraper)
     schedule.every(5).minutes.do(ensure_analyzer_running)
     
+    # Hourly jobs
+    schedule.every().hour.do(update_sentiment_statistics)
+    
     # Weekly jobs
     schedule.every().sunday.at("02:00").do(run_weekly_similarity)
     
@@ -194,6 +216,7 @@ def setup_schedule():
     logger.info("Schedule configured:")
     logger.info("- Scraper: every 30 minutes")
     logger.info("- Analyzer check: every 5 minutes")
+    logger.info("- Sentiment statistics: every hour")
     logger.info("- Similarity computation: Sundays at 2 AM")
     logger.info("- Clustering: 1st of month at 3 AM")
     logger.info("- Database maintenance: Daily at 4 AM")

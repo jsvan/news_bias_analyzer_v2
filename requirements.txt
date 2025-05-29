@@ -1,6 +1,8 @@
 sqlalchemy>=2.0.23
 psycopg2-binary
 python-dotenv
+numpy
+scipy
 requests
 beautifulsoup4
 feedparser

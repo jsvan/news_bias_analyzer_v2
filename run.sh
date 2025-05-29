@@ -67,6 +67,8 @@ show_help() {
   echo "  analyze diag           Run full diagnostic on the analyzer database status"
   echo "  analyze recover-batches Recover articles from OpenAI batches (use --help for options)"
   echo "  analyze reset-database  Reset database by clearing entity data and article status"
+  echo "  statistics [OPTIONS]   Run statistical analysis and clustering with throttling"
+  echo "                         Options: --force, --intelligence-only, --clustering-only, --status"
   echo "  batch                  Run the batch analyzer"
   echo "  api                    Start the API server"
   echo "  dashboard              Start the web dashboard"
@@ -301,6 +303,16 @@ restore_openai_data() {
   fi
 }
 
+# Run statistical analysis and clustering
+run_statistics() {
+  setup_python_env
+  cd "$PROJECT_ROOT"
+  echo -e "${GREEN}Running statistical analysis and clustering...${NC}"
+  
+  # Pass all arguments to the statistical orchestrator
+  python -m intelligence.statistical_orchestrator "$@"
+}
+
 # Run SQL query on the database
 run_sql_query() {
   setup_python_env
@@ -379,6 +391,10 @@ case "$1" in
     ;;
   analyze)
     run_batch_analyzer "$2"
+    ;;
+  statistics)
+    shift  # Remove the 'statistics' command, leaving any arguments
+    run_statistics "$@"
     ;;
   batch)
     run_batch

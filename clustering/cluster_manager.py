@@ -14,12 +14,22 @@ from sqlalchemy import text
 import json
 
 from .base import BaseAnalyzer, ClusterConfig
+# Import statistical database for storing results
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from statistical_database.db_manager import StatisticalDBManager
 
 logger = logging.getLogger(__name__)
 
 
 class ClusterManager(BaseAnalyzer):
     """Handles clustering of news sources within countries."""
+    
+    def __init__(self, session: Session):
+        super().__init__(session)
+        # Initialize statistical database for storing results
+        self.statistical_db = StatisticalDBManager()
     
     def perform_monthly_clustering(self, month_start: datetime = None):
         """Run monthly clustering job for all countries."""
@@ -317,6 +327,16 @@ class ClusterManager(BaseAnalyzer):
         
         self.session.commit()
         logger.info(f"Stored cluster assignments for {len(tier1_sources) + len(tier2_sources)} sources in {country}")
+        
+        # Also store clustering results in statistical database for intelligence analysis
+        self._store_clustering_in_statistical_db(
+            country=country,
+            clusters=clusters,
+            tier1_sources=tier1_sources,
+            tier2_sources=tier2_sources,
+            quality_metrics=quality_metrics,
+            assigned_date=assigned_date
+        )
     
     def get_cluster_centroid_vectors(self, 
                                    start_date: datetime, 
@@ -356,3 +376,57 @@ class ClusterManager(BaseAnalyzer):
                 pass
                 
         return centroid_vectors
+    
+    def _store_clustering_in_statistical_db(self,
+                                           country: str,
+                                           clusters: Dict[int, str],
+                                           tier1_sources: List[Dict],
+                                           tier2_sources: List[Dict],
+                                           quality_metrics: Dict,
+                                           assigned_date: datetime):
+        """Store clustering results in statistical database for intelligence analysis."""
+        try:
+            # Calculate time window (use monthly clustering window)
+            month_start = datetime(assigned_date.year, assigned_date.month, 1)
+            month_end = self._get_month_end(month_start)
+            
+            # Group clusters and calculate metrics for each
+            cluster_groups = {}
+            
+            # Add Tier 1 sources (each is its own cluster)
+            for source in tier1_sources:
+                cluster_id = f"{country}_tier1_{source['id']}"
+                cluster_groups[cluster_id] = [source]
+            
+            # Add Tier 2 source clusters
+            for source in tier2_sources:
+                if source['id'] in clusters:
+                    cluster_id = clusters[source['id']]
+                    if cluster_id not in cluster_groups:
+                        cluster_groups[cluster_id] = []
+                    cluster_groups[cluster_id].append(source)
+            
+            # Store each cluster in statistical database
+            for cluster_id, members in cluster_groups.items():
+                source_count = len(members)
+                
+                # Calculate average similarity (placeholder - would use actual similarity matrix)
+                avg_similarity = quality_metrics.get('avg_intra_cluster_similarity', 0.8)
+                silhouette = quality_metrics.get('silhouette_score', 0.0)
+                
+                # Store cluster cache entry
+                self.statistical_db.store_clustering_cache(
+                    time_window_start=month_start,
+                    time_window_end=month_end,
+                    country=country,
+                    cluster_id=cluster_id,
+                    source_count=source_count,
+                    intra_cluster_similarity=avg_similarity,
+                    silhouette_score=silhouette
+                )
+            
+            logger.info(f"Stored {len(cluster_groups)} clusters in statistical database for {country}")
+            
+        except Exception as e:
+            logger.error(f"Error storing clustering results in statistical database: {e}")
+            # Don't fail the main clustering process if statistical storage fails

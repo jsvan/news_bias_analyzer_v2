@@ -8,6 +8,8 @@ This file contains various prompts for different analysis tasks.
 ENTITY_SENTIMENT_PROMPT = """
 You analyze how news articles make readers feel about political entities. Different news sources portray the same people, countries, and organizations differently, and we want to measure this.
 
+**IMPORTANT**: You may receive articles in any language (English, German, French, Spanish, Italian, Portuguese, Japanese, Korean, Chinese, Arabic, etc.). Analyze the article in its original language, but ALWAYS extract and report entity names using their official English equivalents to ensure consistent tracking across all global sources.
+
 Find the main political entities that readers naturally form opinions about - countries, leaders, major organizations, etc. For each entity, answer two simple questions:
 
 1. How strong/weak does this entity seem?
@@ -37,6 +39,15 @@ For each key entity, provide:
 1. A precise score on each dimension using the -2 to +2 scale (decimal values are allowed)
 2. 1-2 KEY PHRASES (not full sentences) that demonstrate sentiment toward it
 3. The entity type from the valid categories listed below
+4. Use the OFFICIAL, STANDARDIZED ENGLISH name for each entity:
+   - People: Full official name in English, not titles or shortened versions (e.g., "Xi Jinping", not "习近平" or "President Xi")
+   - Countries: Standard English country name, not government references or capital cities (e.g., "Germany", not "Deutschland" or "Federal Republic of Germany")
+   - Organizations: Official English name or widely recognized English abbreviation (e.g., "European Union", not "Union européenne")
+   - Leaders: Full English name when acting in personal capacity (e.g., "Emmanuel Macron", not "Le Président")
+   - Governments: Use the country name itself, not "government of [Country]" (e.g., "France", not "French government")
+   - International entities: Use standard English terminology (e.g., "United Nations", not "Nations Unies")
+   
+   **CRITICAL FOR NON-ENGLISH SOURCES**: Always translate and standardize entity names to their official English equivalents. This ensures consistent tracking across language barriers while preserving analytical coherence.
 
 
 VALID ENTITY TYPES WITH EXAMPLES:
@@ -70,10 +81,9 @@ VALID ENTITY TYPES WITH EXAMPLES:
 
 **IDEOLOGICAL CONCEPTS** (when concretized as actors):
 18. **political_ideology**: When personified (socialism, "woke ideology", conservatism)
-19. **abstract_force**: Societal forces ("cancel culture", "the establishment", "deep state")
 
 **EMERGING SYMBOLIC INDIVIDUALS**:
-20. **symbolic_individual**: People positioned as representatives of larger issues (George Floyd, Derek Chauvin, Kyle Rittenhouse, specific victims, whistleblowers, viral incident protagonists)
+19. **symbolic_individual**: People positioned as representatives of larger issues (George Floyd, Derek Chauvin, Kyle Rittenhouse, specific victims, whistleblowers, viral incident protagonists)
 
 AGGREGATION RULES:
 - Roll up to major entities: "[Country] police" → [Country], "[Leader] officials" → [Leader], "[Company] teams" → [Company]
@@ -85,14 +95,12 @@ AGGREGATION RULES:
 - Skip minor players, passing mentions, generic demographic references
 - Extract individuals only if they're the primary subject or positioned as symbols of broader issues
 
-**THINK DEEPER ABOUT ATTRIBUTION:**
-- When abstract concepts are mentioned, ask: "Who is actually responsible for this?"
-- Replace vague forces with the specific entities behind them:
-  - "[Geopolitical] sanctions" → extract separate entities: [Country A], [Regional Bloc], [Leader]
-  - "Military strategy" → extract separate entities: [Defense Department], specific generals, defense officials
-  - "[Policy type] policies" → extract separate entities: specific governments, individual leaders
-- If the abstract force succeeds/fails, those responsible look good/bad
-- Extract each decision-maker as a separate entity - don't group them with "and"
+🚫 **CRITICAL: NEVER EXTRACT ABSTRACT FORCES - FIND RESPONSIBLE ENTITIES** 🚫
+- Abstract concepts like "sanctions", "policies", "strategies", "pressure", "forces" are NOT entities
+- MANDATORY QUESTION: "Who is the actual decision-maker behind this action or policy?"
+- PRINCIPLE: Every action has a responsible actor - find that actor, not the action itself
+- Score the RESPONSIBLE ENTITY based on how the action/concept is portrayed
+- Extract each decision-maker as a separate entity, not grouped together
 
 IMPORTANT GUIDELINES:
 - Base analysis solely on how entities are portrayed in THIS SPECIFIC article
@@ -102,10 +110,11 @@ KEY PRINCIPLE: Score based on how the article makes you feel about the entity, n
 
 FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
 {
+  "source_country": "The country or region this news source represents (e.g. USA, UK, China, Russia, Singapore, etc.). Analyze the publication name, URL domain, and content perspective to determine which country's viewpoint this represents.",
   "entities": [
     {
       "entity": "Entity Name",
-      "entity_type": "one of the 20 types: sovereign_state|political_organization|international_institution|political_leader|regional_bloc|major_corporation|industry_sector|business_leader|activist_movement|identity_group|demographic_cohort|specific_technology|tech_platform|scientific_field|media_organization|educational_institution|religious_institution|political_ideology|abstract_force|symbolic_individual",
+      "entity_type": "one of the 19 types: sovereign_state|political_organization|international_institution|political_leader|regional_bloc|major_corporation|industry_sector|business_leader|activist_movement|identity_group|demographic_cohort|specific_technology|tech_platform|scientific_field|media_organization|educational_institution|religious_institution|political_ideology|symbolic_individual",
       "power_score": number,
       "moral_score": number,
       "mentions": [

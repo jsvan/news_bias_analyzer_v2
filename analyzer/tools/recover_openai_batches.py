@@ -305,8 +305,8 @@ def update_or_create_article(db_manager, article_id, article_data, source_id=1):
                 # Update basic info if missing
                 if title and not article.title:
                     article.title = title
-                if content and not article.text:
-                    article.text = content
+                # Note: We intentionally don't restore article text for completed articles
+                # to save storage space. Text is cleared after successful analysis.
                     
                 # Try to use source name from article data if available
                 if source_name:

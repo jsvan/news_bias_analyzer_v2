@@ -233,6 +233,7 @@ class OpenAIProcessor:
             
             # Add results to article data
             article['entities'] = result.get('entities', [])
+            article['source_country'] = result.get('source_country', None)  # Extract LLM-determined country
             article['analysis_model'] = response.model or self.model  # Use actual model from response
             article['processed_at'] = time.time()
             

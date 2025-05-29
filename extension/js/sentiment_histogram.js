@@ -1,56 +1,92 @@
 // Sentiment Histogram Implementation
-// This implements a histogram showing sentiment distribution with current article positioning
+// This implements multiple histograms showing sentiment distribution for all entities
 
 class SentimentHistogram {
-  constructor(canvasId, options = {}) {
-    this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d');
-    
-    // Ensure canvas dimensions match HTML attributes
-    this.canvas.width = 320;
-    this.canvas.height = 300;
+  constructor(containerId, options = {}) {
+    this.containerId = containerId;
+    this.container = document.getElementById(containerId);
     
     this.options = Object.assign({
-      width: this.canvas.width,
-      height: this.canvas.height,
       barColor: '#3498db',
       highlightColor: '#ff8c00', // Orange color for current article
       textColor: '#333',
       countryColor: '#2ecc71', // Color for country-specific data
-      bins: 10,
+      bins: 5,
       showPercentile: true,
       animate: true,
       country: null,  // Currently selected country (null = global)
-      dimension: 'power' // Track current dimension (power or moral)
+      dimension: 'moral' // Default to moral dimension
     }, options);
     
-    this.data = null;
-    this.currentValue = null;
-    this.currentBinInfo = null;
+    this.entities = [];
+    this.entityGlobalCounts = {};
+    this.availableCountries = []; // Cache available countries
+    this.scrollPosition = 0; // Track scroll position
   }
   
-  // Set data for histogram
-  setData(data, currentValue, comparisonData = null) {
-    this.data = data;          // Global data
-    this.comparisonData = comparisonData; // Comparison data (country/source)
-    this.currentValue = currentValue;
-    this.render();
+  // Set entities data for all histograms
+  setEntitiesData(entities) {
+    this.entities = entities;
+    this.renderAllEntities();
   }
   
   // Set country filter
   setCountry(country) {
+    // Save current scroll position
+    if (this.container && this.container.parentElement) {
+      this.scrollPosition = this.container.parentElement.scrollTop;
+    }
+    
     this.options.country = country;
-    this.render();
+    this.renderAllEntities().then(() => {
+      // Restore scroll position after rendering
+      if (this.container && this.container.parentElement) {
+        this.container.parentElement.scrollTop = this.scrollPosition;
+      }
+      
+      // Update all individual selectors to match
+      this.updateAllCountrySelectors(country);
+    });
+  }
+  
+  // Set country filter with anchor positioning for individual selectors
+  setCountryWithAnchor(country, anchorId) {
+    this.options.country = country;
+    this.renderAllEntities().then(() => {
+      // Update all individual selectors to match
+      this.updateAllCountrySelectors(country);
+      
+      // Scroll back to the specific histogram that was changed
+      if (anchorId) {
+        const targetElement = document.getElementById(anchorId);
+        if (targetElement) {
+          targetElement.scrollIntoView({ 
+            behavior: 'instant', 
+            block: 'center'
+          });
+        }
+      }
+    });
   }
   
   // Set dimension (power or moral)
   setDimension(dimension) {
+    // Save current scroll position
+    if (this.container && this.container.parentElement) {
+      this.scrollPosition = this.container.parentElement.scrollTop;
+    }
+    
     this.options.dimension = dimension;
-    this.render();
+    this.renderAllEntities().then(() => {
+      // Restore scroll position after rendering
+      if (this.container && this.container.parentElement) {
+        this.container.parentElement.scrollTop = this.scrollPosition;
+      }
+    });
   }
   
   // Create bins from data
-  createBins(data, numBins = 10, normalize = false) {
+  createBins(data, numBins = 5, normalize = false) {
     if (!data || data.length === 0) return [];
     
     // Fixed range for sentiment scores: -2 to +2
@@ -104,247 +140,534 @@ class SentimentHistogram {
     }
     return -1;
   }
-  
-  // Render the histogram
-  render() {
-    if (!this.data || this.data.length === 0 || (this.data.length < 5 && this.data.every(val => val === 0))) {
-      this.drawEmptyState("No data available for this entity");
+
+  // Render all entity histograms ordered by global count
+  async renderAllEntities() {
+    if (!this.container) return;
+    
+    // Clear container
+    this.container.innerHTML = '';
+    
+    if (!this.entities || this.entities.length === 0) {
+      this.container.innerHTML = '<div class="empty-message">No entities available</div>';
       return;
     }
+
+    // Fetch global counts for all entities
+    await this.fetchGlobalCounts();
     
-    const { width, height, barColor, highlightColor, countryColor, textColor, bins, showPercentile, country } = this.options;
+    // Sort entities by global count (descending)
+    const sortedEntities = [...this.entities].sort((a, b) => {
+      const nameA = a.name || a.entity;
+      const nameB = b.name || b.entity;
+      const countA = this.entityGlobalCounts[nameA] || 0;
+      const countB = this.entityGlobalCounts[nameB] || 0;
+      return countB - countA;
+    });
+
+    // Render entities and collect results for reordering
+    const renderResults = [];
+    for (const entity of sortedEntities) {
+      const result = await this.renderEntityHistogramWithResult(entity);
+      renderResults.push(result);
+    }
+
+    // Reorder: successful renders first, then failed ones
+    const successfulResults = renderResults.filter(r => r.success);
+    const failedResults = renderResults.filter(r => !r.success);
     
-    // Clear canvas and reset current bin info
-    this.ctx.clearRect(0, 0, width, height);
-    this.currentBinInfo = null;
+    // Clear container again and add in correct order
+    this.container.innerHTML = '';
     
-    // Check if we have comparison data to determine normalization
+    // Add successful renders first
+    successfulResults.forEach(result => {
+      this.container.appendChild(result.element);
+    });
+    
+    // Add failed renders at the bottom
+    failedResults.forEach(result => {
+      this.container.appendChild(result.element);
+    });
+  }
+
+  // Fetch global counts for entities
+  async fetchGlobalCounts() {
+    try {
+      const response = await fetch('http://localhost:8000/stats/entity/global-counts');
+      if (response.ok) {
+        const data = await response.json();
+        this.entityGlobalCounts = data.counts || {};
+      }
+    } catch (error) {
+      console.warn('Could not fetch global entity counts:', error);
+      this.entityGlobalCounts = {};
+    }
+  }
+
+  // Render histogram for a single entity (returns success status)
+  async renderEntityHistogramWithResult(entity) {
+    const entityName = entity.name || entity.entity;
+    if (!entityName) return { success: false, element: null };
+
+    // Create container for this entity
+    const entityContainer = document.createElement('div');
+    entityContainer.className = 'entity-histogram-container';
+    entityContainer.style.marginBottom = '30px';
+    
+    // Add unique ID for anchor functionality
+    const safeEntityName = entityName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    entityContainer.id = `histogram-${safeEntityName}`;
+    entityContainer.setAttribute('data-entity-name', entityName);
+    
+    // Create title
+    const title = document.createElement('h4');
+    title.textContent = `${entityName} - ${this.options.dimension === 'moral' ? 'Moral' : 'Power'} Distribution`;
+    title.style.marginBottom = '10px';
+    title.style.fontSize = '14px';
+    entityContainer.appendChild(title);
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 200;
+    canvas.style.border = '1px solid #ddd';
+    entityContainer.appendChild(canvas);
+
+    // Create individual country selector
+    const countrySelector = document.createElement('select');
+    countrySelector.className = 'entity-country-selector';
+    countrySelector.style.cssText = `
+      width: 100%;
+      padding: 4px 8px;
+      margin-top: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      background-color: white;
+    `;
+    countrySelector.innerHTML = '<option value="">Global Comparison</option>';
+    
+    // Add event listener for this selector with anchor positioning
+    countrySelector.addEventListener('change', (e) => {
+      this.setCountryWithAnchor(e.target.value, entityContainer.id);
+    });
+    
+    entityContainer.appendChild(countrySelector);
+
+    // Create sample size info
+    const sampleInfo = document.createElement('div');
+    sampleInfo.className = 'sample-size-info';
+    sampleInfo.style.fontSize = '12px';
+    sampleInfo.style.color = '#666';
+    sampleInfo.style.marginTop = '5px';
+    sampleInfo.textContent = 'Loading...';
+    entityContainer.appendChild(sampleInfo);
+
+    // Populate country selector with available countries
+    await this.populateCountrySelector(countrySelector, entityName);
+    
+    // Set current selection (only if this entity has data for the selected country)
+    const hasSelectedCountry = Array.from(countrySelector.options).some(option => option.value === (this.options.country || ''));
+    countrySelector.value = hasSelectedCountry ? (this.options.country || '') : '';
+    
+    // Fetch and render data for this entity
+    const success = await this.fetchAndRenderEntityData(entity, canvas, sampleInfo, countrySelector);
+    
+    return { success, element: entityContainer };
+  }
+
+  // Render histogram for a single entity (legacy method for backward compatibility)
+  async renderEntityHistogram(entity) {
+    const result = await this.renderEntityHistogramWithResult(entity);
+    if (result.element) {
+      this.container.appendChild(result.element);
+    }
+  }
+
+  // Fetch and render data for a specific entity
+  async fetchAndRenderEntityData(entity, canvas, sampleInfo, countrySelector = null) {
+    const entityName = entity.name || entity.entity;
+    const dimension = this.options.dimension;
+    // Use the individual selector's value if provided, otherwise fall back to global
+    const country = countrySelector ? countrySelector.value : this.options.country;
+
+    try {
+      // Build API URL
+      let apiUrl = `http://localhost:8000/stats/sentiment/distribution?entity_name=${encodeURIComponent(entityName)}&dimension=${dimension}`;
+      if (country) {
+        apiUrl += `&country=${encodeURIComponent(country)}`;
+      }
+
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        // Check if it's a 400 error (insufficient data)
+        if (response.status === 400) {
+          this.renderEmptyCanvas(canvas, 'Not enough data');
+          sampleInfo.textContent = 'Not enough data for meaningful analysis';
+          sampleInfo.style.color = '#e67e22';
+          sampleInfo.style.fontWeight = 'bold';
+          return false; // Indicate failure
+        }
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Check if we have valid data
+      if (!data.has_data || !data.values || data.values.length < 5) {
+        this.renderEmptyCanvas(canvas, 'Not enough data');
+        sampleInfo.textContent = 'Not enough data for meaningful analysis';
+        sampleInfo.style.color = '#e67e22';
+        sampleInfo.style.fontWeight = 'bold';
+        return false; // Indicate failure
+      }
+
+      // Get current entity's value from the entity object
+      const currentValue = dimension === 'moral' ? entity.moral_score : entity.power_score;
+
+      // Render the histogram
+      this.renderEntityCanvas(canvas, data.values, currentValue, data.comparison_data, dimension);
+
+      // Update sample size info
+      let sampleText = `Sample: ${data.sample_size} mentions`;
+      if (data.comparison_data) {
+        const comparisonKey = Object.keys(data.comparison_data)[0];
+        if (comparisonKey && data.comparison_data[comparisonKey]) {
+          const comparisonCount = data.comparison_data[comparisonKey].length;
+          sampleText += ` | ${comparisonKey}: ${comparisonCount} mentions`;
+        }
+      }
+      sampleInfo.textContent = sampleText;
+      sampleInfo.style.color = '#666'; // Reset to normal color
+      sampleInfo.style.fontWeight = 'normal'; // Reset to normal weight
+      
+      return true; // Indicate success
+
+    } catch (error) {
+      console.error(`Error fetching data for entity ${entityName}:`, error);
+      this.renderEmptyCanvas(canvas, 'Error loading data');
+      sampleInfo.textContent = 'Error loading data from server';
+      sampleInfo.style.color = '#e74c3c';
+      sampleInfo.style.fontWeight = 'bold';
+      return false; // Indicate failure
+    }
+  }
+
+  // Render canvas for a specific entity
+  renderEntityCanvas(canvas, values, currentValue, comparisonData, dimension) {
+    const ctx = canvas.getContext('2d');
+    const { barColor, highlightColor, textColor, countryColor, bins } = this.options;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Check if we have comparison data
     let comparisonBinData = null;
-    let comparisonLabel = "";
     let hasComparison = false;
     
-    if (this.comparisonData) {
-      const comparisonKey = Object.keys(this.comparisonData)[0];
-      if (comparisonKey && this.comparisonData[comparisonKey] && this.comparisonData[comparisonKey].length > 0) {
-        const comparisonDataForBin = this.comparisonData[comparisonKey];
-        comparisonBinData = this.createBins(comparisonDataForBin, bins, true); // normalize comparison
-        comparisonLabel = comparisonKey;
+    if (comparisonData) {
+      const comparisonKey = Object.keys(comparisonData)[0];
+      if (comparisonKey && comparisonData[comparisonKey] && comparisonData[comparisonKey].length > 0) {
+        const comparisonDataForBin = comparisonData[comparisonKey];
+        comparisonBinData = this.createBins(comparisonDataForBin, bins, true); // Normalize country data
+        // Add the raw values and label for percentile calculation
+        comparisonBinData.values = comparisonDataForBin;
+        comparisonBinData.label = comparisonKey;
         hasComparison = true;
       }
     }
     
-    // Create bins for global data (normalize if we have comparison data)
-    const binData = this.createBins(this.data, bins, hasComparison);
-    const { counts, boundaries, max } = binData;
-    
+    // Create bins for global data (normalize if we have comparison)
+    const binData = this.createBins(values, bins, hasComparison);
+    const { counts, boundaries } = binData;
     
     // Find which bin contains the current value
-    const currentBin = this.findBinForValue(this.currentValue, boundaries);
+    const currentBin = this.findBinForValue(currentValue, boundaries);
     
     // Calculate dimensions
-    const padding = { top: 30, right: 20, bottom: 40, left: 40 };
+    const padding = { top: 20, right: 15, bottom: 60, left: 30 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
     const barWidth = chartWidth / bins;
     
     // Determine maximum value for scaling
-    let maxValue;
-    if (hasComparison) {
-      // When normalized, max value should be 1.0 for consistent scaling
-      maxValue = 1.0;
-    } else {
-      maxValue = max;
-    }
-    
+    let maxValue = hasComparison ? 1.0 : Math.max(...counts);
     
     // Draw axes
-    this.ctx.beginPath();
-    this.ctx.strokeStyle = textColor;
-    this.ctx.lineWidth = 1;
-    this.ctx.moveTo(padding.left, height - padding.bottom);
-    this.ctx.lineTo(width - padding.right, height - padding.bottom);
-    this.ctx.stroke();
+    ctx.beginPath();
+    ctx.strokeStyle = textColor;
+    ctx.lineWidth = 1;
+    ctx.moveTo(padding.left, height - padding.bottom);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.stroke();
     
     // Y-axis
-    this.ctx.beginPath();
-    this.ctx.moveTo(padding.left, padding.top);
-    this.ctx.lineTo(padding.left, height - padding.bottom);
-    this.ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.stroke();
     
-    // Draw global data bars
+    // Draw bars and labels
     counts.forEach((count, i) => {
       const x = padding.left + i * barWidth;
       const barHeight = (count / maxValue) * chartHeight;
       const y = height - padding.bottom - barHeight;
 
-      // Draw bar (all bars are blue)
-      this.ctx.fillStyle = barColor;
-      this.ctx.fillRect(x, y, barWidth - 0.1, barHeight);
+      // Draw bar
+      ctx.fillStyle = barColor;
+      ctx.fillRect(x, y, barWidth - 1, barHeight);
 
-      // Store current bin info for later drawing (after all bars)
-      if (i === currentBin) {
-        this.currentBinInfo = { x, y, barWidth, barHeight };
+      // Draw semantic labels
+      ctx.fillStyle = textColor;
+      ctx.textAlign = 'center';
+      ctx.font = '9px Arial';
+
+      let label = '';
+      if (i === 0) {
+        label = dimension === 'power' ? 'Very Weak' : 'Very Evil';
+      } else if (i === 1) {
+        label = dimension === 'power' ? 'Weak' : 'Evil';
+      } else if (i === 2) {
+        label = 'Neutral';
+      } else if (i === 3) {
+        label = dimension === 'power' ? 'Strong' : 'Good';
+      } else {
+        label = dimension === 'power' ? 'Very Strong' : 'Very Good';
       }
 
-      // Draw semantic labels (only show first, middle, and last for clarity)
-      if (i === 0 || i === Math.floor(bins/2) || i === bins - 1) {
-        this.ctx.fillStyle = textColor;
-        this.ctx.textAlign = 'center';
-        this.ctx.font = '11px Arial';
-
-        // Get semantic label based on dimension and position
-        let label = '';
-        const { dimension } = this.options;
-        
-        if (i === 0) {
-          // Left side (negative values)
-          label = dimension === 'power' ? 'Weak' : 'Evil';
-        } else if (i === Math.floor(bins/2)) {
-          // Center (neutral)
-          label = 'Neutral';
-        } else {
-          // Right side (positive values)
-          label = dimension === 'power' ? 'Strong' : 'Good';
-        }
-
-        // All labels stay horizontal for better readability
-        this.ctx.fillText(
-          label,
-          x + barWidth / 2,
-          height - padding.bottom + 15
-        );
-      }
+      ctx.fillText(label, x + barWidth / 2, height - padding.bottom + 15);
     });
-    
-    // Draw comparison-specific bars if available
+
+    // Draw comparison bars if available (country-specific data)
     if (comparisonBinData) {
       comparisonBinData.counts.forEach((count, i) => {
         const x = padding.left + i * barWidth;
         const barHeight = (count / maxValue) * chartHeight;
         const y = height - padding.bottom - barHeight;
         
-        // Draw comparison bars as outlined bars (same width as main bars)
-        this.ctx.strokeStyle = countryColor;
-        this.ctx.lineWidth = 3;
-        this.ctx.strokeRect(x, y, barWidth - 0.1, barHeight);
+        // Draw country data as outlined bars with pattern
+        ctx.strokeStyle = countryColor;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x + 2, y, barWidth - 5, barHeight);
         
-        // Fill with semi-transparent comparison color
-        this.ctx.fillStyle = countryColor;
-        this.ctx.globalAlpha = 0.3;
-        this.ctx.fillRect(x, y, barWidth - 0.1, barHeight);
-        this.ctx.globalAlpha = 1.0;
+        // Add diagonal line pattern for country data
+        ctx.strokeStyle = countryColor;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.6;
+        
+        // Draw diagonal lines pattern
+        const lineSpacing = 4;
+        for (let offset = -(barHeight + barWidth); offset < barWidth + barHeight; offset += lineSpacing) {
+          ctx.beginPath();
+          const startX = x + 2 + Math.max(0, offset);
+          const startY = y + Math.max(0, -offset);
+          const endX = x + 2 + Math.min(barWidth - 5, offset + barHeight);
+          const endY = y + Math.min(barHeight, barHeight - offset);
+          
+          // Only draw if line is within the bar bounds
+          if (startX < x + barWidth - 2 && startY < y + barHeight && endX > x + 2 && endY > y) {
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+          }
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
       });
     }
+
+    // Draw current article indicator
+    if (currentBin >= 0 && currentBin < counts.length) {
+      const x = padding.left + currentBin * barWidth;
+      const barHeight = (counts[currentBin] / maxValue) * chartHeight;
+      const y = height - padding.bottom - barHeight;
+      
+      // Calculate percentile - use comparison data if available, otherwise global data
+      let percentile, percentileLabel;
+      if (comparisonBinData && comparisonBinData.values && comparisonBinData.values.length > 0) {
+        // Calculate percentile relative to country/comparison data
+        const comparisonValues = comparisonBinData.values;
+        const lowerCountComparison = comparisonValues.filter(v => v < currentValue).length;
+        percentile = Math.round((lowerCountComparison / comparisonValues.length) * 100);
+        percentileLabel = `${percentile}th percentile (${comparisonBinData.label || 'comparison'})`;
+      } else {
+        // Calculate percentile relative to global data
+        const lowerCount = values.filter(v => v < currentValue).length;
+        percentile = Math.round((lowerCount / values.length) * 100);
+        percentileLabel = `${percentile}th percentile (global)`;
+      }
+      
+      // Draw orange circle overlay
+      const circleRadius = (barWidth - 1) * 0.15;
+      const circleX = x + barWidth / 2;
+      const circleY = y + barHeight / 2;
+      
+      ctx.beginPath();
+      ctx.fillStyle = highlightColor;
+      ctx.arc(circleX, circleY, circleRadius, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Draw marker triangle
+      ctx.beginPath();
+      ctx.fillStyle = highlightColor;
+      ctx.moveTo(x + barWidth / 2, y - 8);
+      ctx.lineTo(x + barWidth / 2 - 5, y - 2);
+      ctx.lineTo(x + barWidth / 2 + 5, y - 2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Add "Your Article" label
+      ctx.fillStyle = highlightColor;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 8px Arial';
+      ctx.fillText("Your Article", x + barWidth / 2, y - 18);
+      
+      ctx.font = '7px Arial';
+      ctx.fillText(percentileLabel, x + barWidth / 2, y - 10);
+    }
+
+    // Draw average lines
+    const minVal = -2;
+    const maxVal = 2;
+    const range = maxVal - minVal;
     
+    // Global average line
+    const average = values.reduce((sum, val) => sum + val, 0) / values.length;
+    const avgX = padding.left + ((average - minVal) / range) * chartWidth;
+    
+    if (avgX >= padding.left && avgX <= width - padding.right) {
+      ctx.beginPath();
+      ctx.strokeStyle = hasComparison ? '#3498db' : '#666666';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.moveTo(avgX, padding.top);
+      ctx.lineTo(avgX, height - padding.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    
+    // Comparison average line (if available)
+    if (comparisonBinData && comparisonBinData.values && comparisonBinData.values.length > 0) {
+      const comparisonAverage = comparisonBinData.values.reduce((sum, val) => sum + val, 0) / comparisonBinData.values.length;
+      const comparisonAvgX = padding.left + ((comparisonAverage - minVal) / range) * chartWidth;
+      
+      if (comparisonAvgX >= padding.left && comparisonAvgX <= width - padding.right) {
+        ctx.beginPath();
+        ctx.strokeStyle = countryColor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 2]);
+        ctx.moveTo(comparisonAvgX, padding.top);
+        ctx.lineTo(comparisonAvgX, height - padding.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     // Draw y-axis labels
-    this.ctx.fillStyle = textColor;
-    this.ctx.textAlign = 'right';
-    this.ctx.textBaseline = 'middle';
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
     
-    // Draw a few y-axis labels
-    for (let i = 0; i <= 5; i++) {
-      const value = maxValue * (i / 5);
-      const y = height - padding.bottom - (chartHeight * (i / 5));
+    for (let i = 0; i <= 3; i++) {
+      const value = maxValue * (i / 3);
+      const y = height - padding.bottom - (chartHeight * (i / 3));
       
       if (hasComparison) {
-        // Show as probability (0.0 to 1.0)
-        this.ctx.fillText((value).toFixed(1), padding.left - 5, y);
+        ctx.fillText((value).toFixed(1), padding.left - 3, y);
       } else {
-        // Show as count
-        this.ctx.fillText(Math.round(value), padding.left - 5, y);
+        ctx.fillText(Math.round(value), padding.left - 3, y);
       }
     }
     
-    // Draw current article indicator after all bars (so it's on top)
-    if (this.currentBinInfo) {
-      const { x, y, barWidth, barHeight } = this.currentBinInfo;
+    // Draw mini legend if we have comparison data
+    if (hasComparison) {
+      const legendY = height - padding.bottom + 35;
       
-      // Calculate percentile for the second line of text
-      const lowerCount = this.data.filter(v => v < this.currentValue).length;
-      const percentile = Math.round((lowerCount / this.data.length) * 100);
+      // Global data legend
+      ctx.fillStyle = barColor;
+      ctx.fillRect(padding.left, legendY, 12, 8);
+      ctx.fillStyle = textColor;
+      ctx.textAlign = 'left';
+      ctx.font = '9px Arial';
+      ctx.fillText('Global', padding.left + 16, legendY + 6);
       
-      // Draw orange circle overlay on the bar (slightly narrower than bar)
-      const circleRadius = (barWidth - 0.1) * 0.4; // Circle slightly narrower than bar
-      const circleX = x + barWidth / 2;
-      const circleY = y + barHeight / 2; // Center vertically on the bar
-      
-      this.ctx.beginPath();
-      this.ctx.fillStyle = highlightColor;
-      this.ctx.arc(circleX, circleY, circleRadius, 0, 2 * Math.PI);
-      this.ctx.fill();
-      
-      // Draw marker triangle above the bar
-      this.ctx.beginPath();
-      this.ctx.fillStyle = highlightColor;
-      this.ctx.moveTo(x + barWidth / 2, y - 10);
-      this.ctx.lineTo(x + barWidth / 2 - 7, y - 3);
-      this.ctx.lineTo(x + barWidth / 2 + 7, y - 3);
-      this.ctx.closePath();
-      this.ctx.fill();
-
-      // Add "Your Article" label (on top of everything)
-      this.ctx.fillStyle = highlightColor;
-      this.ctx.textAlign = 'center';
-      this.ctx.font = 'bold 10px Arial';
-      this.ctx.fillText("Your Article", x + barWidth / 2, y - 25);
-      
-      // Add percentile as second line
-      this.ctx.font = '9px Arial';
-      this.ctx.fillText(`${percentile}th percentile`, x + barWidth / 2, y - 15);
+      // Country data legend
+      ctx.strokeStyle = countryColor;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(padding.left + 60, legendY, 12, 8);
+      ctx.fillStyle = countryColor;
+      ctx.globalAlpha = 0.2;
+      ctx.fillRect(padding.left + 60, legendY, 12, 8);
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = textColor;
+      ctx.fillText('Country', padding.left + 76, legendY + 6);
     }
-    
-    // Draw axes labels
-    this.ctx.fillStyle = textColor;  // Reset to black for axis labels
-    this.ctx.textAlign = 'center';
-    this.ctx.font = '12px Arial';
-    this.ctx.fillText('Sentiment Score', width / 2, height - 5);
+  }
 
-    this.ctx.save();
-    this.ctx.translate(15, height / 2);
-    this.ctx.rotate(-Math.PI / 2);
-    this.ctx.fillStyle = textColor;  // Reset to black for y-axis label
-    this.ctx.fillText(hasComparison ? 'Probability' : 'Frequency', 0, 0);
-    this.ctx.restore();
-    
-    // Title is now handled in HTML, not drawn on canvas
-    
-    // Percentile info is now part of the "Your Article" pointer above
-    
-    // Draw legend for comparison data
-    if (comparisonBinData) {
-      const legendY = padding.top + 15;
-      const legendX1 = padding.left + 10;
-      const legendX2 = padding.left + chartWidth / 2;
+  // Render empty canvas
+  renderEmptyCanvas(canvas, message = 'No data available') {
+    const ctx = canvas.getContext('2d');
+    const { textColor } = this.options;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    ctx.font = '12px Arial';
+    ctx.fillText(message, canvas.width / 2, canvas.height / 2);
+  }
+  
+  // Populate individual country selector
+  async populateCountrySelector(selector, entityName) {
+    try {
+      const apiUrl = `http://localhost:8000/stats/entity/available-countries?entity_name=${encodeURIComponent(entityName)}&dimension=${this.options.dimension}`;
+      const response = await fetch(apiUrl);
       
-      // Global/All Sources legend
-      this.ctx.fillStyle = barColor;
-      this.ctx.fillRect(legendX1, legendY, 10, 10);
-      this.ctx.fillStyle = textColor;
-      this.ctx.textAlign = 'left';
-      this.ctx.font = '10px Arial';
-      this.ctx.fillText('All Sources', legendX1 + 15, legendY + 5);
-      
-      // Comparison legend (country or source)
-      this.ctx.fillStyle = countryColor;
-      this.ctx.fillRect(legendX2, legendY, 10, 10);
-      this.ctx.fillStyle = textColor;
-      this.ctx.fillText(comparisonLabel, legendX2 + 15, legendY + 5);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Clear existing options except global
+        selector.innerHTML = '<option value="">Global Comparison</option>';
+        
+        // Add countries with sufficient data
+        data.countries.forEach(country => {
+          const option = document.createElement('option');
+          option.value = country.code;
+          option.textContent = `${country.name} Comparison`;
+          selector.appendChild(option);
+        });
+        
+        // Cache available countries
+        this.availableCountries = data.countries;
+      }
+    } catch (error) {
+      console.warn('Could not fetch available countries for selector:', error);
+      // Keep just global option on error
+      selector.innerHTML = '<option value="">Global Comparison</option>';
     }
   }
   
-  // Draw empty state when no data
-  drawEmptyState(message = 'No data available') {
-    const { width, height, textColor } = this.options;
-
-    this.ctx.clearRect(0, 0, width, height);
-    this.ctx.fillStyle = textColor;
-    this.ctx.textAlign = 'center';
-    this.ctx.font = '12px Arial';
-    this.ctx.fillText(message, width / 2, height / 2);
-
-    // Draw a small legend or explanation
-    this.ctx.font = '10px Arial';
-    this.ctx.fillText('Analysis requires more data points for this entity', width / 2, height / 2 + 25);
+  // Update all individual country selectors intelligently
+  updateAllCountrySelectors(selectedCountry) {
+    const selectors = this.container.querySelectorAll('.entity-country-selector');
+    selectors.forEach(selector => {
+      // Check if the selected country is available for this specific selector
+      const hasCountryOption = Array.from(selector.options).some(option => option.value === selectedCountry);
+      
+      if (hasCountryOption) {
+        // Country is available for this entity, select it
+        selector.value = selectedCountry || '';
+      } else {
+        // Country not available for this entity, fall back to global
+        selector.value = '';
+      }
+    });
+  }
+  
+  // Legacy render method (kept for backward compatibility)
+  render() {
+    // This method is now deprecated - use renderAllEntities() instead
+    console.warn('SentimentHistogram.render() is deprecated - use renderAllEntities() instead');
   }
   
 }

@@ -42,6 +42,15 @@ except ImportError:
     stats_router = APIRouter()
     has_stats_router = False
 
+# Import intelligence system
+try:
+    from intelligence.api_endpoints import router as intelligence_router
+    has_intelligence_router = True
+except ImportError:
+    from fastapi import APIRouter
+    intelligence_router = APIRouter()
+    has_intelligence_router = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer Dashboard API",
@@ -576,6 +585,9 @@ def get_historical_sentiment(
 # Include routers if available
 if has_stats_router:
     app.include_router(stats_router)
+
+if has_intelligence_router:
+    app.include_router(intelligence_router)
 
 # Add request logging middleware
 @app.middleware("http")

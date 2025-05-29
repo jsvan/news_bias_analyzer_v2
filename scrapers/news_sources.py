@@ -90,6 +90,31 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "name": "The Globe and Mail",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/politics/",  # Valid
+                "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/world/",  # Valid
+            ]
+        },
+        {
+            "name": "National Post",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://nationalpost.com/feed/",  # Valid
+            ]
+        },
+        {
+            "name": "Toronto Star",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.thestar.com/feeds/articles.rss",  # Valid
+            ]
+        },
+        {
             "name": "BBC",
             "country": "UK",
             "language": "en",
@@ -112,12 +137,47 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "name": "Sky News",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://feeds.skynews.com/feeds/rss/home.xml",  # Valid
+                "https://feeds.skynews.com/feeds/rss/world.xml",  # Valid
+                "https://feeds.skynews.com/feeds/rss/politics.xml",  # Valid
+            ]
+        },
+        {
+            "name": "The Telegraph",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.telegraph.co.uk/rss.xml",  # Valid
+            ]
+        },
+        {
+            "name": "The Independent",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.independent.co.uk/news/world/rss",  # Valid
+                "https://www.independent.co.uk/news/uk/rss",  # Valid
+            ]
+        },
+        {
             "name": "Deutsche Welle",
             "country": "Germany",
             "language": "en",
             "rss_feeds": [
                 "https://rss.dw.com/rdf/rss-en-all",  # Valid
                 "https://rss.dw.com/rdf/rss-en-world",  # Valid
+            ]
+        },
+        {
+            "name": "Der Spiegel",
+            "country": "Germany",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.spiegel.de/international/index.rss",  # Valid
             ]
         },
         {
@@ -332,11 +392,51 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "name": "NHK World",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "https://www3.nhk.or.jp/rss/news/cat0.xml",  # Valid
+            ]
+        },
+        {
+            "name": "Kyodo News",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "https://english.kyodonews.net/rss/all.xml",  # Valid
+            ]
+        },
+        {
+            "name": "Asahi Shimbun",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "https://rss.asahi.com/rss/asahi/newsheadlines.rdf",  # Valid
+            ]
+        },
+        {
             "name": "The Korea Times",
             "country": "South Korea",
             "language": "en",
             "rss_feeds": [
                 "https://www.koreatimes.co.kr/www/rss/rss.xml",  # Valid
+            ]
+        },
+        {
+            "name": "Korea Herald",
+            "country": "South Korea",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.koreaherald.com/rss_xml.php",  # Valid
+            ]
+        },
+        {
+            "name": "Yonhap News",
+            "country": "South Korea",
+            "language": "en",
+            "rss_feeds": [
+                "https://en.yna.co.kr/RSS/news.xml",  # Valid
             ]
         },
         {
@@ -397,6 +497,16 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
+            "name": "The Age",
+            "country": "Australia",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.theage.com.au/rss/feed.xml",  # Valid
+                "https://www.theage.com.au/rss/world.xml",  # Valid
+                "https://www.theage.com.au/rss/national.xml",  # Valid
+            ]
+        },
+        {
             "name": "New Zealand Herald",
             "country": "New Zealand",
             "language": "en",
@@ -447,6 +557,542 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://www.foreignaffairs.com/rss.xml",  # Valid
+            ]
+        },
+        # Additional UK sources
+        {
+            "name": "Sky News",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://feeds.skynews.com/feeds/rss/home.xml",  # Sky News main feed
+                "https://feeds.skynews.com/feeds/rss/world.xml",  # Sky News world news
+            ]
+        },
+        {
+            "name": "The Telegraph",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.telegraph.co.uk/rss.xml",  # The Telegraph main feed
+            ]
+        },
+        {
+            "name": "The Independent",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.independent.co.uk/news/world/rss",  # Independent world news
+                "https://www.independent.co.uk/news/uk/rss",  # Independent UK news
+            ]
+        },
+        # Additional Canadian sources
+        {
+            "name": "Globe and Mail",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/news/",  # Globe and Mail news
+            ]
+        },
+        {
+            "name": "National Post",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://nationalpost.com/feed/",  # National Post main feed
+            ]
+        },
+        {
+            "name": "Toronto Star",
+            "country": "Canada",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.thestar.com/content/thestar/feed.RSSManagerServlet.topstories.rss",  # Toronto Star
+            ]
+        },
+        # Additional German sources
+        {
+            "name": "Der Spiegel",
+            "country": "Germany",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.spiegel.de/international/index.rss",  # Der Spiegel International (English)
+                "https://www.spiegel.de/schlagzeilen/index.rss",  # Der Spiegel main (German)
+            ]
+        },
+        {
+            "name": "Frankfurter Allgemeine Zeitung",
+            "country": "Germany",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.faz.net/rss/aktuell/",  # FAZ current news
+            ]
+        },
+        # French sources
+        {
+            "name": "Le Monde",
+            "country": "France",
+            "language": "fr",
+            "rss_feeds": [
+                "https://www.lemonde.fr/rss/une.xml",  # Le Monde front page
+                "https://www.lemonde.fr/international/rss_full.xml",  # Le Monde international
+            ]
+        },
+        {
+            "name": "Le Figaro",
+            "country": "France",
+            "language": "fr",
+            "rss_feeds": [
+                "https://www.lefigaro.fr/rss/figaro_actualites.xml",  # Le Figaro news
+                "https://www.lefigaro.fr/rss/figaro_international.xml",  # Le Figaro international
+            ]
+        },
+        # Italian sources
+        {
+            "name": "Corriere della Sera",
+            "country": "Italy",
+            "language": "it",
+            "rss_feeds": [
+                "https://xml2.corriereobjects.it/rss/homepage.xml",  # Corriere homepage
+                "https://xml2.corriereobjects.it/rss/esteri.xml",  # Corriere international
+            ]
+        },
+        {
+            "name": "La Repubblica",
+            "country": "Italy",
+            "language": "it",
+            "rss_feeds": [
+                "https://www.repubblica.it/rss/homepage/rss2.0.xml",  # La Repubblica homepage
+            ]
+        },
+        # Spanish sources
+        {
+            "name": "El País",
+            "country": "Spain",
+            "language": "es",
+            "rss_feeds": [
+                "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada",  # El País main
+                "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional",  # El País international
+            ]
+        },
+        {
+            "name": "El Mundo",
+            "country": "Spain",
+            "language": "es",
+            "rss_feeds": [
+                "https://e00-elmundo.uecdn.es/elmundo/rss/portada.xml",  # El Mundo main
+            ]
+        },
+        # Additional Japanese sources
+        {
+            "name": "NHK World",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "https://www3.nhk.or.jp/rss/news/cat0.xml",  # NHK World English
+            ]
+        },
+        {
+            "name": "Kyodo News",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "https://english.kyodonews.net/rss/all.xml",  # Kyodo News English
+            ]
+        },
+        {
+            "name": "Asahi Shimbun",
+            "country": "Japan",
+            "language": "en",
+            "rss_feeds": [
+                "http://rss.asahi.com/rss/asahi/newsheadlines.rdf",  # Asahi Shimbun
+            ]
+        },
+        # Additional South Korean sources
+        {
+            "name": "Korea Herald",
+            "country": "South Korea",
+            "language": "en",
+            "rss_feeds": [
+                "http://www.koreaherald.com/rss_xml.php",  # Korea Herald
+            ]
+        },
+        {
+            "name": "Yonhap News",
+            "country": "South Korea",
+            "language": "en",
+            "rss_feeds": [
+                "https://en.yna.co.kr/RSS/news.xml",  # Yonhap English
+            ]
+        },
+        # Additional Australian sources
+        {
+            "name": "The Age",
+            "country": "Australia",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.theage.com.au/rss/feed.xml",  # The Age main
+                "https://www.theage.com.au/rss/world.xml",  # The Age world
+            ]
+        },
+        {
+            "name": "The Australian",
+            "country": "Australia",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.theaustralian.com.au/rss/",  # The Australian main
+            ]
+        },
+        # Brazilian sources
+        {
+            "name": "Folha de S.Paulo",
+            "country": "Brazil",
+            "language": "pt",
+            "rss_feeds": [
+                "https://feeds.folha.uol.com.br/emcimadahora/rss091.xml",  # Folha main
+            ]
+        },
+        {
+            "name": "O Globo",
+            "country": "Brazil",
+            "language": "pt",
+            "rss_feeds": [
+                "https://oglobo.globo.com/rss.xml",  # O Globo main
+            ]
+        },
+        # Additional sources from various countries
+        {
+            "name": "The Times",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.thetimes.co.uk/rss",  # The Times
+            ]
+        },
+        {
+            "name": "Financial Times",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": [
+                "https://www.ft.com/rss/home",  # Financial Times
+            ]
+        },
+        # Additional German sources
+        {
+            "name": "Die Zeit",
+            "country": "Germany",
+            "language": "de",
+            "rss_feeds": [
+                "https://newsfeed.zeit.de/index",  # Die Zeit main feed
+                "https://newsfeed.zeit.de/politik/index",  # Die Zeit politics
+            ]
+        },
+        {
+            "name": "Die Welt",
+            "country": "Germany",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.welt.de/feeds/latest.rss",  # Die Welt latest
+                "https://www.welt.de/feeds/topthemen.rss",  # Die Welt top topics
+            ]
+        },
+        {
+            "name": "Süddeutsche Zeitung",
+            "country": "Germany",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.sueddeutsche.de/news/rss",  # SZ main feed
+                "https://www.sueddeutsche.de/politik/rss",  # SZ politics
+            ]
+        },
+        # Additional French sources
+        {
+            "name": "France 24",
+            "country": "France", 
+            "language": "fr",
+            "rss_feeds": [
+                "https://www.france24.com/fr/rss",  # France 24 French
+                "https://www.france24.com/fr/actualites/rss",  # France 24 French news
+            ]
+        },
+        {
+            "name": "BFM TV",
+            "country": "France",
+            "language": "fr", 
+            "rss_feeds": [
+                "https://www.bfmtv.com/rss/info/flux-rss/flux-toutes-les-actualites/",  # BFM TV all news
+            ]
+        },
+        {
+            "name": "Libération",
+            "country": "France",
+            "language": "fr",
+            "rss_feeds": [
+                "https://www.liberation.fr/arc/outboundfeeds/rss-all/",  # Libération all
+            ]
+        },
+        # Additional Italian sources
+        {
+            "name": "La Gazzetta del Mezzogiorno",
+            "country": "Italy",
+            "language": "it",
+            "rss_feeds": [
+                "https://www.lagazzettadelmezzogiorno.it/rss/",  # Gazzetta del Mezzogiorno
+            ]
+        },
+        {
+            "name": "ANSA",
+            "country": "Italy",
+            "language": "it",
+            "rss_feeds": [
+                "https://www.ansa.it/sito/notizie/topnews/topnews_rss.xml",  # ANSA top news
+                "https://www.ansa.it/sito/notizie/mondo/mondo_rss.xml",  # ANSA world news
+            ]
+        },
+        # Additional Spanish sources  
+        {
+            "name": "ABC España",
+            "country": "Spain",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.abc.es/rss/feeds/abcPortada.xml",  # ABC Spain homepage
+                "https://www.abc.es/rss/feeds/abcInternacional.xml",  # ABC Spain international
+            ]
+        },
+        {
+            "name": "La Vanguardia",
+            "country": "Spain",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.lavanguardia.com/rss/home.xml",  # La Vanguardia home
+                "https://www.lavanguardia.com/rss/internacional.xml",  # La Vanguardia international
+            ]
+        },
+        # Portuguese sources
+        {
+            "name": "Público Portugal",
+            "country": "Portugal",
+            "language": "pt",
+            "rss_feeds": [
+                "https://www.publico.pt/rss",  # Público main feed
+            ]
+        },
+        {
+            "name": "Observador",
+            "country": "Portugal",
+            "language": "pt",
+            "rss_feeds": [
+                "https://observador.pt/feed/",  # Observador main feed
+            ]
+        },
+        # Additional Japanese sources (in Japanese)
+        {
+            "name": "Mainichi Shimbun",
+            "country": "Japan",
+            "language": "ja",
+            "rss_feeds": [
+                "https://mainichi.jp/rss/etc/mainichi-flash.rss",  # Mainichi breaking news
+            ]
+        },
+        {
+            "name": "Yomiuri Shimbun",
+            "country": "Japan", 
+            "language": "ja",
+            "rss_feeds": [
+                "https://www.yomiuri.co.jp/rss/",  # Yomiuri main
+            ]
+        },
+        # Korean sources (in Korean)
+        {
+            "name": "Chosun Ilbo",
+            "country": "South Korea",
+            "language": "ko",
+            "rss_feeds": [
+                "https://www.chosun.com/arc/outboundfeeds/rss/",  # Chosun Ilbo
+            ]
+        },
+        {
+            "name": "Hankyoreh",
+            "country": "South Korea",
+            "language": "ko", 
+            "rss_feeds": [
+                "https://www.hani.co.kr/rss/",  # Hankyoreh
+            ]
+        },
+        # Additional Chinese sources (in Chinese)
+        {
+            "name": "Caixin",
+            "country": "China",
+            "language": "zh",
+            "rss_feeds": [
+                "https://www.caixin.com/rss/all.xml",  # Caixin all news
+            ]
+        },
+        # Mexican sources
+        {
+            "name": "El Universal México",
+            "country": "Mexico",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.eluniversal.com.mx/rss.xml",  # El Universal Mexico
+            ]
+        },
+        {
+            "name": "La Jornada",
+            "country": "Mexico",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.jornada.com.mx/rss/portada.xml",  # La Jornada front page
+            ]
+        },
+        # Argentine sources
+        {
+            "name": "Clarín",
+            "country": "Argentina",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.clarin.com/rss.xml",  # Clarín main
+            ]
+        },
+        {
+            "name": "La Nación Argentina",
+            "country": "Argentina", 
+            "language": "es",
+            "rss_feeds": [
+                "https://www.lanacion.com.ar/rss",  # La Nación Argentina
+            ]
+        },
+        # Chilean sources
+        {
+            "name": "El Mercurio",
+            "country": "Chile",
+            "language": "es",
+            "rss_feeds": [
+                "https://www.emol.com/rss/rss.asp?canal=1",  # El Mercurio
+            ]
+        },
+        # Dutch sources
+        {
+            "name": "NOS",
+            "country": "Netherlands",
+            "language": "nl",
+            "rss_feeds": [
+                "https://feeds.nos.nl/nosnieuwsalgemeen",  # NOS general news
+                "https://feeds.nos.nl/nosnieuwsbuitenland",  # NOS international news
+            ]
+        },
+        {
+            "name": "De Volkskrant",
+            "country": "Netherlands",
+            "language": "nl",
+            "rss_feeds": [
+                "https://www.volkskrant.nl/rss/voorpagina",  # De Volkskrant front page
+            ]
+        },
+        # Swedish sources
+        {
+            "name": "Svenska Dagbladet",
+            "country": "Sweden",
+            "language": "sv",
+            "rss_feeds": [
+                "https://www.svd.se/rss.xml",  # Svenska Dagbladet main
+            ]
+        },
+        {
+            "name": "Dagens Nyheter",
+            "country": "Sweden",
+            "language": "sv",
+            "rss_feeds": [
+                "https://www.dn.se/rss/",  # Dagens Nyheter main
+            ]
+        },
+        # Norwegian sources  
+        {
+            "name": "VG",
+            "country": "Norway",
+            "language": "no",
+            "rss_feeds": [
+                "https://www.vg.no/rss/create.php?categories=1068,1069,1078",  # VG news
+            ]
+        },
+        {
+            "name": "Aftenposten",
+            "country": "Norway",
+            "language": "no",
+            "rss_feeds": [
+                "https://www.aftenposten.no/rss/",  # Aftenposten main
+            ]
+        },
+        # Danish sources
+        {
+            "name": "Politiken",
+            "country": "Denmark",
+            "language": "da",
+            "rss_feeds": [
+                "https://politiken.dk/rss/senestenyt.rss",  # Politiken latest news
+            ]
+        },
+        # Finnish sources
+        {
+            "name": "Helsingin Sanomat",
+            "country": "Finland",
+            "language": "fi",
+            "rss_feeds": [
+                "https://www.hs.fi/rss/tuoreimmat.xml",  # Helsingin Sanomat latest
+            ]
+        },
+        # Swiss sources (German)
+        {
+            "name": "Neue Zürcher Zeitung",
+            "country": "Switzerland",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.nzz.ch/recent.rss",  # NZZ recent news
+            ]
+        },
+        # Austrian sources
+        {
+            "name": "Der Standard",
+            "country": "Austria",
+            "language": "de",
+            "rss_feeds": [
+                "https://www.derstandard.at/rss",  # Der Standard main
+            ]
+        },
+        # Belgian sources (Dutch)
+        {
+            "name": "De Standaard",
+            "country": "Belgium",
+            "language": "nl",
+            "rss_feeds": [
+                "https://www.standaard.be/rss/section/1f2838d4-99ea-49f0-9102-138784c7ea7c",  # De Standaard
+            ]
+        },
+        # Israeli sources (Hebrew)
+        {
+            "name": "Ynet",
+            "country": "Israel",
+            "language": "he",
+            "rss_feeds": [
+                "https://www.ynet.co.il/Integration/StoryRss1854.xml",  # Ynet main news
+            ]
+        },
+        # Arabic sources
+        {
+            "name": "Al Arabiya",
+            "country": "UAE",
+            "language": "ar",
+            "rss_feeds": [
+                "https://www.alarabiya.net/rss/feeds/web/news.xml",  # Al Arabiya news
+            ]
+        },
+        {
+            "name": "Al Ahram",
+            "country": "Egypt",
+            "language": "ar", 
+            "rss_feeds": [
+                "https://www.ahram.org.eg/rss/ahram.xml",  # Al Ahram
             ]
         },
     ]

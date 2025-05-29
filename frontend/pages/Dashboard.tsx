@@ -34,6 +34,7 @@ import SentimentDistributionChart from '../components/SentimentDistributionChart
 import EntityTrendChart from '../components/EntityTrendChart';
 import SourceBiasChart from '../components/SourceBiasChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
+import IntelligenceInsights from '../components/IntelligenceInsights';
 
 // Types
 import { 
@@ -255,52 +256,58 @@ const Dashboard: React.FC = () => {
     const entityObj = entities.find(e => e.name === entityName);
     if (!entityObj) return;
 
-    const sourceTrends: Record<string, any[]> = {};
-    
-    // Filter sources by selected countries
-    const filteredSources = sources.filter(source => 
-      countries.length === 0 || countries.includes(source.country)
-    );
-
-    // For now, let's create a simple approach: get the overall historical sentiment 
-    // and show it as "Global Average" until we can implement proper source-specific data
     try {
-      const historicalResponse = await statsApi.getHistoricalSentiment(entityObj.id, { days: selectedTimeRange });
+      // Use the new source-specific historical sentiment endpoint
+      const params: any = { days: selectedTimeRange };
+      if (countries.length > 0) {
+        params.countries = countries;
+      }
       
-      if (historicalResponse && historicalResponse.daily_data && historicalResponse.daily_data.length > 0) {
-        // For now, just show the global trend as a single source
-        // In a real implementation, we'd need to modify the backend to return source-specific data
-        sourceTrends[`Global Average (All Sources)`] = historicalResponse.daily_data;
+      const sourceHistoricalResponse = await statsApi.getSourceHistoricalSentiment(entityObj.id, params);
+      
+      if (sourceHistoricalResponse && sourceHistoricalResponse.sources) {
+        const sourceTrends: Record<string, any[]> = {};
         
-        // Let's also create some mock data to demonstrate how it would look with real source data
-        if (entityName === "Donald Trump") {
-          // Create mock data for demonstration
-          const mockSources = [
-            { name: "CNN", country: "USA", sentiment_bias: -0.3 },
-            { name: "Fox News", country: "USA", sentiment_bias: 0.4 },
-            { name: "BBC", country: "UK", sentiment_bias: -0.1 },
-            { name: "RT", country: "Russia", sentiment_bias: -0.6 }
-          ];
-          
-          filteredSources.slice(0, 4).forEach((source, index) => {
-            if (mockSources[index]) {
-              const mockData = historicalResponse.daily_data.map((point: any) => ({
-                ...point,
-                power_score: point.power_score + (Math.random() - 0.5) * 0.4,
-                moral_score: point.moral_score + mockSources[index].sentiment_bias + (Math.random() - 0.5) * 0.3,
-                mention_count: Math.floor(point.mention_count * (0.1 + Math.random() * 0.3))
-              }));
-              sourceTrends[`${mockSources[index].name} (${mockSources[index].country})`] = mockData;
-            }
+        // Convert the API response to the format expected by the chart
+        Object.entries(sourceHistoricalResponse.sources).forEach(([sourceKey, sourceData]: [string, any]) => {
+          if (sourceData.daily_data && sourceData.daily_data.length > 0) {
+            sourceTrends[sourceKey] = sourceData.daily_data;
+          }
+        });
+        
+        setSourcesTrends(sourceTrends);
+        console.log(`Found real trend data for ${Object.keys(sourceTrends).length} sources for ${entityName}`);
+        console.log('Countries filter applied:', countries);
+        console.log('Available sources:', Object.keys(sourceTrends));
+      } else {
+        // Fallback to global average if no source-specific data
+        const historicalResponse = await statsApi.getHistoricalSentiment(entityObj.id, { days: selectedTimeRange });
+        
+        if (historicalResponse && historicalResponse.daily_data && historicalResponse.daily_data.length > 0) {
+          setSourcesTrends({
+            'Global Average (All Sources)': historicalResponse.daily_data
           });
+          console.log('No source-specific data found, showing global average');
+        } else {
+          setSourcesTrends({});
         }
       }
     } catch (err) {
-      console.error(`Error fetching historical sentiment for ${entityName}:`, err);
+      console.error(`Error fetching source historical sentiment for ${entityName}:`, err);
+      
+      // Fallback to global data
+      try {
+        const historicalResponse = await statsApi.getHistoricalSentiment(entityObj.id, { days: selectedTimeRange });
+        if (historicalResponse && historicalResponse.daily_data) {
+          setSourcesTrends({
+            'Global Average (All Sources)': historicalResponse.daily_data
+          });
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback to global data also failed:', fallbackErr);
+        setSourcesTrends({});
+      }
     }
-    
-    setSourcesTrends(sourceTrends);
-    console.log(`Found trend data for ${Object.keys(sourceTrends).length} sources for ${entityName}`);
   };
 
   // Get unique countries from sources
@@ -413,6 +420,7 @@ const Dashboard: React.FC = () => {
             <Tab label="Source Comparison" />
             <Tab label="Temporal Trends" />
             <Tab label="Statistics & Distributions" />
+            <Tab label="Intelligence Insights" />
           </Tabs>
         </Paper>
         
@@ -796,6 +804,10 @@ const Dashboard: React.FC = () => {
               </Grid>
             </Grid>
           </Box>
+        )}
+
+        {currentTab === 4 && (
+          <IntelligenceInsights />
         )}
       </Box>
     </Container>

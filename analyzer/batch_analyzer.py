@@ -35,6 +35,7 @@ from sqlalchemy.exc import SQLAlchemyError
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
+from analyzer.hotelling_t2 import HotellingT2Calculator
 from database.entity_pruning import prune_low_activity_entities, get_pruning_stats
 
 # Setup directories
@@ -387,7 +388,8 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             try:
                 analysis_result = json.loads(content)
                 
-                # Store entity mentions
+                # Store entity mentions and collect for T² calculation
+                article_entities = []
                 if 'entities' in analysis_result and analysis_result['entities']:
                     for entity_data in analysis_result['entities']:
                         # Create or get entity
@@ -421,13 +423,38 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
                             article_id=article.id,
                             power_score=power_score,
                             moral_score=moral_score,
-                            mentions=entity_data.get('mentions', [])
+                            mentions=entity_data.get('mentions', []),
+                            created_at=article.publish_date or article.scraped_at
                         )
                         session.add(mention)
+                        
+                        # Collect for T² calculation
+                        article_entities.append({
+                            'entity_id': entity.id,
+                            'power_score': power_score,
+                            'moral_score': moral_score
+                        })
+                
+                # Calculate Hotelling's T² score if we have entities
+                if article_entities:
+                    t2_calculator = HotellingT2Calculator(session)
+                    t2_score = t2_calculator.calculate_article_t2(article_entities)
+                    article.hotelling_t2_score = t2_score
+                    if t2_score:
+                        logger.debug(f"Article {article.id} T² score: {t2_score:.2f}")
                 
                 # Update article status
                 article.analysis_status = "completed"
                 article.processed_at = datetime.now()
+                
+                # Clear article text to save storage space
+                # The text is no longer needed after analysis since:
+                # 1. All statistical analysis works on sentiment vectors, not text
+                # 2. The extension re-extracts text from pages when needed
+                # 3. Recovery tools only need article IDs to match with OpenAI results
+                article.text = None
+                article.html = None
+                
                 processed_count += 1
                 processed_article_ids.append(article.id)
                 
@@ -480,6 +507,7 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
         
         logger.info(f"Processed batch: {processed_count} articles processed, {error_count} errors")
         logger.info(f"Total completed articles: {after_count} (was {before_count} before)")
+        logger.info(f"💾 Cleared text from {processed_count} articles to save storage space")
         
         # Reset failed articles back to unanalyzed so they can be attempted again in future batches
         if failed_article_ids:
@@ -751,14 +779,7 @@ def check_active_batches(session: Session):
                         
                         logger.info(f"Processed batch {batch_id}: {processed_count} articles, {error_count} errors")
                         
-                        # Explicitly log the cleanup attempt
-                        logger.info(f"Attempting to clean up files for batch {batch_id}")
-                        cleanup_successful = cleanup_batch_files(batch, batch_id)
-                        if cleanup_successful:
-                            logger.info(f"🧹 Successfully cleaned up batch files for {batch_id}")
-                        else:
-                            logger.warning(f"⚠️ Failed to clean up some batch files for {batch_id}")
-                            
+                        # Cleanup is already handled inside process_batch_output()
                         # Don't keep batch in active list
                         continue
                     except Exception as e:

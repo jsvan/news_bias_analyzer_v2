@@ -37,12 +37,23 @@ interface MultiSourceTrendChartProps {
   dimension?: 'power' | 'moral' | 'both';
 }
 
-// Predefined colors for different sources
-const COLORS = [
-  '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088fe',
-  '#00c49f', '#ffbb28', '#ff8042', '#8dd1e1', '#d084d0',
-  '#87d068', '#f56565', '#4fd1c7', '#63b3ed', '#fbd38d'
-];
+// Country-based color palettes
+const COUNTRY_COLORS: Record<string, string[]> = {
+  'USA': ['#e53e3e', '#fc8181', '#feb2b2', '#fed7d7'], // Reds
+  'UK': ['#3182ce', '#63b3ed', '#90cdf4', '#bee3f8'], // Blues  
+  'Russia': ['#38a169', '#68d391', '#9ae6b4', '#c6f6d5'], // Greens
+  'China': ['#d69e2e', '#f6e05e', '#faf089', '#fefcbf'], // Yellows
+  'Germany': ['#805ad5', '#b794f6', '#d6bcfa', '#e9d8fd'], // Purples
+  'France': ['#ed8936', '#fbb454', '#fdd089', '#fdefdb'], // Oranges
+  'Canada': ['#319795', '#4fd1c7', '#81e6d9', '#b2f5ea'], // Teals
+  'Australia': ['#e53e3e', '#fc8181', '#feb2b2', '#fed7d7'], // Reds (share with USA)
+  'Japan': ['#9f7aea', '#c3aed6', '#d6bcfa', '#e9d8fd'], // Light purples
+  'India': ['#f56500', '#fd9801', '#feb454', '#fed7aa'], // Bright oranges
+  'default': ['#718096', '#a0aec0', '#cbd5e0', '#e2e8f0'] // Grays for unknown countries
+};
+
+// Line style patterns
+const LINE_STYLES = ['0', '5 5', '10 5', '10 5 5 5', '15 5 15 5'];
 
 const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   entityName,
@@ -91,28 +102,96 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
-  // Custom tooltip for the chart
+  // State for tracking which line is being hovered
+  const [hoveredLine, setHoveredLine] = useState<string | null>(null);
+
+  // Custom tooltip that only shows the hovered line
   const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      const relevantPayload = payload.filter((p: any) => p.value !== undefined);
+    if (active && payload && payload.length && hoveredLine) {
+      // Find the entry that matches the hovered line
+      const hoveredEntry = payload.find((p: any) => 
+        p.dataKey && p.dataKey.startsWith(hoveredLine) && p.value !== undefined && p.value !== null
+      );
       
-      if (relevantPayload.length === 0) return null;
+      if (!hoveredEntry) return null;
+      
+      const sourceName = hoveredEntry.dataKey.replace(/_power|_moral/, '');
+      const dimension = hoveredEntry.dataKey.includes('_power') ? 'Power' : 'Moral';
+      const country = getCountryFromSource(sourceName);
+      const isCountryColored = COUNTRY_COLORS[country] !== undefined;
+      
+      // Get line style info
+      const lineStyle = getSourceLineStyle(sourceName);
+      const isDashed = lineStyle !== '0';
       
       return (
-        <Paper elevation={3} sx={{ p: 2, bgcolor: 'background.paper', maxWidth: 300 }}>
-          <Typography variant="subtitle2">{formatDate(label)}</Typography>
-          {relevantPayload.map((entry: any, index: number) => {
-            const sourceName = entry.dataKey.replace(/_power|_moral/, '');
-            const dimension = entry.dataKey.includes('_power') ? 'Power' : 'Moral';
-            
-            return (
-              <Box key={`item-${index}`} sx={{ color: entry.color, mt: 1 }}>
-                <Typography variant="caption" sx={{ display: 'block' }}>
-                  {sourceName} - {dimension}: {entry.value.toFixed(2)}
-                </Typography>
-              </Box>
-            );
-          })}
+        <Paper 
+          elevation={6} 
+          sx={{ 
+            p: 2, 
+            bgcolor: 'rgba(255, 255, 255, 0.95)',
+            border: `2px solid ${hoveredEntry.color}`,
+            borderRadius: 2,
+            minWidth: 180
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <Box 
+              sx={{ 
+                width: 20, 
+                height: 3, 
+                bgcolor: hoveredEntry.color,
+                mr: 1,
+                borderRadius: 1,
+                ...(isDashed && {
+                  background: `linear-gradient(to right, ${hoveredEntry.color} 60%, transparent 60%)`,
+                  backgroundSize: '8px 3px',
+                  backgroundRepeat: 'repeat-x'
+                })
+              }} 
+            />
+            <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+              {sourceName}
+            </Typography>
+          </Box>
+          
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+            {formatDate(label)}
+          </Typography>
+          
+          <Box sx={{ mt: 1 }}>
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                color: hoveredEntry.color,
+                fontWeight: 'bold',
+                fontSize: '0.9rem'
+              }}
+            >
+              {dimension}: {hoveredEntry.value.toFixed(2)}
+            </Typography>
+          </Box>
+          
+          <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip 
+              label={country} 
+              size="small" 
+              sx={{
+                backgroundColor: isCountryColored ? `${hoveredEntry.color}20` : 'action.hover',
+                color: hoveredEntry.color,
+                fontWeight: 'bold',
+                fontSize: '0.7rem'
+              }}
+            />
+            {isDashed && (
+              <Chip 
+                label="dashed" 
+                size="small" 
+                variant="outlined"
+                sx={{ fontSize: '0.7rem', height: 20 }}
+              />
+            )}
+          </Box>
         </Paper>
       );
     }
@@ -150,6 +229,20 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     acc[country].push(sourceName);
     return acc;
   }, {} as Record<string, string[]>);
+
+  // Assign colors to sources based on country
+  const getSourceColor = (sourceName: string) => {
+    const country = getCountryFromSource(sourceName);
+    const countryPalette = COUNTRY_COLORS[country] || COUNTRY_COLORS['default'];
+    const sourceIndexInCountry = sourcesByCountry[country].indexOf(sourceName);
+    return countryPalette[sourceIndexInCountry % countryPalette.length];
+  };
+
+  // Get line style for source
+  const getSourceLineStyle = (sourceName: string) => {
+    const sourceIndex = sourceNames.indexOf(sourceName);
+    return LINE_STYLES[sourceIndex % LINE_STYLES.length];
+  };
 
   return (
     <Box sx={{ width: '100%', height: height }}>
@@ -200,14 +293,25 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       {/* Country groupings */}
       {hasData && (
         <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          {Object.entries(sourcesByCountry).map(([country, sources]) => (
-            <Chip 
-              key={country} 
-              label={`${country} (${sources.length})`} 
-              size="small" 
-              variant="outlined"
-            />
-          ))}
+          {Object.entries(sourcesByCountry).map(([country, sources]) => {
+            const countryPalette = COUNTRY_COLORS[country] || COUNTRY_COLORS['default'];
+            const mainColor = countryPalette[0];
+            
+            return (
+              <Chip 
+                key={country} 
+                label={`${country} (${sources.length})`} 
+                size="small" 
+                sx={{
+                  backgroundColor: `${mainColor}20`,
+                  color: mainColor,
+                  borderColor: mainColor,
+                  fontWeight: 'bold'
+                }}
+                variant="outlined"
+              />
+            );
+          })}
         </Box>
       )}
 
@@ -252,13 +356,18 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                 style={{ textAnchor: 'middle' }} 
               />
             </YAxis>
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
+            <Tooltip 
+              content={<CustomTooltip />} 
+              cursor={{ stroke: '#666', strokeWidth: 1, strokeDasharray: '3 3' }}
+              allowEscapeViewBox={{ x: true, y: true }}
+              position={{ x: 'auto', y: 'auto' }}
+            />
             <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
             
             {/* Render lines for each source */}
             {sourceNames.map((sourceName, index) => {
-              const color = COLORS[index % COLORS.length];
+              const color = getSourceColor(sourceName);
+              const lineStyle = getSourceLineStyle(sourceName);
               const country = getCountryFromSource(sourceName);
               
               return (
@@ -269,10 +378,19 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                       name={`${sourceName} (Power)`}
                       dataKey={`${sourceName}_power`}
                       stroke={color}
-                      strokeWidth={2}
-                      strokeDasharray={selectedDimension === 'both' ? "5 5" : "0"}
-                      dot={{ strokeWidth: 2, r: 3 }}
+                      strokeWidth={2.5}
+                      strokeDasharray={selectedDimension === 'both' ? lineStyle : "0"}
+                      dot={{ strokeWidth: 2, r: 4, fill: color }}
+                      activeDot={{ 
+                        r: 6, 
+                        strokeWidth: 2, 
+                        fill: color,
+                        onMouseEnter: () => setHoveredLine(sourceName),
+                        onMouseLeave: () => setHoveredLine(null)
+                      }}
                       connectNulls={false}
+                      onMouseEnter={() => setHoveredLine(sourceName)}
+                      onMouseLeave={() => setHoveredLine(null)}
                     />
                   )}
                   {(selectedDimension === 'both' || selectedDimension === 'moral') && (
@@ -281,10 +399,19 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                       name={`${sourceName} (Moral)`}
                       dataKey={`${sourceName}_moral`}
                       stroke={color}
-                      strokeWidth={2}
-                      strokeDasharray={selectedDimension === 'both' ? "0" : "0"}
-                      dot={{ strokeWidth: 2, r: 3 }}
+                      strokeWidth={2.5}
+                      strokeDasharray={selectedDimension === 'both' ? "0" : lineStyle}
+                      dot={{ strokeWidth: 2, r: 4, fill: color }}
+                      activeDot={{ 
+                        r: 6, 
+                        strokeWidth: 2, 
+                        fill: color,
+                        onMouseEnter: () => setHoveredLine(sourceName),
+                        onMouseLeave: () => setHoveredLine(null)
+                      }}
                       connectNulls={false}
+                      onMouseEnter={() => setHoveredLine(sourceName)}
+                      onMouseLeave={() => setHoveredLine(null)}
                     />
                   )}
                 </React.Fragment>

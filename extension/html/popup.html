@@ -45,13 +45,13 @@
             <div class="score-meter">
               <div id="composite-indicator" class="indicator"></div>
               <div class="labels">
-                <span>Very Unique</span>
+                <span>Common</span>
                 <span>Average</span>
-                <span>Very Common</span>
+                <span>Extreme</span>
               </div>
             </div>
             <p>
-              This article's bias pattern is <span id="composite-percentile">...</span> compared to global news sources.
+              This article's sentiment pattern is <span id="composite-percentile">...</span> compared to articles this week.
               <span id="cache-indicator" style="display: none; font-size: 0.7em; padding: 1px 4px; border-radius: 3px; margin-left: 5px; color: white; background-color: #4a90e2;"></span>
             </p>
           </div>
@@ -106,46 +106,15 @@
       </div>
       
       <div id="distribution-tab" class="tab-content">
-        <h3>Sentiment Distribution Comparison</h3>
+        <h3>Sentiment Distribution Comparison <span class="info-link" id="distribution-info-link" title="Learn about sentiment distributions">ⓘ</span></h3>
         
         <div class="chart-controls">
           <div class="control-group-vertical">
-            <select id="entity-selector">
-              <option value="">Select Entity...</option>
-            </select>
-          </div>
-          <div class="control-group-vertical">
             <select id="dimension-selector">
-              <option value="power">Power Dimension</option>
               <option value="moral">Moral Dimension</option>
+              <option value="power">Power Dimension</option>
             </select>
           </div>
-          <div class="control-group-vertical">
-            <select id="country-selector">
-              <option value="">Global Comparison</option>
-              <option value="USA">United States Comparison</option>
-              <option value="UK">United Kingdom Comparison</option>
-              <option value="Canada">Canada Comparison</option>
-              <option value="Australia">Australia Comparison</option>
-              <option value="Germany">Germany Comparison</option>
-              <option value="France">France Comparison</option>
-              <option value="Japan">Japan Comparison</option>
-              <option value="Russia">Russia Comparison</option>
-              <option value="China">China Comparison</option>
-              <option value="India">India Comparison</option>
-            </select>
-          </div>
-        </div>
-        
-        <div class="chart-container">
-          <h4 id="distribution-title">Sentiment Distribution</h4>
-          <canvas id="distribution-chart" width="320" height="300"></canvas>
-        </div>
-        
-        <div class="distribution-description">
-          <p>This histogram shows how the selected entity's sentiment score compares to the global distribution of scores for similar entities across thousands of news articles.</p>
-          <p>The highlighted bar shows where this article's sentiment falls in the distribution, helping identify unusual portrayals.</p>
-          <p id="sample-size-info" class="sample-size-info">Loading sample size information...</p>
         </div>
         
         <div class="distribution-legend">
@@ -157,6 +126,16 @@
             <span class="color-box standard"></span>
             <span>Other Articles</span>
           </div>
+        </div>
+        
+        <div class="chart-container">
+          <div id="distribution-charts-container">
+            <!-- All entity histograms will be rendered here -->
+          </div>
+        </div>
+        
+        <div class="distribution-description">
+          <p id="sample-size-info" class="sample-size-info">Loading sample size information...</p>
         </div>
       </div>
       
@@ -338,12 +317,20 @@
     </footer>
   </div>
   
+  <!-- Third-party libraries -->
   <script src="../js/chart.min.js"></script>
+  
+  <!-- Visualization components (still using old structure for now) -->
   <script src="../js/sentiment_histogram.js"></script>
   <script src="../js/similarity_cluster.js"></script>
   <script src="../js/similarity_sources.js"></script>
   <script src="../js/entity_tracking.js"></script>
   <script src="../js/topic_cluster.js"></script>
-  <script src="../js/popup.js"></script>
+  
+  <!-- New modular structure -->
+  <script type="module" src="../js/popup-new.js"></script>
+  
+  <!-- Legacy fallback (can be removed after testing) -->
+  <!-- <script src="../js/popup.js"></script> -->
 </body>
 </html>

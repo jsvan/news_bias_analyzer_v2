@@ -15,10 +15,10 @@ class EntityTrackingViz {
       textColor: '#333',
       backgroundColor: '#f8f9fa',
       animationDuration: 1000, // ms
-      showLegend: true,
+      showLegend: false,
       showGrid: true,
       showConfidenceIntervals: true,
-      padding: { top: 30, right: 20, bottom: 40, left: 50 },
+      padding: { top: 40, right: 20, bottom: 20, left: 50 },
       entityName: 'Entity',
       entityType: 'Unknown',
       dateRange: '30 days',
@@ -32,6 +32,14 @@ class EntityTrackingViz {
       progress: 0
     };
     
+    // Hover state
+    this.isHovering = false;
+    this.hoveredLine = null;
+    this.mousePos = { x: 0, y: 0 };
+    
+    // Add mouse event listeners
+    this.setupMouseEvents();
+    
     // Save chart dimensions accounting for padding
     this.chartDimensions = {
       x: this.options.padding.left,
@@ -42,6 +50,232 @@ class EntityTrackingViz {
     
     // Initialize with empty data
     this.clear();
+  }
+  
+  // Setup mouse event listeners for hover functionality
+  setupMouseEvents() {
+    this.canvas.addEventListener('mousemove', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mousePos.x = e.clientX - rect.left;
+      this.mousePos.y = e.clientY - rect.top;
+      this.checkHover();
+    });
+    
+    this.canvas.addEventListener('mouseleave', () => {
+      this.isHovering = false;
+      this.hoveredLine = null;
+      this.canvas.style.cursor = 'default';
+      this.redrawWithTooltip();
+    });
+  }
+  
+  // Check if mouse is hovering over a line
+  checkHover() {
+    if (!this.data || this.data.length === 0) return;
+    
+    const { x, y, width: chartWidth, height: chartHeight } = this.chartDimensions;
+    const tolerance = 8; // Pixels tolerance for line detection
+    
+    let closestLine = null;
+    let minDistance = Infinity;
+    
+    // Check each data point for proximity to lines
+    for (let i = 0; i < this.data.length - 1; i++) {
+      const x1 = x + (i / (this.data.length - 1)) * chartWidth;
+      const x2 = x + ((i + 1) / (this.data.length - 1)) * chartWidth;
+      
+      // Check if mouse X is between these two points
+      if (this.mousePos.x >= x1 && this.mousePos.x <= x2) {
+        // Check Source Power line
+        const y1_power = y + chartHeight - ((this.data[i].power_score + 2) / 4) * chartHeight;
+        const y2_power = y + chartHeight - ((this.data[i + 1].power_score + 2) / 4) * chartHeight;
+        const interpY_power = y1_power + ((this.mousePos.x - x1) / (x2 - x1)) * (y2_power - y1_power);
+        const distance_power = Math.abs(this.mousePos.y - interpY_power);
+        
+        if (distance_power < tolerance && distance_power < minDistance) {
+          minDistance = distance_power;
+          closestLine = 'Source Power';
+        }
+        
+        // Check Source Moral line
+        const y1_moral = y + chartHeight - ((this.data[i].moral_score + 2) / 4) * chartHeight;
+        const y2_moral = y + chartHeight - ((this.data[i + 1].moral_score + 2) / 4) * chartHeight;
+        const interpY_moral = y1_moral + ((this.mousePos.x - x1) / (x2 - x1)) * (y2_moral - y1_moral);
+        const distance_moral = Math.abs(this.mousePos.y - interpY_moral);
+        
+        if (distance_moral < tolerance && distance_moral < minDistance) {
+          minDistance = distance_moral;
+          closestLine = 'Source Moral';
+        }
+        
+        // Check Global Power line (if available)
+        if (this.data[i].global_power_avg !== undefined) {
+          const y1_global_power = y + chartHeight - ((this.data[i].global_power_avg + 2) / 4) * chartHeight;
+          const y2_global_power = y + chartHeight - ((this.data[i + 1].global_power_avg + 2) / 4) * chartHeight;
+          const interpY_global_power = y1_global_power + ((this.mousePos.x - x1) / (x2 - x1)) * (y2_global_power - y1_global_power);
+          const distance_global_power = Math.abs(this.mousePos.y - interpY_global_power);
+          
+          if (distance_global_power < tolerance && distance_global_power < minDistance) {
+            minDistance = distance_global_power;
+            closestLine = 'Global Power';
+          }
+        }
+        
+        // Check Global Moral line (if available)
+        if (this.data[i].global_moral_avg !== undefined) {
+          const y1_global_moral = y + chartHeight - ((this.data[i].global_moral_avg + 2) / 4) * chartHeight;
+          const y2_global_moral = y + chartHeight - ((this.data[i + 1].global_moral_avg + 2) / 4) * chartHeight;
+          const interpY_global_moral = y1_global_moral + ((this.mousePos.x - x1) / (x2 - x1)) * (y2_global_moral - y1_global_moral);
+          const distance_global_moral = Math.abs(this.mousePos.y - interpY_global_moral);
+          
+          if (distance_global_moral < tolerance && distance_global_moral < minDistance) {
+            minDistance = distance_global_moral;
+            closestLine = 'Global Moral';
+          }
+        }
+        
+        break;
+      }
+    }
+    
+    // Update hover state
+    const wasHovering = this.isHovering;
+    const previousLine = this.hoveredLine;
+    
+    this.isHovering = closestLine !== null;
+    this.hoveredLine = closestLine;
+    this.canvas.style.cursor = this.isHovering ? 'pointer' : 'default';
+    
+    // Redraw if hover state changed
+    if (wasHovering !== this.isHovering || previousLine !== this.hoveredLine) {
+      this.redrawWithTooltip();
+    }
+  }
+  
+  // Redraw chart with tooltip if hovering
+  redrawWithTooltip() {
+    if (!this.isAnimating) {
+      this.render(1); // Render at full progress
+      
+      if (this.isHovering && this.hoveredLine) {
+        this.drawTooltip();
+      }
+    }
+  }
+  
+  // Draw tooltip for hovered line
+  drawTooltip() {
+    if (!this.hoveredLine) return;
+    
+    const { textColor, powerColor, moralColor } = this.options;
+    
+    // Get line properties
+    let lineColor, isDashed, tooltipText;
+    switch (this.hoveredLine) {
+      case 'Source Power':
+        lineColor = powerColor;
+        isDashed = true;
+        tooltipText = 'Source Power';
+        break;
+      case 'Source Moral':
+        lineColor = moralColor;
+        isDashed = true;
+        tooltipText = 'Source Moral';
+        break;
+      case 'Global Power':
+        lineColor = powerColor;
+        isDashed = false;
+        tooltipText = 'Global Power';
+        break;
+      case 'Global Moral':
+        lineColor = moralColor;
+        isDashed = false;
+        tooltipText = 'Global Moral';
+        break;
+    }
+    
+    // Calculate tooltip dimensions
+    this.ctx.font = '11px Arial';
+    const textWidth = this.ctx.measureText(tooltipText).width;
+    const lineWidth = 20;
+    const padding = 8;
+    const gap = 6;
+    const tooltipWidth = lineWidth + gap + textWidth + padding * 2;
+    const tooltipHeight = 24;
+    
+    let tooltipX = this.mousePos.x - tooltipWidth / 2;
+    let tooltipY = this.mousePos.y - tooltipHeight - 10;
+    
+    // Ensure tooltip stays within canvas bounds
+    if (tooltipX < 5) tooltipX = 5;
+    if (tooltipX + tooltipWidth > this.canvas.width - 5) {
+      tooltipX = this.canvas.width - tooltipWidth - 5;
+    }
+    if (tooltipY < 5) {
+      tooltipY = this.mousePos.y + 15;
+    }
+    
+    // Draw tooltip background with rounded corners and shadow
+    this.ctx.save();
+    
+    // Shadow
+    this.ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    this.ctx.shadowBlur = 4;
+    this.ctx.shadowOffsetX = 2;
+    this.ctx.shadowOffsetY = 2;
+    
+    // Background
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    this.ctx.lineWidth = 1;
+    
+    // Rounded rectangle
+    const radius = 4;
+    this.ctx.beginPath();
+    this.ctx.moveTo(tooltipX + radius, tooltipY);
+    this.ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
+    this.ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY, tooltipX + tooltipWidth, tooltipY + radius);
+    this.ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
+    this.ctx.quadraticCurveTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight, tooltipX + tooltipWidth - radius, tooltipY + tooltipHeight);
+    this.ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
+    this.ctx.quadraticCurveTo(tooltipX, tooltipY + tooltipHeight, tooltipX, tooltipY + tooltipHeight - radius);
+    this.ctx.lineTo(tooltipX, tooltipY + radius);
+    this.ctx.quadraticCurveTo(tooltipX, tooltipY, tooltipX + radius, tooltipY);
+    this.ctx.closePath();
+    this.ctx.fill();
+    this.ctx.stroke();
+    
+    this.ctx.restore();
+    
+    // Draw line sample
+    const lineY = tooltipY + tooltipHeight / 2;
+    const lineStartX = tooltipX + padding;
+    const lineEndX = lineStartX + lineWidth;
+    
+    this.ctx.strokeStyle = lineColor;
+    this.ctx.lineWidth = 2;
+    
+    if (isDashed) {
+      this.ctx.setLineDash([4, 2]);
+    } else {
+      this.ctx.setLineDash([]);
+      this.ctx.globalAlpha = 0.8;
+    }
+    
+    this.ctx.beginPath();
+    this.ctx.moveTo(lineStartX, lineY);
+    this.ctx.lineTo(lineEndX, lineY);
+    this.ctx.stroke();
+    
+    this.ctx.globalAlpha = 1;
+    this.ctx.setLineDash([]);
+    
+    // Draw text
+    this.ctx.fillStyle = '#333';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.font = '11px Arial';
+    this.ctx.fillText(tooltipText, lineEndX + gap, lineY);
   }
   
   // Set data for time series
@@ -259,16 +493,20 @@ class EntityTrackingViz {
     
     // Draw global confidence intervals first (if available and enabled)
     if (showConfidenceIntervals && visibleData[0].global_power_ci_lower !== undefined) {
+      console.log('Drawing confidence intervals for entity tracking');
       this.drawGlobalConfidenceIntervals(visibleData);
+    } else if (showConfidenceIntervals) {
+      console.log('Confidence intervals not available - missing global_power_ci_lower field');
+      console.log('Sample data point:', visibleData[0]);
     }
     
     // Draw global average lines if available
     if (visibleData[0].global_power_avg !== undefined) {
-      // Global power average (dashed line)
+      // Global power average (solid line)
       this.ctx.strokeStyle = powerColor;
-      this.ctx.lineWidth = 1;
-      this.ctx.setLineDash([5, 5]);
-      this.ctx.globalAlpha = 0.5;
+      this.ctx.lineWidth = this.hoveredLine === 'Global Power' ? 3 : 2;
+      this.ctx.setLineDash([]);
+      this.ctx.globalAlpha = this.hoveredLine === 'Global Power' ? 1.0 : 0.7;
       this.ctx.beginPath();
       
       visibleData.forEach((dataPoint, index) => {
@@ -284,8 +522,10 @@ class EntityTrackingViz {
       
       this.ctx.stroke();
       
-      // Global moral average (dashed line)
+      // Global moral average (solid line)
       this.ctx.strokeStyle = moralColor;
+      this.ctx.lineWidth = this.hoveredLine === 'Global Moral' ? 3 : 2;
+      this.ctx.globalAlpha = this.hoveredLine === 'Global Moral' ? 1.0 : 0.7;
       this.ctx.beginPath();
       
       visibleData.forEach((dataPoint, index) => {
@@ -301,14 +541,15 @@ class EntityTrackingViz {
       
       this.ctx.stroke();
       
-      // Reset line style
-      this.ctx.setLineDash([]);
+      // Reset alpha
       this.ctx.globalAlpha = 1;
     }
     
-    // Draw source-specific power score line (solid)
+    // Draw source-specific power score line (dashed)
     this.ctx.strokeStyle = powerColor;
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = this.hoveredLine === 'Source Power' ? 3 : 2;
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.globalAlpha = this.hoveredLine === 'Source Power' ? 1.0 : 0.9;
     this.ctx.beginPath();
     
     visibleData.forEach((dataPoint, index) => {
@@ -323,10 +564,13 @@ class EntityTrackingViz {
     });
     
     this.ctx.stroke();
+    this.ctx.globalAlpha = 1;
     
-    // Draw source-specific moral score line (solid)
+    // Draw source-specific moral score line (dashed)
     this.ctx.strokeStyle = moralColor;
-    this.ctx.lineWidth = 2;
+    this.ctx.lineWidth = this.hoveredLine === 'Source Moral' ? 3 : 2;
+    this.ctx.setLineDash([5, 5]);
+    this.ctx.globalAlpha = this.hoveredLine === 'Source Moral' ? 1.0 : 0.9;
     this.ctx.beginPath();
     
     visibleData.forEach((dataPoint, index) => {
@@ -341,6 +585,10 @@ class EntityTrackingViz {
     });
     
     this.ctx.stroke();
+    this.ctx.globalAlpha = 1;
+    
+    // Reset line style
+    this.ctx.setLineDash([]);
     
     // Add data points
     visibleData.forEach((dataPoint, index) => {
@@ -360,11 +608,6 @@ class EntityTrackingViz {
       this.ctx.arc(xPos, moralY, 3, 0, Math.PI * 2);
       this.ctx.fill();
     });
-    
-    // Add trend indicators if we have enough data points
-    if (visibleData.length >= 4) {
-      this.drawTrendIndicators(visibleData);
-    }
   }
   
   // Draw confidence intervals for global averages as shaded areas
@@ -431,98 +674,10 @@ class EntityTrackingViz {
     this.ctx.fill();
   }
   
-  // Draw trend indicators (arrows showing trend direction)
-  drawTrendIndicators(visibleData) {
-    const { powerColor, moralColor, textColor } = this.options;
-    const { x, y, width: chartWidth } = this.chartDimensions;
-    
-    // Calculate trends using simple linear regression
-    const powerTrend = this.calculateTrend(visibleData.map(d => d.power_score));
-    const moralTrend = this.calculateTrend(visibleData.map(d => d.moral_score));
-    
-    // Draw power trend arrow
-    const lastPowerY = y + this.chartDimensions.height - 
-      ((visibleData[visibleData.length - 1].power_score + 2) / 4) * this.chartDimensions.height;
-    
-    this.drawTrendArrow(
-      x + chartWidth + 5, 
-      lastPowerY, 
-      powerTrend, 
-      powerColor
-    );
-    
-    // Draw moral trend arrow
-    const lastMoralY = y + this.chartDimensions.height - 
-      ((visibleData[visibleData.length - 1].moral_score + 2) / 4) * this.chartDimensions.height;
-    
-    this.drawTrendArrow(
-      x + chartWidth + 5, 
-      lastMoralY, 
-      moralTrend, 
-      moralColor
-    );
-  }
   
-  // Draw a trend arrow
-  drawTrendArrow(x, y, trend, color) {
-    this.ctx.fillStyle = color;
-    
-    // Determine arrow direction based on trend
-    if (Math.abs(trend) < 0.05) {
-      // Horizontal arrow for flat trend
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, y);
-      this.ctx.lineTo(x + 10, y);
-      this.ctx.lineTo(x + 8, y - 3);
-      this.ctx.moveTo(x + 10, y);
-      this.ctx.lineTo(x + 8, y + 3);
-      this.ctx.stroke();
-    } else if (trend > 0) {
-      // Upward arrow for positive trend
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, y);
-      this.ctx.lineTo(x + 5, y - 8);
-      this.ctx.lineTo(x + 10, y);
-      this.ctx.closePath();
-      this.ctx.fill();
-    } else {
-      // Downward arrow for negative trend
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, y);
-      this.ctx.lineTo(x + 5, y + 8);
-      this.ctx.lineTo(x + 10, y);
-      this.ctx.closePath();
-      this.ctx.fill();
-    }
-  }
-  
-  // Calculate trend using simple linear regression
-  calculateTrend(values) {
-    const n = values.length;
-    if (n < 2) return 0;
-    
-    // Create x values (0, 1, 2, ...)
-    const x = Array.from({ length: n }, (_, i) => i);
-    
-    // Calculate means
-    const meanX = x.reduce((sum, val) => sum + val, 0) / n;
-    const meanY = values.reduce((sum, val) => sum + val, 0) / n;
-    
-    // Calculate slope (trend)
-    let numerator = 0;
-    let denominator = 0;
-    
-    for (let i = 0; i < n; i++) {
-      numerator += (x[i] - meanX) * (values[i] - meanY);
-      denominator += (x[i] - meanX) ** 2;
-    }
-    
-    return denominator !== 0 ? numerator / denominator : 0;
-  }
-  
-  // Draw title and legend
+  // Draw title
   drawTitleAndLegend() {
-    const { width, textColor, powerColor, moralColor } = this.options;
+    const { width, textColor } = this.options;
     
     // Draw title
     this.ctx.fillStyle = textColor;
@@ -531,79 +686,8 @@ class EntityTrackingViz {
     this.ctx.fillText(
       `${this.options.entityName} (${this.options.entityType}) - Past ${this.options.dateRange}`, 
       width / 2, 
-      10
+      15
     );
-    
-    // Draw legend if enabled
-    if (this.options.showLegend) {
-      const legendY = this.options.height - 25;
-      const legendY2 = this.options.height - 10;
-      const legendX1 = width / 2 - 140;
-      const legendX2 = width / 2 - 50;
-      const legendX3 = width / 2 + 40;
-      const legendX4 = width / 2 + 120;
-      
-      // Source Power score legend (solid line)
-      this.ctx.strokeStyle = powerColor;
-      this.ctx.lineWidth = 2;
-      this.ctx.setLineDash([]);
-      this.ctx.beginPath();
-      this.ctx.moveTo(legendX1, legendY);
-      this.ctx.lineTo(legendX1 + 12, legendY);
-      this.ctx.stroke();
-      
-      this.ctx.fillStyle = textColor;
-      this.ctx.textAlign = 'left';
-      this.ctx.font = '9px Arial';
-      this.ctx.fillText('Source Power', legendX1 + 15, legendY + 3);
-      
-      // Source Moral score legend (solid line)
-      this.ctx.strokeStyle = moralColor;
-      this.ctx.lineWidth = 2;
-      this.ctx.beginPath();
-      this.ctx.moveTo(legendX2, legendY);
-      this.ctx.lineTo(legendX2 + 12, legendY);
-      this.ctx.stroke();
-      
-      this.ctx.fillStyle = textColor;
-      this.ctx.fillText('Source Moral', legendX2 + 15, legendY + 3);
-      
-      // Global Power legend (dashed line)
-      this.ctx.strokeStyle = powerColor;
-      this.ctx.lineWidth = 1;
-      this.ctx.setLineDash([5, 3]);
-      this.ctx.globalAlpha = 0.5;
-      this.ctx.beginPath();
-      this.ctx.moveTo(legendX3, legendY);
-      this.ctx.lineTo(legendX3 + 12, legendY);
-      this.ctx.stroke();
-      this.ctx.globalAlpha = 1;
-      
-      this.ctx.fillStyle = textColor;
-      this.ctx.fillText('Global Power', legendX3 + 15, legendY + 3);
-      
-      // Global Moral legend (dashed line)
-      this.ctx.strokeStyle = moralColor;
-      this.ctx.lineWidth = 1;
-      this.ctx.beginPath();
-      this.ctx.moveTo(legendX4, legendY);
-      this.ctx.lineTo(legendX4 + 12, legendY);
-      this.ctx.stroke();
-      
-      this.ctx.fillStyle = textColor;
-      this.ctx.fillText('Global Moral', legendX4 + 15, legendY + 3);
-      
-      // Reset line style
-      this.ctx.setLineDash([]);
-      
-      // Add source info if available
-      if (this.options.sourceName) {
-        this.ctx.fillStyle = textColor;
-        this.ctx.textAlign = 'center';
-        this.ctx.font = '8px Arial';
-        this.ctx.fillText(`Source: ${this.options.sourceName}`, width / 2, legendY2 + 3);
-      }
-    }
   }
   
 }

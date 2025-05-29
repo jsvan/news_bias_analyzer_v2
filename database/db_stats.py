@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database.db import DatabaseManager
 from database.models import NewsArticle, NewsSource, Entity, EntityMention, Quote, Topic, PublicFigure
+from statistical_database.db_manager import StatisticalDBManager
 
 # Configure logging
 logging.basicConfig(
@@ -64,6 +65,27 @@ def get_database_stats() -> Dict[str, Any]:
         ).filter(
             NewsArticle.analysis_status == "completed"
         ).scalar() or 0
+        
+        # Articles with T² scores
+        article_stats['t2_score_count'] = session.query(
+            func.count(NewsArticle.id)
+        ).filter(
+            NewsArticle.hotelling_t2_score.isnot(None)
+        ).scalar() or 0
+        
+        # T² score distribution (if any exist)
+        if article_stats['t2_score_count'] > 0:
+            t2_stats = session.query(
+                func.min(NewsArticle.hotelling_t2_score).label('min_t2'),
+                func.avg(NewsArticle.hotelling_t2_score).label('avg_t2'),
+                func.max(NewsArticle.hotelling_t2_score).label('max_t2')
+            ).filter(
+                NewsArticle.hotelling_t2_score.isnot(None)
+            ).first()
+            
+            article_stats['t2_min'] = round(t2_stats.min_t2, 2) if t2_stats.min_t2 else 0
+            article_stats['t2_avg'] = round(t2_stats.avg_t2, 2) if t2_stats.avg_t2 else 0
+            article_stats['t2_max'] = round(t2_stats.max_t2, 2) if t2_stats.max_t2 else 0
         
         # Articles processing percentage
         if article_stats['total_count'] > 0:
@@ -139,6 +161,14 @@ def get_database_stats() -> Dict[str, Any]:
         
         # Total entity mentions
         entity_stats['mentions_count'] = session.query(func.count(EntityMention.id)).scalar() or 0
+        
+        # Get total deleted entities from statistical database
+        try:
+            stats_db = StatisticalDBManager()
+            entity_stats['total_deleted'] = stats_db.get_system_metric('total_entities_deleted')
+        except Exception as e:
+            logger.warning(f"Could not get deleted entities metric: {e}")
+            entity_stats['total_deleted'] = 0
         
         # Most mentioned entities
         top_entities = session.query(
@@ -248,6 +278,11 @@ def format_stats_output(stats: Dict[str, Any]) -> str:
     if 'completed_count' in article_stats:
         completed_percentage = round((article_stats['completed_count'] / article_stats['total_count'] * 100) if article_stats['total_count'] > 0 else 0, 1)
         output.append(f"Completed articles: {article_stats['completed_count']} ({completed_percentage}%)")
+    if 't2_score_count' in article_stats:
+        t2_percentage = round((article_stats['t2_score_count'] / article_stats['completed_count'] * 100) if article_stats['completed_count'] > 0 else 0, 1)
+        output.append(f"Articles with T² scores: {article_stats['t2_score_count']} ({t2_percentage}% of completed)")
+        if article_stats['t2_score_count'] > 0 and 't2_min' in article_stats:
+            output.append(f"  T² range: {article_stats['t2_min']} - {article_stats['t2_max']} (avg: {article_stats['t2_avg']})")
     
     # Add analysis status breakdown if available
     if 'status_breakdown' in article_stats:
@@ -273,6 +308,8 @@ def format_stats_output(stats: Dict[str, Any]) -> str:
     output.append("\n===== ENTITY STATISTICS =====")
     output.append(f"Total entities: {entity_stats['total_count']}")
     output.append(f"Total entity mentions: {entity_stats['mentions_count']}")
+    if 'total_deleted' in entity_stats and entity_stats['total_deleted'] > 0:
+        output.append(f"Total entities deleted (all-time): {entity_stats['total_deleted']}")
     
     if entity_stats['top_entities']:
         output.append("Most mentioned entities:")

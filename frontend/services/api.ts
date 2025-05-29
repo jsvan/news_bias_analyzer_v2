@@ -79,6 +79,27 @@ export const statsApi = {
   getHistoricalSentiment: async (entityId: number, params = {}) => {
     const response = await api.get(`/stats/historical_sentiment?entity_id=${entityId}`, { params });
     return response.data;
+  },
+  
+  // Get source-specific historical sentiment data
+  getSourceHistoricalSentiment: async (entityId: number, params: any = {}) => {
+    // Build the URL with proper query parameters
+    let url = `/stats/source_historical_sentiment?entity_id=${entityId}`;
+    
+    // Add other parameters
+    if (params.days) {
+      url += `&days=${params.days}`;
+    }
+    
+    // Handle countries array properly for FastAPI
+    if (params.countries && Array.isArray(params.countries)) {
+      params.countries.forEach((country: string) => {
+        url += `&countries=${encodeURIComponent(country)}`;
+      });
+    }
+    
+    const response = await api.get(url);
+    return response.data;
   }
 };
 

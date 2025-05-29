@@ -22,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabButtons = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
   
+  // Info link elements
+  const methodologyLink = document.getElementById('methodology-link');
+  const distributionInfoLink = document.getElementById('distribution-info-link');
+  
   // Configuration
   const API_ENDPOINT = 'http://localhost:8000';
 
@@ -76,6 +80,35 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+  
+  // Info button event listeners
+  if (methodologyLink) {
+    methodologyLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showInfoPopup('Composite Bias Score Methodology', 
+        'The composite bias score represents how typical or unusual this article\'s sentiment pattern is compared to articles from this week.\n\n' +
+        'It\'s calculated by:\n' +
+        '1. Converting each entity\'s power and moral scores to percentiles\n' +
+        '2. Measuring statistical deviation from expected values\n' +
+        '3. Combining scores using weighted averaging\n' +
+        '4. Normalizing to a 0-100 percentile\n\n' +
+        'Lower percentiles indicate more unusual sentiment patterns.'
+      );
+    });
+  }
+  
+  if (distributionInfoLink) {
+    distributionInfoLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showInfoPopup('Sentiment Distribution Explanation',
+        'This histogram shows how the selected entity\'s sentiment score compares to the distribution of scores across news articles.\n\n' +
+        'The orange marker shows where this article\'s sentiment falls in the distribution. The percentile is calculated relative to:\n' +
+        '• Global data (when no country is selected)\n' +
+        '• Country-specific data (when a country is selected)\n\n' +
+        'This helps identify whether the sentiment is typical or unusual compared to the selected comparison group.'
+      );
+    });
+  }
   
   // Initialize the extension
   function initializeExtension() {
@@ -596,16 +629,16 @@ document.addEventListener('DOMContentLoaded', () => {
         
       compositeIndicator.style.left = `${percentile}%`;
       
-      // Format percentile text
+      // Format percentile text based on extremeness
       let percentileText;
-      if (percentile < 10) {
-        percentileText = 'highly unusual (bottom 10%)';
-      } else if (percentile < 25) {
-        percentileText = 'unusual (bottom 25%)';
-      } else if (percentile > 90) {
-        percentileText = 'very typical (top 10%)';
+      if (percentile > 90) {
+        percentileText = 'extremely unusual (top 10%)';
       } else if (percentile > 75) {
-        percentileText = 'typical (top 25%)';
+        percentileText = 'very unusual (top 25%)';
+      } else if (percentile > 60) {
+        percentileText = 'somewhat unusual';
+      } else if (percentile < 25) {
+        percentileText = 'typical';
       } else {
         percentileText = 'average';
       }
@@ -770,10 +803,11 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Initialize visualizations
   function initializeVisualizations() {
-    // Initialize distribution histogram
-    window.sentimentHistogram = new SentimentHistogram('distribution-chart', {
+    // Initialize distribution histogram container (now shows multiple histograms)
+    window.sentimentHistogram = new SentimentHistogram('distribution-charts-container', {
       animate: true,
-      showPercentile: true
+      showPercentile: true,
+      dimension: 'moral' // Default to moral dimension
     });
 
     // Initialize entity tracking visualization
@@ -952,313 +986,38 @@ document.addEventListener('DOMContentLoaded', () => {
   // Populate distribution tab
   function populateDistributionTab() {
     // Get dropdown elements
-    const entitySelector = document.getElementById('entity-selector');
     const dimensionSelector = document.getElementById('dimension-selector');
-    const countrySelector = document.getElementById('country-selector');
-    let sourceSelector = document.getElementById('source-selector');
-    const sampleSizeInfo = document.getElementById('sample-size-info');
     
-    // Fix the layout of controls - we'll put each selector on its own row
-    const tabControls = document.querySelector('.tab-controls');
-    if (tabControls) {
-      // Apply new styles to improve layout
-      tabControls.style.display = 'flex';
-      tabControls.style.flexDirection = 'column';
-      tabControls.style.gap = '10px';
-      
-      // Ensure each control group has proper width
-      const controlGroups = tabControls.querySelectorAll('.control-group');
-      controlGroups.forEach(group => {
-        group.style.width = '100%';
-        group.style.display = 'flex';
-        group.style.flexDirection = 'column';
-        group.style.marginBottom = '8px';
-        
-        // Make selects take full width
-        const select = group.querySelector('select');
-        if (select) {
-          select.style.width = '100%';
-        }
-      });
+    // Hide the global sample size info since individual histograms have their own
+    const globalSampleInfo = document.getElementById('sample-size-info');
+    if (globalSampleInfo) {
+      globalSampleInfo.style.display = 'none';
     }
     
-    // If sourceSelector doesn't exist, create it
-    let comparisonContainer = document.querySelector('.comparison-container');
-    if (!comparisonContainer) {
-      // Create comparison container and selectors
-      comparisonContainer = document.createElement('div');
-      comparisonContainer.className = 'comparison-container';
-      comparisonContainer.style.width = '100%';
-      
-      // Add source selector if it doesn't exist
-      if (!sourceSelector) {
-        const sourceSelectorContainer = document.createElement('div');
-        sourceSelectorContainer.className = 'control-group';
-        sourceSelectorContainer.style.width = '100%';
-        sourceSelectorContainer.innerHTML = `
-          <label for="source-selector">Compare with source:</label>
-          <select id="source-selector" style="width: 100%;">
-            <option value="">All Sources</option>
-          </select>
-        `;
-        comparisonContainer.appendChild(sourceSelectorContainer);
-        
-        // Add it to the distribution controls
-        const controlsContainer = countrySelector ? countrySelector.closest('.tab-controls') : null;
-        if (controlsContainer) {
-          controlsContainer.appendChild(comparisonContainer);
-          sourceSelector = document.getElementById('source-selector');
-        }
+    if (!analysisResult || !analysisResult.entities || analysisResult.entities.length === 0) {
+      // Show empty state
+      if (window.sentimentHistogram) {
+        window.sentimentHistogram.container.innerHTML = '<div class="empty-message">No entities available</div>';
       }
+      return;
     }
-    
-    // Clear and repopulate entity selector
-    if (entitySelector) {
-      entitySelector.innerHTML = '';
-      
-      if (!analysisResult || !analysisResult.entities || analysisResult.entities.length === 0) {
-        // Show empty state
-        if (window.sentimentHistogram) {
-          window.sentimentHistogram.drawEmptyState('No entities available');
-        }
-        entitySelector.innerHTML = '<option value="">No entities available</option>';
-        if (sampleSizeInfo) {
-          sampleSizeInfo.textContent = 'No data available';
-        }
-        return;
-      }
-      
-      // Populate entity dropdown
-      analysisResult.entities.forEach(entity => {
-        const displayName = entity.name || entity.entity;
-        if (!displayName) return;
-        
-        const option = document.createElement('option');
-        option.value = displayName;
-        option.textContent = displayName;
-        entitySelector.appendChild(option);
-      });
-    }
-    
-    // Ensure all selectors exist before adding event listeners
-    if (entitySelector) {
-      entitySelector.addEventListener('change', updateDistributionChart);
-    }
-    
+
+    // Set up event listener for dimension selector
     if (dimensionSelector) {
-      dimensionSelector.addEventListener('change', updateDistributionChart);
-    }
-    
-    if (countrySelector) {
-      countrySelector.addEventListener('change', updateDistributionChart);
-    }
-    
-    if (sourceSelector) {
-      sourceSelector.addEventListener('change', updateDistributionChart);
-    }
-    
-    // Load initial data only if we have entities
-    if (analysisResult && analysisResult.entities && analysisResult.entities.length > 0) {
-      updateDistributionChart();
-    }
-    
-    // Update distribution chart based on selections
-    function updateDistributionChart() {
-      // Handle cases where elements might not exist
-      if (!entitySelector || !dimensionSelector || !window.sentimentHistogram) {
-        console.error("Required elements for distribution chart not found");
-        return;
-      }
+      // Remove any existing listeners
+      const newDimensionSelector = dimensionSelector.cloneNode(true);
+      dimensionSelector.parentNode.replaceChild(newDimensionSelector, dimensionSelector);
       
-      // Re-fetch sourceSelector in case it was created after initial load
-      sourceSelector = document.getElementById('source-selector');
-    
-      const selectedEntity = entitySelector.value;
-      const selectedDimension = dimensionSelector ? dimensionSelector.value : 'power';
-      const selectedCountry = countrySelector ? countrySelector.value : '';
-      const selectedSource = sourceSelector ? sourceSelector.value : '';
-      
-      console.log('🔍 DISTRIBUTION UPDATE:', {
-        entity: selectedEntity,
-        dimension: selectedDimension,
-        country: selectedCountry,
-        source: selectedSource
+      newDimensionSelector.addEventListener('change', () => {
+        if (window.sentimentHistogram) {
+          window.sentimentHistogram.setDimension(newDimensionSelector.value);
+        }
       });
-      
-      if (!selectedEntity) {
-        window.sentimentHistogram.drawEmptyState('Please select an entity');
-        return;
-      }
-      
-      // Ensure we have analysis result with entities
-      if (!analysisResult || !analysisResult.entities || !Array.isArray(analysisResult.entities)) {
-        window.sentimentHistogram.drawEmptyState('No entity data available');
-        return;
-      }
-      
-      const entity = analysisResult.entities.find(e => 
-        (e.name === selectedEntity) || (e.entity === selectedEntity)
-      );
-      
-      if (!entity) {
-        window.sentimentHistogram.drawEmptyState('Entity data not found');
-        return;
-      }
-      
-      // Show loading state
-      sampleSizeInfo.textContent = 'Loading distribution data...';
-      
-      // Build API URL with parameters
-      let apiUrl = `${API_ENDPOINT}/stats/sentiment/distribution?entity_name=${encodeURIComponent(selectedEntity)}&dimension=${selectedDimension}`;
-      
-      // Only add one comparison filter - source takes precedence over country
-      if (selectedSource) {
-        apiUrl += `&source_id=${selectedSource}`;
-        console.log('📡 API URL (source filter):', apiUrl);
-      } else if (selectedCountry) {
-        apiUrl += `&country=${encodeURIComponent(selectedCountry)}`;
-        console.log('📡 API URL (country filter):', apiUrl);
-      } else {
-        console.log('📡 API URL (global):', apiUrl);
-      }
-      
-      // Fetch distribution data from API
-      fetch(apiUrl)
-        .then(response => {
-          if (!response.ok) {
-            // Handle API errors gracefully
-            return response.json().then(errorData => {
-              throw new Error(errorData.detail || `API request failed: ${response.status}`);
-            }).catch(() => {
-              throw new Error(`API request failed: ${response.status}`);
-            });
-          }
-          return response.json();
-        })
-        .then(data => {
-          console.log('📊 Distribution API response:', data);
-          console.log('🔍 Comparison data details:', {
-            has_comparison_data: !!data.comparison_data,
-            comparison_data: data.comparison_data,
-            comparison_label: data.comparison_label,
-            sample_size: data.sample_size,
-            values_count: data.values ? data.values.length : 0
-          });
-          
-          // Check if we have valid data
-          if (!data.has_data || !data.values || data.values.length < 5) {
-            window.sentimentHistogram.drawEmptyState('No data available for this entity');
-            if (sampleSizeInfo) {
-              sampleSizeInfo.textContent = `Sample: ${data.sample_size || 0} entity mentions (insufficient for analysis)`;
-            }
-            return;
-          }
-          
-          // Set the data in the histogram
-          // The API now returns comparison_data directly
-          const comparisonData = data.comparison_data || null;
-          
-          console.log('🎯 Setting histogram data:', {
-            values_sample: data.values.slice(0, 5),
-            current_value: data.current_value,
-            has_comparison: !!comparisonData,
-            comparison_keys: comparisonData ? Object.keys(comparisonData) : [],
-            dimension: selectedDimension
-          });
-          
-          // Update dimension for semantic labeling
-          window.sentimentHistogram.setDimension(selectedDimension);
-          
-          window.sentimentHistogram.setData(
-            data.values, 
-            data.current_value, 
-            comparisonData
-          );
-          
-          // Update HTML title based on dimension and comparison data
-          const titleElement = document.getElementById('distribution-title');
-          if (titleElement) {
-            const dimensionTitle = selectedDimension === 'power' ? 'Power Distribution' : 'Moral Distribution';
-            if (comparisonData) {
-              const comparisonKey = Object.keys(comparisonData)[0];
-              titleElement.textContent = comparisonKey ? 
-                `${dimensionTitle} with ${comparisonKey} Comparison` :
-                dimensionTitle;
-            } else {
-              titleElement.textContent = dimensionTitle;
-            }
-          }
-          
-          // Update sample size info
-          let sampleSizeText = `Sample: ${data.sample_size} entity mentions across ${data.source_count} news sources`;
-          
-          // Add info about comparison data if available
-          if (comparisonData) {
-            const comparisonKey = Object.keys(comparisonData)[0];
-            if (comparisonKey && comparisonData[comparisonKey]) {
-              const comparisonCount = comparisonData[comparisonKey].length;
-              // Extract the base country name (remove "(limited data)" suffix if present)
-              const baseKey = comparisonKey.replace(' (limited data)', '');
-              if (comparisonKey.includes('(limited data)') || comparisonCount < 3) {
-                sampleSizeText += ` | ${baseKey}: ${comparisonCount} mention${comparisonCount === 1 ? '' : 's'} (limited data)`;
-              } else {
-                sampleSizeText += ` | ${baseKey}: ${comparisonCount} mentions`;
-              }
-            }
-          }
-          
-          sampleSizeInfo.textContent = sampleSizeText;
-          
-          // Update available sources dropdown if we have source data
-          if (data.available_sources && data.available_sources.length > 0 && sourceSelector) {
-            // Keep the current selection
-            const currentSelection = sourceSelector.value;
-            
-            // Clear existing options except the first one
-            while (sourceSelector.options.length > 1) {
-              sourceSelector.remove(1);
-            }
-            
-            // Add new source options
-            data.available_sources.forEach(source => {
-              const option = document.createElement('option');
-              option.value = source.id;
-              option.textContent = `${source.name} (${source.count})`;
-              sourceSelector.appendChild(option);
-            });
-            
-            // Restore previous selection if it exists in the new options
-            if (currentSelection) {
-              for (let i = 0; i < sourceSelector.options.length; i++) {
-                if (sourceSelector.options[i].value === currentSelection) {
-                  sourceSelector.selectedIndex = i;
-                  break;
-                }
-              }
-            }
-          }
-        })
-        .catch(error => {
-          console.error('Error fetching distribution data:', error);
-          
-          // Show user-friendly error messages
-          if (error.message.includes('Insufficient data')) {
-            window.sentimentHistogram.drawEmptyState('Insufficient data for this entity');
-            if (sampleSizeInfo) {
-              sampleSizeInfo.textContent = 'This entity has too few mentions for statistical analysis';
-            }
-          } else if (error.message.includes('not found')) {
-            window.sentimentHistogram.drawEmptyState('Entity not found in database');
-            if (sampleSizeInfo) {
-              sampleSizeInfo.textContent = 'This entity is not yet in our database';
-            }
-          } else {
-            window.sentimentHistogram.drawEmptyState('Error loading data');
-            if (sampleSizeInfo) {
-              sampleSizeInfo.textContent = 'Error: Could not fetch data from server';
-            }
-          }
-        });
+    }
+
+    // Set entities data and render all histograms
+    if (window.sentimentHistogram) {
+      window.sentimentHistogram.setEntitiesData(analysisResult.entities);
     }
   }
   
@@ -1651,5 +1410,99 @@ document.addEventListener('DOMContentLoaded', () => {
       default:
         return type.charAt(0).toUpperCase() + type.slice(1);
     }
+  }
+  
+  // Show info popup
+  function showInfoPopup(title, message) {
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'info-popup-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    
+    // Create popup
+    const popup = document.createElement('div');
+    popup.className = 'info-popup';
+    popup.style.cssText = `
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 400px;
+      max-height: 300px;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      position: relative;
+    `;
+    
+    // Create close button
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '×';
+    closeBtn.style.cssText = `
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      border: none;
+      background: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #666;
+    `;
+    
+    // Create content
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = title;
+    titleEl.style.cssText = `
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #333;
+    `;
+    
+    const messageEl = document.createElement('div');
+    messageEl.style.cssText = `
+      color: #555;
+      line-height: 1.5;
+      white-space: pre-line;
+    `;
+    messageEl.textContent = message;
+    
+    // Assemble popup
+    popup.appendChild(closeBtn);
+    popup.appendChild(titleEl);
+    popup.appendChild(messageEl);
+    overlay.appendChild(popup);
+    
+    // Add to document
+    document.body.appendChild(overlay);
+    
+    // Close handlers
+    const closePopup = () => {
+      document.body.removeChild(overlay);
+    };
+    
+    closeBtn.addEventListener('click', closePopup);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closePopup();
+      }
+    });
+    
+    // Close on escape key
+    const escapeHandler = (e) => {
+      if (e.key === 'Escape') {
+        closePopup();
+        document.removeEventListener('keydown', escapeHandler);
+      }
+    };
+    document.addEventListener('keydown', escapeHandler);
   }
 });

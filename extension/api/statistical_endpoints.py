@@ -19,11 +19,70 @@ import math
 # Note: get_session is provided by main.py as get_db dependency
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 
+# Import entity mapping utilities
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from utils.entity_mapper import entity_mapper, normalize_entity_name, find_entity_variants
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def find_entity_variants_in_db(entity_name: str, session: Session) -> List[Entity]:
+    """
+    Find all variants of an entity in the database using the entity mapper
+    
+    Args:
+        entity_name: The entity name to search for
+        session: Database session
+        
+    Returns:
+        List of Entity objects that are variants of the same entity
+    """
+    try:
+        if session is None:
+            logger.error(f"Database session is None for entity '{entity_name}'")
+            return []
+            
+        # Normalize the target entity name
+        normalized_name = normalize_entity_name(entity_name)
+        
+        # Get all entities from database
+        all_entities = session.query(Entity).all()
+        
+        # Convert to dict format for entity mapper
+        entity_dicts = []
+        for entity in all_entities:
+            entity_dicts.append({
+                'name': entity.name,
+                'type': entity.entity_type,
+                'id': entity.id,
+                'entity_obj': entity  # Keep reference to original object
+            })
+        
+        # Find variants using entity mapper
+        variants = find_entity_variants(normalized_name, entity_dicts)
+        
+        # Extract the original Entity objects
+        variant_entities = [v['entity_obj'] for v in variants]
+        
+        logger.info(f"🔍 Found {len(variant_entities)} entities for '{entity_name}', using '{normalized_name}' as representative")
+        
+        # Log the entities found
+        for entity in variant_entities[:10]:  # Log first 10
+            logger.info(f"  - {entity.name} ({entity.entity_type})")
+        if len(variant_entities) > 10:
+            logger.info(f"  ... and {len(variant_entities) - 10} more")
+            
+        return variant_entities
+        
+    except Exception as e:
+        logger.error(f"Error finding entity variants for '{entity_name}': {str(e)}")
+        return []
 
 class SentimentDistributionResponse(BaseModel):
     entity_name: str
@@ -36,6 +95,10 @@ class SentimentDistributionResponse(BaseModel):
     source_count: int
     available_sources: Optional[List[Dict[str, Any]]] = None
     has_data: bool
+
+class AvailableCountriesResponse(BaseModel):
+    entity_name: str
+    countries: List[Dict[str, Any]]  # [{"code": "USA", "name": "United States", "sample_size": 123}]
 
 
 def get_db_session():
@@ -65,65 +128,67 @@ async def get_sentiment_distribution(
         Distribution data with current value and comparison data
     """
     try:
-        # Get the entity by name - prioritize by mention count to get the most relevant entity
-        entity = session.query(Entity).join(
+        # Create flexible entity matching patterns for common entities
+        def get_entity_patterns(name):
+            name_lower = name.lower().strip()
+            patterns = [name_lower]  # Always include exact match
+            
+            if name_lower == "trump" or name_lower == "donald trump":
+                patterns.extend(["trump", "donald trump", "president trump", "donald j. trump", "mr trump", "mr. trump"])
+            elif name_lower == "russia":
+                patterns.extend(["russia", "russian federation"])
+            elif name_lower == "united states" or name_lower == "usa":
+                patterns.extend(["united states", "usa", "us", "america"])
+            elif name_lower == "china":
+                patterns.extend(["china", "chinese"])
+            elif name_lower == "iran":
+                patterns.extend(["iran", "iranian"])
+            elif name_lower == "putin" or name_lower == "vladimir putin":
+                patterns.extend(["putin", "vladimir putin", "president putin"])
+            elif name_lower == "ukraine":
+                patterns.extend(["ukraine", "ukrainian"])
+            elif name_lower == "biden" or name_lower == "joe biden":
+                patterns.extend(["biden", "joe biden", "president biden"])
+            
+            return patterns
+        
+        # Get all matching entity IDs
+        entity_patterns = get_entity_patterns(entity_name)
+        entity_ids = []
+        
+        for pattern in entity_patterns:
+            # Find entities that match this pattern
+            matching_entities = session.query(Entity.id).filter(
+                func.lower(Entity.name).like(f"%{pattern}%")
+            ).all()
+            entity_ids.extend([e.id for e in matching_entities])
+        
+        # Remove duplicates
+        entity_ids = list(set(entity_ids))
+        
+        if not entity_ids:
+            logger.error(f"No entities found for '{entity_name}' with patterns: {entity_patterns}")
+            raise HTTPException(status_code=404, detail=f"Entity '{entity_name}' not found in database")
+        
+        # Get a representative entity for metadata (pick the one with most mentions)
+        representative_entity = session.query(Entity).join(
             EntityMention, Entity.id == EntityMention.entity_id
         ).filter(
-            func.lower(Entity.name) == func.lower(entity_name)
+            Entity.id.in_(entity_ids)
         ).group_by(
             Entity.id, Entity.name, Entity.entity_type
         ).order_by(
             func.count(EntityMention.id).desc()
         ).first()
         
-        if not entity:
-            # Try fuzzy matching if exact match fails - also prioritize by mention count
-            entity = session.query(Entity).join(
-                EntityMention, Entity.id == EntityMention.entity_id
-            ).filter(
-                func.lower(Entity.name).like(f"%{entity_name.lower()}%")
-            ).group_by(
-                Entity.id, Entity.name, Entity.entity_type
-            ).order_by(
-                func.count(EntityMention.id).desc()
-            ).first()
-            
-            # Also check for common variations
-            if not entity and entity_name.lower() == "united states":
-                # Try common variations - prioritize by mention count
-                for variant in ["USA", "US", "U.S.", "U.S.A.", "America"]:
-                    entity = session.query(Entity).join(
-                        EntityMention, Entity.id == EntityMention.entity_id
-                    ).filter(
-                        func.lower(Entity.name) == func.lower(variant)
-                    ).group_by(
-                        Entity.id, Entity.name, Entity.entity_type
-                    ).order_by(
-                        func.count(EntityMention.id).desc()
-                    ).first()
-                    if entity:
-                        logger.info(f"Found entity under variant name: {entity.name}")
-                        break
-        
-        if not entity:
-            # Entity not found in database - log available entities for debugging
-            similar_entities = session.query(Entity.name, func.count(EntityMention.id).label('count')).join(
-                EntityMention, Entity.id == EntityMention.entity_id
-            ).filter(
-                func.lower(Entity.name).like(f"%{entity_name.lower()[:3]}%")
-            ).group_by(Entity.name).order_by(func.count(EntityMention.id).desc()).limit(10).all()
-            
-            logger.error(f"Entity '{entity_name}' not found. Similar entities: {[f'{name} ({count})' for name, count in similar_entities]}")
-            raise HTTPException(status_code=404, detail=f"Entity '{entity_name}' not found in database")
-        
-        logger.info(f"🔍 Found entity: {entity.name} (ID: {entity.id}, Type: {entity.entity_type})")
+        logger.info(f"🔍 Found {len(entity_ids)} entities for '{entity_name}', using '{representative_entity.name}' as representative")
         
         # Get all mentions of this entity
         score_field = EntityMention.power_score if dimension == "power" else EntityMention.moral_score
         
-        # Query for all mentions of this entity with the selected dimension
+        # Query for all mentions across ALL matching entities with the selected dimension
         mentions_query = session.query(score_field).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             score_field.isnot(None)  # Ensure we only get mentions with valid scores
         )
         
@@ -133,7 +198,7 @@ async def get_sentiment_distribution(
         # If we don't have enough data, return error
         min_mentions_required = 3  # Lowered from 5 to be more permissive
         if total_mentions < min_mentions_required:
-            logger.error(f"Insufficient data for entity '{entity_name}' ({total_mentions} mentions).")
+            logger.error(f"Insufficient data for entity '{entity_name}' ({total_mentions} mentions across {len(entity_ids)} entity variants).")
             raise HTTPException(status_code=400, detail=f"Insufficient data for entity '{entity_name}'. Only {total_mentions} mentions found, need at least {min_mentions_required}.")
         
         # Get all score values  
@@ -141,7 +206,7 @@ async def get_sentiment_distribution(
         
         # Get the most recent mention score as the current value
         most_recent = session.query(score_field, EntityMention.created_at).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             score_field.isnot(None)
         ).order_by(
             EntityMention.created_at.desc()
@@ -161,7 +226,7 @@ async def get_sentiment_distribution(
             source_mentions = session.query(score_field).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
             ).filter(
-                EntityMention.entity_id == entity.id,
+                EntityMention.entity_id.in_(entity_ids),
                 NewsArticle.source_id == source_id,
                 score_field.isnot(None)
             ).all()
@@ -189,7 +254,7 @@ async def get_sentiment_distribution(
             ).join(
                 EntityMention, NewsArticle.id == EntityMention.article_id
             ).filter(
-                EntityMention.entity_id == entity.id,
+                EntityMention.entity_id.in_(entity_ids),
                 score_field.isnot(None)
             ).group_by(NewsSource.id, NewsSource.name, NewsSource.country).all()
             
@@ -203,7 +268,7 @@ async def get_sentiment_distribution(
             ).join(
                 NewsSource, NewsArticle.source_id == NewsSource.id
             ).filter(
-                EntityMention.entity_id == entity.id,
+                EntityMention.entity_id.in_(entity_ids),
                 score_field.isnot(None),
                 func.lower(NewsSource.country) == func.lower(country)
             ).all()
@@ -240,7 +305,7 @@ async def get_sentiment_distribution(
         ).join(
             EntityMention, NewsArticle.id == EntityMention.article_id
         ).filter(
-            EntityMention.entity_id == entity.id
+            EntityMention.entity_id.in_(entity_ids)
         ).scalar() or 0
         
         # Get available sources for this entity to offer as comparison options
@@ -253,7 +318,7 @@ async def get_sentiment_distribution(
         ).join(
             EntityMention, NewsArticle.id == EntityMention.article_id
         ).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             score_field.isnot(None)
         ).group_by(
             NewsSource.id, 
@@ -270,8 +335,8 @@ async def get_sentiment_distribution(
         ]
         
         return SentimentDistributionResponse(
-            entity_name=entity.name,
-            entity_type=entity.entity_type or "unknown",
+            entity_name=representative_entity.name,
+            entity_type=representative_entity.entity_type or "unknown",
             current_value=float(current_value),
             values=values,
             comparison_data=comparison_data,
@@ -329,21 +394,16 @@ async def get_entity_tracking(
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
         
-        # Get the entity by name
-        entity = session.query(Entity).filter(
-            func.lower(Entity.name) == func.lower(entity_name)
-        ).first()
+        # Find all entity variants using entity mapper
+        entity_variants = find_entity_variants_in_db(entity_name, session)
         
-        if not entity:
-            # Try fuzzy matching if exact match fails
-            entity = session.query(Entity).filter(
-                func.lower(Entity.name).like(f"%{entity_name.lower()}%")
-            ).first()
-        
-        if not entity:
+        if not entity_variants:
             # Entity not found in database
             logger.error(f"Entity '{entity_name}' not found in database.")
             raise HTTPException(status_code=404, detail=f"Entity '{entity_name}' not found in database")
+        
+        # Use all variant entity IDs for querying mentions
+        entity_ids = [entity.id for entity in entity_variants]
         
         # Get entity mentions over the time period
         mentions_query = session.query(
@@ -351,7 +411,7 @@ async def get_entity_tracking(
             EntityMention.power_score,
             EntityMention.moral_score
         ).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             EntityMention.created_at >= start_date,
             EntityMention.created_at <= end_date,
             EntityMention.power_score.isnot(None),
@@ -371,6 +431,7 @@ async def get_entity_tracking(
         ).all()
         
         # Get global averages and standard deviations for this entity over the same time period
+        # If source_id is provided, exclude that source from global averages for true comparison
         global_avg_query = session.query(
             func.date(EntityMention.created_at).label('date'),
             func.avg(EntityMention.power_score).label('global_power_avg'),
@@ -379,12 +440,22 @@ async def get_entity_tracking(
             func.stddev(EntityMention.moral_score).label('global_moral_std'),
             func.count(EntityMention.id).label('count')
         ).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             EntityMention.created_at >= start_date,
             EntityMention.created_at <= end_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
-        ).group_by(
+        )
+        
+        # If source_id is provided, exclude that source from global averages
+        if source_id is not None:
+            global_avg_query = global_avg_query.join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).filter(
+                NewsArticle.source_id != source_id
+            )
+        
+        global_avg_query = global_avg_query.group_by(
             func.date(EntityMention.created_at)
         ).all()
         
@@ -406,7 +477,7 @@ async def get_entity_tracking(
         ).join(
             EntityMention, NewsArticle.id == EntityMention.article_id
         ).filter(
-            EntityMention.entity_id == entity.id,
+            EntityMention.entity_id.in_(entity_ids),
             EntityMention.created_at >= start_date,
             EntityMention.created_at <= end_date
         )
@@ -431,9 +502,13 @@ async def get_entity_tracking(
             global_avgs_by_date
         )
         
+        # Use the first entity variant for metadata
+        primary_entity = entity_variants[0]
+        normalized_name = normalize_entity_name(entity_name)
+        
         return EntityTrackingResponse(
-            entity_name=entity.name,
-            entity_type=entity.entity_type or "unknown",
+            entity_name=normalized_name,
+            entity_type=primary_entity.entity_type or "unknown",
             data=tracking_data,
             has_data=len(tracking_data) > 0,
             limited_data=len(mentions) < 20,
@@ -580,3 +655,377 @@ def calculate_sliding_window_average(mentions, start_date, end_date, window_size
 
 
 # No mock data - all responses come from real database data
+
+@router.get("/entity/available-countries", response_model=AvailableCountriesResponse)
+async def get_available_countries_for_entity(
+    entity_name: str,
+    dimension: str = Query("power", regex="^(power|moral)$"),
+    min_mentions: int = Query(3, ge=1),
+    session: Session = Depends(get_db_session)
+):
+    """
+    Get countries that have sufficient data for distribution comparison for a specific entity.
+    
+    Args:
+        entity_name: The name of the entity
+        dimension: Which dimension to check (power or moral)
+        min_mentions: Minimum number of mentions required per country
+        
+    Returns:
+        List of countries with sufficient data for this entity
+    """
+    try:
+        # Get score field based on dimension
+        score_field = EntityMention.power_score if dimension == "power" else EntityMention.moral_score
+        
+        # Create flexible entity matching patterns for common entities
+        def get_entity_patterns(name):
+            name_lower = name.lower().strip()
+            patterns = [name_lower]  # Always include exact match
+            
+            if name_lower == "trump" or name_lower == "donald trump":
+                patterns.extend(["trump", "donald trump", "president trump", "donald j. trump", "mr trump", "mr. trump"])
+            elif name_lower == "russia":
+                patterns.extend(["russia", "russian federation"])
+            elif name_lower == "united states" or name_lower == "usa":
+                patterns.extend(["united states", "usa", "us", "america"])
+            elif name_lower == "china":
+                patterns.extend(["china", "chinese"])
+            elif name_lower == "iran":
+                patterns.extend(["iran", "iranian"])
+            elif name_lower == "putin" or name_lower == "vladimir putin":
+                patterns.extend(["putin", "vladimir putin", "president putin"])
+            elif name_lower == "ukraine":
+                patterns.extend(["ukraine", "ukrainian"])
+            elif name_lower == "biden" or name_lower == "joe biden":
+                patterns.extend(["biden", "joe biden", "president biden"])
+            
+            return patterns
+        
+        # Get all matching entity IDs
+        entity_patterns = get_entity_patterns(entity_name)
+        entity_ids = []
+        
+        for pattern in entity_patterns:
+            # Find entities that match this pattern
+            matching_entities = session.query(Entity.id).filter(
+                func.lower(Entity.name).like(f"%{pattern}%")
+            ).all()
+            entity_ids.extend([e.id for e in matching_entities])
+        
+        # Remove duplicates
+        entity_ids = list(set(entity_ids))
+        
+        if not entity_ids:
+            logger.error(f"No entities found for '{entity_name}' with patterns: {entity_patterns}")
+            return AvailableCountriesResponse(
+                entity_name=entity_name,
+                countries=[]
+            )
+        
+        logger.info(f"🔍 Found {len(entity_ids)} matching entities for '{entity_name}': {entity_ids[:10]}...")
+        
+        # Query countries and their data counts across ALL matching entities
+        countries_query = session.query(
+            NewsSource.country,
+            func.count(EntityMention.id).label('mention_count')
+        ).join(
+            NewsArticle, NewsSource.id == NewsArticle.source_id
+        ).join(
+            EntityMention, NewsArticle.id == EntityMention.article_id
+        ).filter(
+            EntityMention.entity_id.in_(entity_ids),
+            NewsSource.country.isnot(None),
+            score_field.isnot(None)
+        ).group_by(
+            NewsSource.country
+        ).having(
+            func.count(EntityMention.id) >= min_mentions
+        ).order_by(
+            func.count(EntityMention.id).desc()
+        )
+        
+        # Debug: log the query info
+        logger.info(f"🔍 Aggregating across {len(entity_ids)} entities for '{entity_name}' ({dimension} dimension)")
+        
+        countries_result = countries_query.all()
+        logger.info(f"🔍 Query returned {len(countries_result)} rows")
+        
+        # Country code mapping for countries we support in the frontend
+        country_mapping = {
+            'USA': 'United States',
+            'UK': 'United Kingdom', 
+            'Canada': 'Canada',
+            'Australia': 'Australia',
+            'Germany': 'Germany',
+            'France': 'France',
+            'Japan': 'Japan',
+            'Russia': 'Russia',
+            'China': 'China',
+            'India': 'India',
+            'Singapore': 'Singapore',
+            'Qatar': 'Qatar',
+            'Hong Kong/China': 'Hong Kong',
+            'Pakistan': 'Pakistan',
+            'Turkey': 'Turkey',
+            'UAE': 'UAE'
+        }
+        
+        # Build response with countries that have sufficient data
+        available_countries = []
+        logger.info(f"🔍 Raw query results for entity '{entity_name}':")
+        for country, mention_count in countries_result:
+            logger.info(f"  - Country: '{country}', Mentions: {mention_count}")
+            
+            # Find matching country code
+            country_code = None
+            country_display_name = None
+            
+            # Check if it matches any of our supported countries
+            for code, name in country_mapping.items():
+                if country == code or country == name:
+                    country_code = code
+                    country_display_name = name
+                    logger.info(f"  ✅ Matched '{country}' to code '{country_code}' name '{country_display_name}'")
+                    break
+            
+            # Only include countries we support in the frontend
+            if country_code and country_display_name:
+                available_countries.append({
+                    "code": country_code,
+                    "name": country_display_name,
+                    "sample_size": int(mention_count)
+                })
+            else:
+                logger.info(f"  ❌ No mapping found for country '{country}'")
+        
+        logger.info(f"Found {len(available_countries)} countries with sufficient data for entity '{entity_name}' ({dimension} dimension)")
+        
+        return AvailableCountriesResponse(
+            entity_name=entity_name,
+            countries=available_countries
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get available countries for entity: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/entity/global-counts")
+def get_global_entity_counts(session: Session = Depends(get_db_session)):
+    """Get global entity mention counts for ordering entities."""
+    try:
+        if session is None:
+            logger.error("Database session is None for global entity counts")
+            raise HTTPException(status_code=500, detail="Database connection not available")
+            
+        # Query to get mention counts for all entities
+        entity_counts = session.query(
+            Entity.name,
+            func.count(EntityMention.id).label('count')
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).group_by(
+            Entity.name
+        ).all()
+        
+        # Convert to dictionary
+        counts = {entity.name: entity.count or 0 for entity in entity_counts}
+        
+        return {"counts": counts}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get global entity counts: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# Response models for similar articles
+class SimilarArticleEntity(BaseModel):
+    name: str
+    power_score: float
+    moral_score: float
+
+class SimilarArticleResponse(BaseModel):
+    article_id: str
+    url: str
+    title: str
+    source_name: str
+    publish_date: datetime
+    entities: List[SimilarArticleEntity]
+    entity_overlap: float  # Jaccard similarity score
+    sentiment_similarity: float  # Sentiment distance score
+    global_sentiment_distance: float  # How far apart the articles are globally
+
+class SimilarArticlesResponse(BaseModel):
+    current_article_id: str
+    similar_articles: List[SimilarArticleResponse]
+    total_count: int
+
+# Database dependency - placeholder, will be overridden by main app
+def get_db_session():
+    """Database session dependency - will be overridden by main.py"""
+    # This is a placeholder that will be overridden by FastAPI dependency injection
+    raise RuntimeError("Database session dependency not properly injected")
+
+@router.get("/article/{article_id}/similar", response_model=SimilarArticlesResponse)
+def get_similar_articles(
+    article_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    days_window: int = Query(3, ge=1, le=7),
+    min_entity_overlap: float = Query(0.3, ge=0.1, le=1.0),
+    session: Session = Depends(get_db_session)
+):
+    """
+    Find articles similar to the given article based on:
+    1. Temporal proximity (same day ± days_window)
+    2. Entity overlap (Jaccard similarity)
+    3. Ordered by sentiment divergence (most different first)
+    """
+    try:
+        if session is None:
+            logger.error(f"Database session is None for article similarity search '{article_id}'")
+            raise HTTPException(status_code=500, detail="Database connection not available")
+        
+        # Clean article ID - remove 'article_' prefix if present
+        clean_article_id = article_id.replace('article_', '') if article_id.startswith('article_') else article_id
+        logger.info(f"Looking for article with cleaned ID: {clean_article_id}")
+            
+        # Get the reference article
+        ref_article = session.query(NewsArticle).filter(NewsArticle.id == clean_article_id).first()
+        if not ref_article:
+            raise HTTPException(status_code=404, detail=f"Article {clean_article_id} not found")
+        
+        # Get entities for the reference article
+        ref_entities = session.query(EntityMention).filter(
+            EntityMention.article_id == clean_article_id
+        ).all()
+        
+        if not ref_entities:
+            logger.warning(f"No entities found for article {clean_article_id}")
+            return SimilarArticlesResponse(
+                current_article_id=article_id,
+                similar_articles=[],
+                total_count=0
+            )
+        
+        ref_entity_names = {e.entity.name.lower() for e in ref_entities}
+        ref_entity_scores = {e.entity.name.lower(): (e.power_score, e.moral_score) for e in ref_entities}
+        
+        logger.info(f"Reference article {article_id} has {len(ref_entity_names)} entities: {list(ref_entity_names)[:5]}...")
+        
+        # Define time window
+        if ref_article.publish_date:
+            time_center = ref_article.publish_date
+        else:
+            time_center = ref_article.scraped_at or datetime.utcnow()
+        
+        time_start = time_center - timedelta(days=days_window)
+        time_end = time_center + timedelta(days=days_window)
+        
+        # Find candidate articles in time window (exclude the reference article)
+        candidate_articles = session.query(NewsArticle).filter(
+            NewsArticle.id != clean_article_id,
+            and_(
+                NewsArticle.publish_date >= time_start,
+                NewsArticle.publish_date <= time_end
+            ) if ref_article.publish_date else and_(
+                NewsArticle.scraped_at >= time_start,
+                NewsArticle.scraped_at <= time_end
+            )
+        ).limit(1000).all()  # Reasonable limit for processing
+        
+        logger.info(f"Found {len(candidate_articles)} candidate articles in time window {time_start.date()} to {time_end.date()}")
+        
+        # Calculate similarity for each candidate
+        similar_articles = []
+        
+        for candidate in candidate_articles:
+            # Get entities for this candidate
+            candidate_entities = session.query(EntityMention).filter(
+                EntityMention.article_id == candidate.id
+            ).all()
+            
+            if not candidate_entities:
+                continue
+                
+            candidate_entity_names = {e.entity.name.lower() for e in candidate_entities}
+            candidate_entity_scores = {e.entity.name.lower(): (e.power_score, e.moral_score) for e in candidate_entities}
+            
+            # Calculate Jaccard similarity for entity overlap
+            intersection = len(ref_entity_names & candidate_entity_names)
+            union = len(ref_entity_names | candidate_entity_names)
+            jaccard_similarity = intersection / union if union > 0 else 0
+            
+            # Skip if not enough entity overlap
+            if jaccard_similarity < min_entity_overlap:
+                continue
+            
+            # Calculate sentiment similarity for overlapping entities
+            overlapping_entities = ref_entity_names & candidate_entity_names
+            if not overlapping_entities:
+                continue
+                
+            sentiment_distances = []
+            for entity_name in overlapping_entities:
+                ref_power, ref_moral = ref_entity_scores[entity_name]
+                cand_power, cand_moral = candidate_entity_scores[entity_name]
+                
+                # Euclidean distance in 2D sentiment space
+                distance = math.sqrt((ref_power - cand_power)**2 + (ref_moral - cand_moral)**2)
+                sentiment_distances.append(distance)
+            
+            avg_sentiment_distance = sum(sentiment_distances) / len(sentiment_distances)
+            
+            # Calculate global sentiment distance (average across all entities)
+            ref_global_power = sum(scores[0] for scores in ref_entity_scores.values()) / len(ref_entity_scores)
+            ref_global_moral = sum(scores[1] for scores in ref_entity_scores.values()) / len(ref_entity_scores)
+            
+            cand_global_power = sum(scores[0] for scores in candidate_entity_scores.values()) / len(candidate_entity_scores)
+            cand_global_moral = sum(scores[1] for scores in candidate_entity_scores.values()) / len(candidate_entity_scores)
+            
+            global_sentiment_distance = math.sqrt(
+                (ref_global_power - cand_global_power)**2 + (ref_global_moral - cand_global_moral)**2
+            )
+            
+            # Format entities for response
+            entities_response = [
+                SimilarArticleEntity(
+                    name=e.entity.name,
+                    power_score=e.power_score,
+                    moral_score=e.moral_score
+                ) for e in candidate_entities
+            ]
+            
+            similar_articles.append(SimilarArticleResponse(
+                article_id=candidate.id,
+                url=candidate.url or "",
+                title=candidate.title or "Unknown Title",
+                source_name=candidate.source.name if candidate.source else "Unknown Source",
+                publish_date=candidate.publish_date or candidate.scraped_at,
+                entities=entities_response,
+                entity_overlap=jaccard_similarity,
+                sentiment_similarity=avg_sentiment_distance,
+                global_sentiment_distance=global_sentiment_distance
+            ))
+        
+        # Sort by sentiment similarity (most different first) - this shows divergent coverage
+        similar_articles.sort(key=lambda x: x.sentiment_similarity, reverse=True)
+        
+        # Limit results
+        similar_articles = similar_articles[:limit]
+        
+        logger.info(f"Found {len(similar_articles)} similar articles for article {article_id}")
+        
+        return SimilarArticlesResponse(
+            current_article_id=article_id,
+            similar_articles=similar_articles,
+            total_count=len(similar_articles)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding similar articles: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to find similar articles: {str(e)}")

@@ -133,6 +133,9 @@ class NewsArticle(Base):
     analysis_status = Column(String(20), default="unanalyzed")  # unanalyzed, in_progress, completed, failed
     batch_id = Column(String(50), nullable=True)  # OpenAI batch ID if in a batch
     last_analysis_attempt = Column(DateTime, nullable=True)  # When last attempted to analyze
+    
+    # Hotelling T² score for measuring article extremeness
+    hotelling_t2_score = Column(Float, nullable=True)  # Statistical extremeness metric
 
     source = relationship("NewsSource", back_populates="articles")
     entities = relationship("EntityMention", back_populates="article")
@@ -283,6 +286,23 @@ class QuoteTopic(Base):
     
     quote = relationship("Quote", back_populates="topic_links")
     topic = relationship("Topic", back_populates="quote_links")
+
+
+class WeeklySentimentStats(Base):
+    """Weekly aggregated sentiment statistics for entities."""
+    __tablename__ = 'weekly_sentiment_stats'
+    
+    entity_id = Column(Integer, ForeignKey('entities.id', ondelete='CASCADE'), primary_key=True)
+    week_start = Column(DateTime, primary_key=True)
+    mean_power = Column(Float)
+    mean_moral = Column(Float)
+    variance_power = Column(Float)
+    variance_moral = Column(Float)
+    covariance = Column(Float)
+    sample_count = Column(Integer)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    entity = relationship("Entity")
     
     def __repr__(self):
-        return f"<QuoteTopic(quote_id={self.quote_id}, topic_id={self.topic_id})>"
+        return f"<WeeklySentimentStats(entity_id={self.entity_id}, week={self.week_start.date()})>"
