@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   
   // Get the repository name for GitHub Pages base path
   // This should be the name of your GitHub repository
-  const repoName = process.env.VITE_REPO_NAME || 'news_bias_analyzer';
+  const repoName = process.env.VITE_REPO_NAME || 'news_bias_analyzer_v2';
   
   return {
     plugins: [react()],
