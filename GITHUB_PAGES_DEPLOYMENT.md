@@ -30,9 +30,9 @@ In `server/dashboard_api.py` and `server/extension_api.py`, update the GitHub Pa
 
 ### Mode 1: GitHub Pages Only (No Backend)
 - ✅ **Frontend**: Hosted on GitHub Pages
-- ✅ **Data**: Mock/demo data included
-- ✅ **Features**: Full UI functionality for demonstration
-- ❌ **Real Data**: No live news analysis
+- ❌ **Data**: No mock data - requires real API connection
+- ⚠️ **Limitation**: Shows error message directing users to run backend
+- 🎯 **Purpose**: Deployment endpoint for when backend is available
 
 ### Mode 2: GitHub Pages + Local API
 - ✅ **Frontend**: Hosted on GitHub Pages  
@@ -117,14 +117,14 @@ The backend automatically configures CORS based on the environment:
 - Includes GitHub Pages URL
 - Includes extension origins
 
-## 📊 Mock Data
+## ⚠️ No Mock Data
 
-When the API is unavailable (GitHub Pages without backend), the frontend automatically uses comprehensive mock data:
+This system does NOT provide mock or fake data for ethical reasons:
 
-- **Entities**: Political figures, countries, organizations
-- **Sources**: Major news outlets with realistic data
-- **Sentiment**: Generated time-series data
-- **Distributions**: Realistic sentiment distributions
+- **Accuracy Required**: News bias analysis must be based on real data
+- **No Simulation**: Fake sentiment data would be misleading
+- **Real Sources Only**: Analysis requires actual news article processing
+- **API Required**: Backend server must be running for any functionality
 
 ## 🚦 Environment Detection
 
@@ -140,7 +140,7 @@ The system automatically detects the deployment environment:
 1. Push to master branch
 2. Wait for GitHub Actions to complete
 3. Visit `https://yourusername.github.io/news_bias_analyzer`
-4. Verify mock data loads and UI works
+4. Verify error message displays correctly (no backend available)
 
 ### Test with Local API
 1. Start your local backend: `python server/dashboard_api.py`

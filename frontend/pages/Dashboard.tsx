@@ -174,7 +174,13 @@ const Dashboard: React.FC = () => {
       setLoading(false);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setError('Failed to load data. Please check that the API server is running.');
+      const errorMessage = (error as Error).message;
+      
+      if (errorMessage.includes('API unavailable')) {
+        setError('⚠️ Backend server required for accurate news analysis.\n\nThis system requires real data - no mock data is provided for reliability.\n\nTo use the dashboard:\n• Run locally: `python server/dashboard_api.py`\n• Or set VITE_API_BASE_URL to your hosted API');
+      } else {
+        setError('Failed to connect to the news analysis API. Please ensure the backend server is running and accessible.');
+      }
       setLoading(false);
     }
   };

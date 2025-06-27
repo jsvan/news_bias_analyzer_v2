@@ -31,7 +31,7 @@ const developmentConfig: EnvironmentConfig = {
   features: {
     enableAnalytics: false,
     enableDebugMode: true,
-    enableOfflineMode: false,
+    enableOfflineMode: false, // Never use offline mode - accuracy required
   },
   api: {
     timeout: 10000,
@@ -80,16 +80,16 @@ const productionConfig: EnvironmentConfig = {
 
 /**
  * GitHub Pages specific configuration
- * When deployed to GitHub Pages without a backend, we provide mock/demo data
+ * When deployed to GitHub Pages without a backend, requires connection to a running API server
  */
 const githubPagesConfig: EnvironmentConfig = {
   ...productionConfig,
-  apiBaseUrl: '', // No API available on GitHub Pages
+  apiBaseUrl: '', // No API available on GitHub Pages by default
   deploymentContext: 'github-pages',
   features: {
     ...productionConfig.features,
     enableDebugMode: false,
-    enableOfflineMode: true, // Essential for GitHub Pages
+    enableOfflineMode: false, // No offline mode - requires real data
   },
   api: {
     ...productionConfig.api,
