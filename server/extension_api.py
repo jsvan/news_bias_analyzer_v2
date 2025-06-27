@@ -84,7 +84,7 @@ def get_cors_origins():
         return [
             "chrome-extension://*",  # Chrome extension
             "moz-extension://*",     # Firefox extension  
-            "https://jsv.github.io",  # Replace with your GitHub username
+            "https://jsvan.github.io",  # Your GitHub Pages URL
             "https://your-custom-domain.com",  # Replace with your custom domain if any
         ]
     elif environment == "staging":

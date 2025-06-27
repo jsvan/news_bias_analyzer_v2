@@ -66,7 +66,7 @@ def get_cors_origins():
     if environment == "production":
         # Production: only allow specific domains
         return [
-            "https://jsv.github.io",  # Replace with your GitHub username
+            "https://jsvan.github.io",  # Your GitHub Pages URL
             "https://your-custom-domain.com",  # Replace with your custom domain if any
             "https://api.news-bias-analyzer.example.com"  # Your production API domain
         ]
