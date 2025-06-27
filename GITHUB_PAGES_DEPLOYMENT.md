@@ -139,7 +139,7 @@ The system automatically detects the deployment environment:
 ### Test GitHub Pages Deployment
 1. Push to master branch
 2. Wait for GitHub Actions to complete
-3. Visit `https://yourusername.github.io/news_bias_analyzer`
+3. Visit `https://jsvan.github.io/news_analysis/`
 4. Verify error message displays correctly (no backend available)
 
 ### Test with Local API

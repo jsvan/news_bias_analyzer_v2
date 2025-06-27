@@ -36,11 +36,8 @@ class IntelligenceManager:
         # Initialize statistical database
         self.statistical_db = StatisticalDBManager(statistical_db_path)
         
-        # Initialize analysis modules
-        self.sentiment_anomaly_detector = SentimentAnomalyDetector(self.statistical_db)
-        self.source_divergence_detector = SourceDivergenceDetector(self.statistical_db)
-        self.polarization_detector = PolarizationDetector(self.statistical_db)
-        self.clustering_insights_analyzer = ClusteringInsightsAnalyzer(self.statistical_db)
+        # Note: Analysis modules will be initialized with session when analyze() is called
+        # since they require a database session parameter
         
         logger.info("Intelligence Manager initialized")
     
@@ -80,24 +77,30 @@ class IntelligenceManager:
             logger.info("Updating baseline statistics")
             self._update_baseline_statistics(session, target_week)
             
-            # TODO: Run sentiment anomaly detection
+            # Initialize analysis modules with session
+            sentiment_anomaly_detector = SentimentAnomalyDetector(session, self.statistical_db)
+            source_divergence_detector = SourceDivergenceDetector(session, self.statistical_db)
+            polarization_detector = PolarizationDetector(session, self.statistical_db)
+            clustering_insights_analyzer = ClusteringInsightsAnalyzer(session, self.statistical_db)
+            
+            # Run sentiment anomaly detection
             logger.info("Running sentiment anomaly detection")
-            sentiment_anomalies = self.sentiment_anomaly_detector.run_weekly_analysis(session, target_week)
+            sentiment_anomalies = sentiment_anomaly_detector.run_weekly_analysis(session, target_week)
             analysis_results['sentiment_anomalies'] = sentiment_anomalies
             
-            # TODO: Run source divergence detection
+            # Run source divergence detection
             logger.info("Running source divergence detection")
-            source_divergences = self.source_divergence_detector.run_weekly_analysis(session, target_week)
+            source_divergences = source_divergence_detector.run_weekly_analysis(session, target_week)
             analysis_results['source_divergences'] = source_divergences
             
-            # TODO: Run polarization detection
+            # Run polarization detection
             logger.info("Running polarization detection")
-            polarization_events = self.polarization_detector.run_weekly_analysis(session, target_week)
+            polarization_events = polarization_detector.run_weekly_analysis(session, target_week)
             analysis_results['polarization_events'] = polarization_events
             
-            # TODO: Run clustering insights analysis
+            # Run clustering insights analysis
             logger.info("Running clustering insights analysis")
-            clustering_insights = self.clustering_insights_analyzer.run_weekly_analysis(session, target_week)
+            clustering_insights = clustering_insights_analyzer.run_weekly_analysis(session, target_week)
             analysis_results['clustering_insights'] = clustering_insights
             
             # TODO: Generate summary
