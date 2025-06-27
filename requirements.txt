@@ -17,3 +17,4 @@ pyjwt
 aiohttp
 asyncio
 alembic
+scikit-learn

@@ -480,12 +480,18 @@ export class TabManager {
         return;
       }
       
+      // Get source name with fallback - use the URL from analysisResult
+      const currentUrl = analysisResult.url;
+      const sourceName = analysisResult.source || (currentUrl ? this.extractSourceFromUrl(currentUrl) : 'Source');
+      console.log('Entity tracking source name:', sourceName, 'from URL:', currentUrl, 'analysisResult.source:', analysisResult.source);
+      
       // Update visualization
       if (window.entityTracking) {
         window.entityTracking.setData(
           data.data, 
           data.entity_name, 
-          data.entity_type || entity.type || entity.entity_type
+          data.entity_type || entity.type || entity.entity_type,
+          sourceName
         );
       }
       
@@ -651,6 +657,64 @@ export class TabManager {
       case 'organization': return 'Organization';
       case 'political_party': return 'Political Party';
       default: return type.charAt(0).toUpperCase() + type.slice(1);
+    }
+  }
+
+  // Helper function to extract readable source name from URL
+  extractSourceFromUrl(url) {
+    try {
+      const domain = new URL(url).hostname.toLowerCase();
+      
+      // Remove www prefix
+      const cleanDomain = domain.replace(/^www\./, '');
+      
+      // Map domains to readable names
+      const sourceMap = {
+        'foxnews.com': 'Fox News',
+        'cnn.com': 'CNN',
+        'nytimes.com': 'New York Times',
+        'washingtonpost.com': 'Washington Post',
+        'bbc.com': 'BBC',
+        'bbc.co.uk': 'BBC',
+        'theguardian.com': 'The Guardian',
+        'reuters.com': 'Reuters',
+        'aljazeera.com': 'Al Jazeera',
+        'nbcnews.com': 'NBC News',
+        'abcnews.go.com': 'ABC News',
+        'cbsnews.com': 'CBS News',
+        'usatoday.com': 'USA Today',
+        'wsj.com': 'Wall Street Journal',
+        'apnews.com': 'Associated Press',
+        'npr.org': 'NPR',
+        'politico.com': 'Politico',
+        'huffpost.com': 'HuffPost',
+        'breitbart.com': 'Breitbart',
+        'dailymail.co.uk': 'Daily Mail',
+        'nypost.com': 'New York Post'
+      };
+      
+      // Check for exact matches first
+      if (sourceMap[cleanDomain]) {
+        return sourceMap[cleanDomain];
+      }
+      
+      // Check for partial matches
+      for (const [domain, name] of Object.entries(sourceMap)) {
+        if (cleanDomain.includes(domain.split('.')[0])) {
+          return name;
+        }
+      }
+      
+      // Default to capitalizing domain without TLD
+      const parts = cleanDomain.split('.');
+      if (parts.length >= 2) {
+        return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+      }
+      
+      return cleanDomain;
+    } catch (error) {
+      console.error('Error extracting source from URL:', error);
+      return 'Unknown Source';
     }
   }
 }

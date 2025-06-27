@@ -13,6 +13,7 @@ import time
 import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
+from functools import lru_cache
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, Body, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,6 +74,46 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# Configure CORS based on environment
+def get_cors_origins():
+    """Get allowed CORS origins based on environment"""
+    environment = os.getenv("APP_ENV", "development")
+    
+    if environment == "production":
+        # Production: allow Chrome extension + GitHub Pages
+        return [
+            "chrome-extension://*",  # Chrome extension
+            "moz-extension://*",     # Firefox extension  
+            "https://jsv.github.io",  # Replace with your GitHub username
+            "https://your-custom-domain.com",  # Replace with your custom domain if any
+        ]
+    elif environment == "staging":
+        # Staging: allow staging domains + extensions
+        return [
+            "chrome-extension://*",
+            "moz-extension://*",
+            "https://staging.news-bias-analyzer.example.com"
+        ]
+    else:
+        # Development: allow all localhost + extensions
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+            "chrome-extension://*",
+            "moz-extension://*"
+        ]
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # Database connection
 database_url = os.getenv("DATABASE_URL", "postgresql://newsbias:newsbias@localhost:5432/news_bias")
 db_manager = DatabaseManager(database_url)
@@ -84,6 +125,160 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Caching for entity autocomplete
+POPULAR_ENTITIES_CACHE = {}
+POPULAR_ENTITIES_CACHE_TIME = 0
+POPULAR_ENTITIES_CACHE_TTL = 3600  # 1 hour
+SEARCH_RESULTS_CACHE = {}
+SEARCH_CACHE_TTL = 300  # 5 minutes
+
+def get_popular_entities(db: Session, limit: int = 1000):
+    """Get most popular entities with caching."""
+    global POPULAR_ENTITIES_CACHE, POPULAR_ENTITIES_CACHE_TIME
+    
+    current_time = time.time()
+    if (current_time - POPULAR_ENTITIES_CACHE_TIME) > POPULAR_ENTITIES_CACHE_TTL:
+        # Cache expired, refresh
+        query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc(),
+            Entity.name
+        ).limit(limit)
+        
+        results = query.all()
+        POPULAR_ENTITIES_CACHE = [
+            {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.entity_type,
+                "mention_count": entity.mention_count or 0
+            }
+            for entity in results
+        ]
+        POPULAR_ENTITIES_CACHE_TIME = current_time
+    
+    return POPULAR_ENTITIES_CACHE
+
+def search_entities_tiered(db: Session, query_text: str, limit: int = 15):
+    """Perform tiered search: prefix match -> word boundary -> contains."""
+    query_lower = query_text.lower().strip()
+    
+    # Check cache first
+    cache_key = f"{query_lower}:{limit}"
+    current_time = time.time()
+    
+    if cache_key in SEARCH_RESULTS_CACHE:
+        cached_result, cached_time = SEARCH_RESULTS_CACHE[cache_key]
+        if (current_time - cached_time) < SEARCH_CACHE_TTL:
+            return cached_result
+    
+    # If short query, search in popular entities cache first
+    if len(query_lower) <= 3:
+        popular_entities = get_popular_entities(db)
+        filtered = [
+            entity for entity in popular_entities
+            if query_lower in entity["name"].lower()
+        ][:limit]
+        
+        # Cache the result
+        SEARCH_RESULTS_CACHE[cache_key] = (filtered, current_time)
+        return filtered
+    
+    # For longer queries, use tiered database search
+    results = []
+    
+    # Tier 1: Prefix match (highest priority)
+    if len(results) < limit:
+        prefix_query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).filter(
+            func.lower(Entity.name).like(f"{query_lower}%")
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc(),
+            Entity.name
+        ).limit(limit)
+        
+        prefix_results = prefix_query.all()
+        results.extend(prefix_results)
+    
+    # Tier 2: Word boundary match (if still need more results)
+    if len(results) < limit:
+        word_boundary_query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).filter(
+            and_(
+                func.lower(Entity.name).like(f"% {query_lower}%"),
+                ~Entity.id.in_([r.id for r in results])  # Exclude already found
+            )
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc(),
+            Entity.name
+        ).limit(limit - len(results))
+        
+        word_results = word_boundary_query.all()
+        results.extend(word_results)
+    
+    # Tier 3: Contains match (if still need more results)
+    if len(results) < limit:
+        contains_query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).filter(
+            and_(
+                func.lower(Entity.name).like(f"%{query_lower}%"),
+                ~Entity.id.in_([r.id for r in results])  # Exclude already found
+            )
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc(),
+            Entity.name
+        ).limit(limit - len(results))
+        
+        contains_results = contains_query.all()
+        results.extend(contains_results)
+    
+    # Format results
+    formatted_results = [
+        {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
+        }
+        for entity in results[:limit]
+    ]
+    
+    # Cache the result
+    SEARCH_RESULTS_CACHE[cache_key] = (formatted_results, current_time)
+    return formatted_results
 
 # Root endpoint
 @app.get("/")
@@ -155,38 +350,41 @@ def get_entities(
 @app.get("/entities/search", response_model=List[Dict[str, Any]])
 def search_entities(
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(15, ge=1, le=50, description="Maximum number of results"),
     db: Session = Depends(get_db)
 ):
-    """Search entities for autocomplete functionality."""
-    # Search by name with mention count ordering
-    query = db.query(
-        Entity.id,
-        Entity.name,
-        Entity.entity_type,
-        func.count(EntityMention.id).label("mention_count")
-    ).join(
-        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-    ).filter(
-        func.lower(Entity.name).like(f"%{q.lower()}%")
-    ).group_by(
-        Entity.id, Entity.name, Entity.entity_type
-    ).order_by(
-        func.count(EntityMention.id).desc(),
-        Entity.name
-    ).limit(limit)
-    
-    results = query.all()
-    
-    return [
-        {
-            "id": entity.id,
-            "name": entity.name,
-            "type": entity.entity_type,
-            "mention_count": entity.mention_count or 0
-        }
-        for entity in results
-    ]
+    """Fast entity search with tiered matching and caching."""
+    try:
+        return search_entities_tiered(db, q, limit)
+    except Exception as e:
+        logging.error(f"Error in entity search: {e}")
+        # Fallback to simple search if tiered search fails
+        query = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).filter(
+            func.lower(Entity.name).like(f"%{q.lower()}%")
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).order_by(
+            func.count(EntityMention.id).desc(),
+            Entity.name
+        ).limit(limit)
+        
+        results = query.all()
+        return [
+            {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.entity_type,
+                "mention_count": entity.mention_count or 0
+            }
+            for entity in results
+        ]
 
 # Entity sentiment endpoint
 @app.get("/entity/{entity_id}/sentiment", response_model=List[Dict[str, Any]])
@@ -605,6 +803,7 @@ async def get_analysis_by_url(
         
         # Create response
         response = {
+            "id": article.id,
             "url": url,
             "exists": True,
             "title": article.title,
@@ -732,6 +931,7 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
                 
                 # Create response
                 api_response = {
+                    "id": article.id,
                     "url": request.url,
                     "title": article.title,
                     "source": article.source.name if article.source else request.source,
@@ -879,6 +1079,7 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
         
         # Create response
         api_response = {
+            "id": article.id,
             "url": request.url,
             "title": request.title,
             "source": request.source,
@@ -1215,42 +1416,89 @@ async def get_source_historical_sentiment(
         if countries:
             logger.info(f"Filtering by countries: {countries}")
             query = query.filter(NewsSource.country.in_(countries))
-        
-        # Group by date, source, and country
-        query = query.group_by(
-            func.date(EntityMention.created_at),
-            NewsSource.name,
-            NewsSource.country,
-            NewsSource.id
-        ).having(
-            func.count(EntityMention.id) >= 3  # Only include sources with at least 3 mentions
-        ).order_by(
-            NewsSource.name,
-            func.date(EntityMention.created_at)
-        )
+            
+            # Group by date, source, and country (source-level data)
+            query = query.group_by(
+                func.date(EntityMention.created_at),
+                NewsSource.name,
+                NewsSource.country,
+                NewsSource.id
+            ).having(
+                func.count(EntityMention.id) >= 3  # Only include sources with at least 3 mentions
+            ).order_by(
+                NewsSource.name,
+                func.date(EntityMention.created_at)
+            )
+        else:
+            # No country filter - aggregate by country
+            logger.info("No country filter provided - aggregating by country")
+            query = db.query(
+                func.date(EntityMention.created_at).label("date"),
+                NewsSource.country,
+                func.avg(EntityMention.power_score).label("avg_power"),
+                func.avg(EntityMention.moral_score).label("avg_moral"),
+                func.count(EntityMention.id).label("mention_count")
+            ).join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).join(
+                NewsSource, NewsArticle.source_id == NewsSource.id
+            ).filter(
+                EntityMention.entity_id == entity_id,
+                EntityMention.created_at >= start_date,
+                EntityMention.power_score.isnot(None),
+                EntityMention.moral_score.isnot(None)
+            ).group_by(
+                func.date(EntityMention.created_at),
+                NewsSource.country
+            ).having(
+                func.count(EntityMention.id) >= 3  # Only include countries with at least 3 mentions per day
+            ).order_by(
+                NewsSource.country,
+                func.date(EntityMention.created_at)
+            )
         
         # Execute query
         results = query.all()
         
-        # Organize data by source
+        # Organize data by source or country
         source_data = {}
         for result in results:
-            source_key = f"{result.source_name} ({result.country})"
-            
-            if source_key not in source_data:
-                source_data[source_key] = {
-                    "source_name": result.source_name,
-                    "country": result.country,
-                    "source_id": result.source_id,
-                    "daily_data": []
-                }
-            
-            source_data[source_key]["daily_data"].append({
-                "date": result.date.isoformat(),
-                "power_score": float(result.avg_power) if result.avg_power else 0,
-                "moral_score": float(result.avg_moral) if result.avg_moral else 0,
-                "mention_count": result.mention_count
-            })
+            if countries:
+                # Source-level data when countries are filtered
+                source_key = f"{result.source_name} ({result.country})"
+                
+                if source_key not in source_data:
+                    source_data[source_key] = {
+                        "source_name": result.source_name,
+                        "country": result.country,
+                        "source_id": result.source_id,
+                        "daily_data": []
+                    }
+                
+                source_data[source_key]["daily_data"].append({
+                    "date": result.date.isoformat(),
+                    "power_score": float(result.avg_power) if result.avg_power else 0,
+                    "moral_score": float(result.avg_moral) if result.avg_moral else 0,
+                    "mention_count": result.mention_count
+                })
+            else:
+                # Country-level data when no countries are filtered
+                country_key = result.country
+                
+                if country_key not in source_data:
+                    source_data[country_key] = {
+                        "source_name": result.country,  # Use country as source name
+                        "country": result.country,
+                        "source_id": None,  # No specific source ID for country aggregation
+                        "daily_data": []
+                    }
+                
+                source_data[country_key]["daily_data"].append({
+                    "date": result.date.isoformat(),
+                    "power_score": float(result.avg_power) if result.avg_power else 0,
+                    "moral_score": float(result.avg_moral) if result.avg_moral else 0,
+                    "mention_count": result.mention_count
+                })
         
         # Calculate summary statistics for each source
         for source_key, data in source_data.items():
@@ -1266,16 +1514,14 @@ async def get_source_historical_sentiment(
                     "days_with_data": len(data["daily_data"])
                 }
         
-        # Limit to top 10 sources by total mentions to avoid cluttered visualization
-        if len(source_data) > 10:
-            logger.info(f"Limiting from {len(source_data)} sources to top 10 by mentions")
-            sorted_sources = sorted(
-                source_data.items(), 
-                key=lambda x: x[1]["summary"]["total_mentions"] if x[1].get("summary") else 0, 
-                reverse=True
-            )
-            source_data = dict(sorted_sources[:10])
-            logger.info(f"Top sources: {list(source_data.keys())}")
+        # Sort sources by total mentions for consistent ordering
+        sorted_sources = sorted(
+            source_data.items(), 
+            key=lambda x: x[1]["summary"]["total_mentions"] if x[1].get("summary") else 0, 
+            reverse=True
+        )
+        source_data = dict(sorted_sources)
+        logger.info(f"Returning {len(source_data)} sources with data")
         
         return {
             "entity": {
@@ -1306,9 +1552,9 @@ if has_stats_router:
         # Import all the endpoint functions and models from the stats module
         from extension.api.statistical_endpoints import (
             get_sentiment_distribution, get_entity_tracking, get_available_countries_for_entity,
-            get_global_entity_counts, get_similar_articles,
+            get_global_entity_counts, get_similar_articles, get_country_top_entities,
             SentimentDistributionResponse, EntityTrackingResponse, AvailableCountriesResponse,
-            SimilarArticlesResponse
+            SimilarArticlesResponse, CountryTopEntitiesResponse
         )
         
         # Create a new router specifically for this app with our database dependency
@@ -1321,9 +1567,10 @@ if has_stats_router:
             dimension: str = Query("power", regex="^(power|moral)$"),
             country: Optional[str] = None,
             source_id: Optional[int] = None,
+            half_life_days: float = Query(14.0, ge=1.0, le=365.0, description="Half-life for temporal weighting in days"),
             session: Session = Depends(get_db)
         ):
-            return await get_sentiment_distribution(entity_name, dimension, country, source_id, session)
+            return await get_sentiment_distribution(entity_name, dimension, country, source_id, half_life_days, session)
         
         @stats_router_local.get("/entity/tracking", response_model=EntityTrackingResponse)
         async def entity_tracking_endpoint(
@@ -1358,6 +1605,15 @@ if has_stats_router:
         ):
             return get_similar_articles(article_id, limit, days_window, min_entity_overlap, session)
         
+        @stats_router_local.get("/country/{country}/top-entities", response_model=CountryTopEntitiesResponse)
+        async def country_top_entities_endpoint(
+            country: str,
+            days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+            limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
+            session: Session = Depends(get_db)
+        ):
+            return await get_country_top_entities(country, days, limit, session)
+        
         app.include_router(stats_router_local, prefix="/stats", tags=["Statistics"])
     except Exception as e:
         logger.error(f"Failed to configure stats router: {e}")
@@ -1385,13 +1641,51 @@ async def log_requests(request: Request, call_next):
     
     return response
 
-# Enable CORS
+# Enable CORS with environment-aware settings
+def get_cors_origins():
+    """Get allowed CORS origins based on environment."""
+    environment = os.getenv("APP_ENV", "development")
+    
+    if environment == "development":
+        return [
+            "http://localhost:3000",  # Vite dev server
+            "http://localhost:4173",  # Vite preview server
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:4173",
+            "chrome-extension://*",   # Chrome extension (any ID)
+            "moz-extension://*",      # Firefox extension
+        ]
+    elif environment == "staging":
+        return [
+            "https://staging.news-bias-analyzer.example.com",
+            "https://*.github.io",    # GitHub Pages staging
+            "chrome-extension://*",   # Chrome extension
+            "moz-extension://*",      # Firefox extension
+        ]
+    elif environment == "production":
+        return [
+            "https://news-bias-analyzer.example.com",
+            "https://jsv.github.io", # GitHub Pages (replace with actual username)
+            "chrome-extension://*",   # Chrome extension
+            "moz-extension://*",      # Firefox extension
+        ]
+    else:
+        # Fallback to development settings
+        return [
+            "http://localhost:3000",
+            "chrome-extension://*",
+        ]
+
+cors_origins = get_cors_origins()
+logger.info(f"CORS configured for origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development; restrict in production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Run with: uvicorn server.extension_api:app --reload

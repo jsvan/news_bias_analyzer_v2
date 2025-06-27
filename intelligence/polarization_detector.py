@@ -7,19 +7,21 @@ Identifies entities and topics that are becoming more divisive over time.
 
 import logging
 import numpy as np
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from scipy import stats
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 # Import database connections
-from database.db import get_session  
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
-from .statistical_database.db_manager import StatisticalDBManager
+from statistical_database.db_manager import StatisticalDBManager
+from intelligence.base_analyzer import BaseIntelligenceAnalyzer
 
 logger = logging.getLogger(__name__)
 
-class PolarizationDetector:
+class PolarizationDetector(BaseIntelligenceAnalyzer):
     """
     Detects increasing polarization in news sentiment patterns.
     
@@ -31,25 +33,52 @@ class PolarizationDetector:
     - Uses bimodal distribution detection to identify true polarization
     """
     
-    def __init__(self,
+    def __init__(self, 
+                 session: Session,
                  statistical_db: StatisticalDBManager,
                  baseline_weeks: int = 12,
                  current_weeks: int = 4,
-                 significance_threshold: float = 0.01,
                  min_sources_per_entity: int = 8,
                  polarization_threshold: float = 1.5):  # Standard deviation increase
-        self.statistical_db = statistical_db
+        super().__init__(
+            session=session,
+            statistical_db=statistical_db,
+            min_mentions_threshold=20,  # Higher threshold for polarization analysis
+            min_sources_threshold=min_sources_per_entity,
+            significance_threshold=0.01
+        )
         self.baseline_weeks = baseline_weeks
         self.current_weeks = current_weeks
-        self.significance_threshold = significance_threshold
         self.min_sources_per_entity = min_sources_per_entity
         self.polarization_threshold = polarization_threshold
     
-    def run_weekly_analysis(self, session: Session, target_week: datetime = None):
+    def analyze(self) -> List[Dict[str, Any]]:
+        """
+        Main analysis entry point for the orchestrator.
+        
+        Returns:
+            List of polarization findings
+        """
+        start_time = time.time()
+        target_week = datetime.utcnow()
+        self.log_analysis_start("polarization", target_week)
+        
+        try:
+            findings = self._run_polarization_detection(target_week)
+            duration = time.time() - start_time
+            self.log_analysis_complete("polarization", len(findings), duration)
+            return findings
+        except Exception as e:
+            logger.error(f"Polarization analysis failed: {e}")
+            return []
+        finally:
+            self.clear_caches()
+    
+    def _run_polarization_detection(self, target_week: datetime = None):
         """
         Run weekly polarization detection analysis.
         
-        TODO: Implement the following steps:
+        Steps:
         1. Get entities with broad source coverage
         2. Calculate sentiment variance across sources (current vs baseline)
         3. Detect bimodal distributions indicating polarization
@@ -59,59 +88,37 @@ class PolarizationDetector:
         if target_week is None:
             target_week = datetime.utcnow()
         
-        logger.info(f"Starting polarization detection for week of {target_week.date()}")
-        
-        # TODO: Calculate time windows
-        current_end = target_week
+        # Calculate time windows
+        current_start, current_end = self.get_week_boundaries(target_week)
         current_start = current_end - timedelta(weeks=self.current_weeks)
         baseline_end = current_start - timedelta(days=1)
         baseline_start = baseline_end - timedelta(weeks=self.baseline_weeks)
         
-        # TODO: Get entities with sufficient source coverage
-        entities = self._get_broadly_covered_entities(session, current_start, current_end)
+        # Get entities with sufficient source coverage
+        entities = self.get_active_entities(
+            current_start, current_end,
+            min_mentions=self.min_mentions_threshold,
+            min_sources=self.min_sources_per_entity
+        )
+        
         logger.info(f"Analyzing {len(entities)} entities for polarization")
         
-        polarizations = []
+        findings = []
         for entity in entities:
-            # TODO: Analyze each entity for polarization
+            # Analyze each entity for polarization
             polarization = self._analyze_entity_polarization(
-                session, entity, 
+                entity, 
                 baseline_start, baseline_end,
                 current_start, current_end
             )
             if polarization:
-                polarizations.append(polarization)
+                findings.append(polarization)
         
-        logger.info(f"Detected {len(polarizations)} significant polarization increases")
-        return polarizations
+        logger.info(f"Detected {len(findings)} significant polarization increases")
+        return findings
     
-    def _get_broadly_covered_entities(self, 
-                                    session: Session, 
-                                    start_date: datetime, 
-                                    end_date: datetime) -> List[Dict]:
-        """
-        Get entities covered by many sources for polarization analysis.
-        
-        TODO: Implement query to get entities with:
-        - Coverage by at least min_sources_per_entity sources
-        - Sufficient mention count for statistical analysis
-        - Ideally from multiple countries for global polarization detection
-        
-        Returns:
-            List of entity dictionaries with id, name, type, source_count
-        """
-        # TODO: Implement database query
-        # query = session.query(
-        #     Entity.id, Entity.name, Entity.entity_type,
-        #     func.count(distinct(NewsSource.id)).label('source_count'),
-        #     func.count(EntityMention.id).label('mention_count')
-        # ).join(EntityMention).join(NewsArticle).join(NewsSource)...
-        
-        # Placeholder return
-        return []
     
     def _analyze_entity_polarization(self, 
-                                   session: Session,
                                    entity: Dict,
                                    baseline_start: datetime,
                                    baseline_end: datetime,
@@ -120,7 +127,7 @@ class PolarizationDetector:
         """
         Analyze polarization for a specific entity.
         
-        TODO: Implement the following:
+        Steps:
         1. Get source sentiment distributions for baseline and current periods
         2. Calculate variance and bimodality metrics
         3. Test for significant increase in polarization
@@ -133,14 +140,14 @@ class PolarizationDetector:
         entity_id = entity['id']
         entity_name = entity['name']
         
-        # TODO: Get baseline sentiment distribution across sources
-        baseline_sentiments = self._get_source_sentiment_distribution(
-            session, entity_id, baseline_start, baseline_end
+        # Get baseline sentiment distribution across sources
+        baseline_sentiments = self.get_entity_sentiment_by_source(
+            entity_id, baseline_start, baseline_end
         )
         
-        # TODO: Get current sentiment distribution across sources
-        current_sentiments = self._get_source_sentiment_distribution(
-            session, entity_id, current_start, current_end
+        # Get current sentiment distribution across sources
+        current_sentiments = self.get_entity_sentiment_by_source(
+            entity_id, current_start, current_end
         )
         
         if not baseline_sentiments or not current_sentiments:
@@ -150,27 +157,27 @@ class PolarizationDetector:
            len(current_sentiments) < self.min_sources_per_entity:
             return None
         
-        # TODO: Calculate polarization metrics
+        # Calculate polarization metrics
         baseline_variance = np.var(list(baseline_sentiments.values()))
         current_variance = np.var(list(current_sentiments.values()))
         
         variance_increase = current_variance - baseline_variance
         relative_increase = variance_increase / baseline_variance if baseline_variance > 0 else float('inf')
         
-        # TODO: Test for statistical significance
+        # Test for statistical significance
         p_value = self._test_variance_increase(baseline_sentiments, current_sentiments)
         
         if p_value > self.significance_threshold or \
            relative_increase < self.polarization_threshold:
             return None
         
-        # TODO: Detect bimodal distribution (true polarization vs just increased variance)
+        # Detect bimodal distribution (true polarization vs just increased variance)
         bimodality_score = self._calculate_bimodality_score(list(current_sentiments.values()))
         
-        # TODO: Identify polarized source clusters
+        # Identify polarized source clusters
         source_clusters = self._identify_polarized_clusters(current_sentiments)
         
-        # TODO: Create polarization finding
+        # Create polarization finding
         finding_id = self._create_polarization_finding(
             entity_id=entity_id,
             entity_name=entity_name,
@@ -197,27 +204,6 @@ class PolarizationDetector:
             'source_clusters': source_clusters
         }
     
-    def _get_source_sentiment_distribution(self, 
-                                         session: Session,
-                                         entity_id: int,
-                                         start_date: datetime,
-                                         end_date: datetime) -> Dict[int, float]:
-        """
-        Get sentiment distribution across sources for an entity.
-        
-        TODO: Implement query to get average sentiment per source for entity
-        
-        Returns:
-            Dictionary mapping source_id -> average_sentiment
-        """
-        # TODO: Query source-level sentiment averages
-        # query = session.query(
-        #     NewsSource.id,
-        #     func.avg((EntityMention.power_score + EntityMention.moral_score) / 2).label('avg_sentiment')
-        # ).join(NewsArticle).join(EntityMention).filter(...)
-        
-        # Placeholder return
-        return {}
     
     def _test_variance_increase(self, 
                               baseline_sentiments: Dict[int, float],
@@ -225,16 +211,14 @@ class PolarizationDetector:
         """
         Test if the increase in variance is statistically significant.
         
-        TODO: Implement Levene's test or F-test for variance equality
-        This tests whether the two groups have significantly different variances
+        Uses Levene's test for variance equality
         """
         baseline_values = list(baseline_sentiments.values())
         current_values = list(current_sentiments.values())
         
-        # TODO: Use proper statistical test for variance difference
-        # For now, use a simplified Levene's test
+        # Use Levene's test for variance difference
         try:
-            statistic, p_value = stats.levene(baseline_values, current_values)
+            statistic, p_value = self.test_variance_equality(baseline_values, current_values)
             return p_value
         except:
             return 1.0  # Unable to compute
@@ -243,10 +227,7 @@ class PolarizationDetector:
         """
         Calculate bimodality score to detect true polarization.
         
-        TODO: Implement bimodality detection using:
-        1. Hartigan's dip test for unimodality
-        2. Or bimodality coefficient based on skewness and kurtosis
-        3. Or simple gap detection in sentiment distribution
+        Uses bimodality coefficient based on skewness and kurtosis
         
         Returns:
             Score from 0-1 where 1 indicates strong bimodality (polarization)
@@ -254,36 +235,34 @@ class PolarizationDetector:
         if len(sentiments) < 4:
             return 0.0
         
-        # TODO: Implement proper bimodality test
-        # For now, use a simplified approach based on distribution shape
-        
         sentiments = np.array(sentiments)
         
-        # Calculate bimodality coefficient (simplified)
+        # Calculate bimodality coefficient
         # BC = (skew^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)*(n-3)))
         n = len(sentiments)
         if n < 4:
             return 0.0
         
-        skewness = stats.skew(sentiments)
-        kurt = stats.kurtosis(sentiments)
-        
-        # Simplified bimodality coefficient
-        bc = (skewness**2 + 1) / (kurt + 3 * (n-1)**2 / ((n-2)*(n-3)))
-        
-        # Normalize to 0-1 scale (values > 0.555 suggest bimodality)
-        bimodality_score = min(1.0, max(0.0, (bc - 0.3) / 0.5))
-        
-        return bimodality_score
+        try:
+            skewness = stats.skew(sentiments)
+            kurt = stats.kurtosis(sentiments)
+            
+            # Simplified bimodality coefficient
+            bc = (skewness**2 + 1) / (kurt + 3 * (n-1)**2 / ((n-2)*(n-3)))
+            
+            # Normalize to 0-1 scale (values > 0.555 suggest bimodality)
+            bimodality_score = min(1.0, max(0.0, (bc - 0.3) / 0.5))
+            
+            return bimodality_score
+        except Exception as e:
+            logger.warning(f"Bimodality calculation failed: {e}")
+            return 0.0
     
     def _identify_polarized_clusters(self, source_sentiments: Dict[int, float]) -> List[Dict[str, Any]]:
         """
         Identify clusters of sources with similar sentiment (polarized groups).
         
-        TODO: Implement clustering to identify polarized source groups:
-        1. Use k-means or hierarchical clustering on sentiment values
-        2. Identify 2-3 distinct clusters if they exist
-        3. Return cluster information with source lists and centroids
+        Uses simple threshold-based clustering to identify polarized source groups
         
         Returns:
             List of cluster dictionaries with source_ids, centroid, size
@@ -291,22 +270,22 @@ class PolarizationDetector:
         if len(source_sentiments) < 4:
             return []
         
-        # TODO: Implement proper clustering
-        # For now, use simple threshold-based clustering
-        
         sentiments = list(source_sentiments.values())
-        source_ids = list(source_sentiments.keys())
         
         # Simple approach: split at median and see if we get distinct groups
         median_sentiment = np.median(sentiments)
+        std_sentiment = np.std(sentiments)
+        
+        # Use 0.5 standard deviations as threshold for cluster separation
+        threshold = max(0.5, std_sentiment * 0.5)
         
         positive_cluster = []
         negative_cluster = []
         
         for source_id, sentiment in source_sentiments.items():
-            if sentiment > median_sentiment + 0.5:  # Threshold for positive cluster
+            if sentiment > median_sentiment + threshold:
                 positive_cluster.append(source_id)
-            elif sentiment < median_sentiment - 0.5:  # Threshold for negative cluster
+            elif sentiment < median_sentiment - threshold:
                 negative_cluster.append(source_id)
         
         clusters = []
@@ -315,7 +294,7 @@ class PolarizationDetector:
             clusters.append({
                 'cluster_type': 'positive',
                 'source_ids': positive_cluster,
-                'centroid': np.mean(positive_sentiments),
+                'centroid': float(np.mean(positive_sentiments)),
                 'size': len(positive_cluster)
             })
         
@@ -324,7 +303,7 @@ class PolarizationDetector:
             clusters.append({
                 'cluster_type': 'negative',
                 'source_ids': negative_cluster,
-                'centroid': np.mean(negative_sentiments),
+                'centroid': float(np.mean(negative_sentiments)),
                 'size': len(negative_cluster)
             })
         
@@ -388,20 +367,18 @@ class PolarizationDetector:
         }
         
         # Store finding
-        finding_id = self.statistical_db.store_statistical_finding(
+        finding_id = self.store_finding(
             finding_type='polarization',
             title=title,
             description=description,
             p_value=p_value,
-            event_start_date=event_start,
+            severity_score=severity_score,
+            event_start=event_start,
             baseline_value=baseline_variance,
             current_value=current_variance,
-            severity_score=severity_score,
-            dashboard_category='polarization',
             entity_id=entity_id,
             event_end_date=event_end,
             change_magnitude=variance_increase,
-            priority_score=severity_score,
             supporting_data=supporting_data
         )
         

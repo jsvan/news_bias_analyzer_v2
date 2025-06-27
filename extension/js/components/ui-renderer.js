@@ -117,6 +117,14 @@ export class UIRenderer {
         }
       }
     });
+
+    // Clean up reanalyze button when leaving results state
+    if (stateName !== 'results') {
+      const existingButton = document.getElementById('reanalyze-section');
+      if (existingButton) {
+        existingButton.remove();
+      }
+    }
   }
 
   displayResults(result) {
@@ -161,6 +169,9 @@ export class UIRenderer {
       
       // Add database/cache indicators
       this.displayCacheIndicator(result);
+      
+      // Add re-analyze button
+      this.addReanalyzeButton(result);
       
     } catch (e) {
       console.error("Error displaying results:", e);
@@ -215,6 +226,47 @@ export class UIRenderer {
       } else {
         cacheTag.style.display = 'none';
       }
+    }
+  }
+
+  addReanalyzeButton(result) {
+    // Remove any existing reanalyze button first
+    const existingButton = document.getElementById('reanalyze-section');
+    if (existingButton) {
+      existingButton.remove();
+    }
+
+    // Create reanalyze section
+    const reanalyzeSection = document.createElement('div');
+    reanalyzeSection.id = 'reanalyze-section';
+    reanalyzeSection.className = 'reanalyze-section';
+    
+    // Set message based on whether it's from database or newly analyzed
+    const messageText = result.from_database 
+      ? 'This page was previously analyzed and loaded from database.'
+      : 'Analysis complete.';
+    
+    reanalyzeSection.innerHTML = `
+      <p>${messageText}</p>
+    `;
+    
+    // Create re-analyze button
+    const reanalyzeBtn = document.createElement('button');
+    reanalyzeBtn.textContent = 'Re-analyze';
+    reanalyzeBtn.className = 'small-button reanalyze-btn';
+    reanalyzeBtn.addEventListener('click', () => {
+      console.log("Re-analyze button clicked");
+      // Use the global app instance to trigger reanalysis
+      if (window.newsAnalyzerApp) {
+        window.newsAnalyzerApp.reanalyze();
+      }
+    });
+    
+    reanalyzeSection.appendChild(reanalyzeBtn);
+    
+    // Add to results container at the bottom
+    if (this.elements.resultsState) {
+      this.elements.resultsState.appendChild(reanalyzeSection);
     }
   }
 

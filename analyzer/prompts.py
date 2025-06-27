@@ -31,9 +31,11 @@ Skip minor players, demographic groups, and entities that don't warrant politica
    * +1: Article wants you to somewhat support this entity
    * +2: Article wants you to strongly support this entity
 
-Step 1: Ask "Who is the article painting as the victim/hero vs. the aggressor/villain?"
-Step 2: Victims and heroes get positive scores. Aggressors and villains get negative scores.
-Step 3: If [Entity A] is portrayed as victim of [Entity B] aggression → [Entity A] gets +2, [Entity B] gets -2.
+**CRITICAL DISTINCTION**: Power and moral scores are COMPLETELY INDEPENDENT:
+- An entity can be portrayed as powerful (+2 power) but morally negative (-2 moral)
+- Being "effective," "strategic," "successful," or "strong" affects POWER, not morality
+- Only assign positive moral scores when the article portrays actions/outcomes as MORALLY GOOD
+
 
 For each key entity, provide:
 1. A precise score on each dimension using the -2 to +2 scale (decimal values are allowed)
@@ -104,9 +106,11 @@ AGGREGATION RULES:
 
 IMPORTANT GUIDELINES:
 - Base analysis solely on how entities are portrayed in THIS SPECIFIC article
-- Provide precise scores based strictly on the text's portrayal
+- Provide precise scores based strictly on the text's portrayal and language choices
+- Every score must reflect the specific context, tone, and framing in this article
+- No entity gets the same score across articles unless the portrayal is genuinely identical
 
-KEY PRINCIPLE: Score based on how the article makes you feel about the entity, not your personal politics. If the article credits someone with good outcomes or blames them for bad outcomes, that affects how readers feel about them.
+KEY PRINCIPLE: Score based on how the article makes you feel about the entity, not your personal politics or external knowledge. Focus entirely on the emotional and moral framing within this specific text.
 
 FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
 {

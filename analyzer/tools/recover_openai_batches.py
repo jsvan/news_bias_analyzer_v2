@@ -384,44 +384,23 @@ def save_entities(db_manager, article_id, entities):
             logger.info(f"Article {article_id} already has {existing_mentions} entity mentions, skipping")
             return True
         
-        # Add new entity mentions
+        # Use service layer to process entities
+        from database.services import DatabaseService
+        
+        db_service = DatabaseService(session)
         mention_count = 0
-        for entity_info in entities:
-            entity_name = entity_info.get('entity', '')
-            entity_type = entity_info.get('entity_type', '')
-            power_score = entity_info.get('power_score', 0)
-            moral_score = entity_info.get('moral_score', 0)
-            mentions = entity_info.get('mentions', [])
-            
-            # Skip entities with empty name or type
-            if not entity_name or not entity_type:
-                logger.warning(f"Skipping entity with empty name or type: {entity_info}")
-                continue
-                
-            # Get or create entity
-            entity = session.query(Entity).filter_by(
-                name=entity_name,
-                entity_type=entity_type
-            ).first()
-            
-            if not entity:
-                entity = Entity(
-                    name=entity_name,
-                    entity_type=entity_type
-                )
-                session.add(entity)
-                session.flush()
-            
-            # Create entity mention
-            mention = EntityMention(
-                entity_id=entity.id,
+        
+        try:
+            # Process all entities for this article using the service
+            entity_results = db_service.entities.process_article_entities(
                 article_id=article_id,
-                power_score=power_score,
-                moral_score=moral_score,
-                mentions=mentions
+                entity_data_list=entities
             )
-            session.add(mention)
-            mention_count += 1
+            mention_count = len(entity_results)
+            
+        except ValueError as e:
+            logger.warning(f"Error processing entities for article {article_id}: {e}")
+            mention_count = 0
         
         session.commit()
         logger.info(f"Saved {mention_count} entity mentions for article {article_id}")

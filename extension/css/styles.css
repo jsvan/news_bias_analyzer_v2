@@ -103,6 +103,36 @@ button {
   background-color: rgba(58, 134, 255, 0.1);
 }
 
+.small-button {
+  padding: 6px 12px;
+  font-size: 12px;
+  background-color: var(--background-color);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.small-button:hover {
+  background-color: rgba(58, 134, 255, 0.1);
+}
+
+.reanalyze-section {
+  margin-top: 16px;
+  padding: 12px;
+  background-color: var(--background-color);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  text-align: center;
+}
+
+.reanalyze-section p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: var(--light-text);
+}
+
 .back-btn {
   background-color: transparent;
   color: var(--primary-color);

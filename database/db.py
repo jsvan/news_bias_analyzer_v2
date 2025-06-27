@@ -22,6 +22,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Global database manager instance
+_db_manager = None
+
+def get_session():
+    """Get a database session."""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager()
+    return _db_manager.get_session()
+
 class DatabaseManager:
     """Manages database connections and operations for the News Bias Analyzer."""
     

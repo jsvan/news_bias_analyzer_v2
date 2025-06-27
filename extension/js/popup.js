@@ -47,6 +47,64 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'article_' + Math.abs(hash).toString(16);
   }
 
+  // Helper function to extract readable source name from URL
+  function extractSourceFromUrl(url) {
+    try {
+      const domain = new URL(url).hostname.toLowerCase();
+      
+      // Remove www prefix
+      const cleanDomain = domain.replace(/^www\./, '');
+      
+      // Map domains to readable names
+      const sourceMap = {
+        'foxnews.com': 'Fox News',
+        'cnn.com': 'CNN',
+        'nytimes.com': 'New York Times',
+        'washingtonpost.com': 'Washington Post',
+        'bbc.com': 'BBC',
+        'bbc.co.uk': 'BBC',
+        'theguardian.com': 'The Guardian',
+        'reuters.com': 'Reuters',
+        'aljazeera.com': 'Al Jazeera',
+        'nbcnews.com': 'NBC News',
+        'abcnews.go.com': 'ABC News',
+        'cbsnews.com': 'CBS News',
+        'usatoday.com': 'USA Today',
+        'wsj.com': 'Wall Street Journal',
+        'apnews.com': 'Associated Press',
+        'npr.org': 'NPR',
+        'politico.com': 'Politico',
+        'huffpost.com': 'HuffPost',
+        'breitbart.com': 'Breitbart',
+        'dailymail.co.uk': 'Daily Mail',
+        'nypost.com': 'New York Post'
+      };
+      
+      // Check for exact matches first
+      if (sourceMap[cleanDomain]) {
+        return sourceMap[cleanDomain];
+      }
+      
+      // Check for partial matches
+      for (const [domain, name] of Object.entries(sourceMap)) {
+        if (cleanDomain.includes(domain.split('.')[0])) {
+          return name;
+        }
+      }
+      
+      // Default to capitalizing domain without TLD
+      const parts = cleanDomain.split('.');
+      if (parts.length >= 2) {
+        return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+      }
+      
+      return cleanDomain;
+    } catch (error) {
+      console.error('Error extracting source from URL:', error);
+      return 'Unknown Source';
+    }
+  }
+
   // Initialize
   initializeExtension();
   
@@ -385,7 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Format the extracted content
       return {
         url: data.url,
-        source: data.source || new URL(data.url).hostname,
+        source: data.source || extractSourceFromUrl(data.url),
         headline: data.title,
         content: data.text,
         publishDate: data.publish_date
@@ -407,6 +465,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const source = article.source || '';
     const title = article.headline || article.title || '';
     const text = article.content || article.text || '';
+    
+    console.log('Analyzing with source:', source, 'from article:', article);
     
     // Validate required fields
     if (!url || !source || !title || !text) {
@@ -619,7 +679,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       // Set source and title with safe defaults
-      sourceEl.textContent = result.source || "Unknown Source";
+      const displaySource = result.source || "Unknown Source";
+      console.log('Display results source:', displaySource, 'from result:', result.source);
+      sourceEl.textContent = displaySource;
       titleEl.textContent = result.title || "Untitled Article";
       
       // Set composite score
@@ -682,32 +744,39 @@ document.addEventListener('DOMContentLoaded', () => {
       // Show results state
       showState(resultsState);
       
-      // If analysis was from database, add a message
-      if (result.from_database) {
-        // Add a previously analyzed message at the bottom if it doesn't exist
-        let dbNote = document.getElementById('database-note');
-        if (!dbNote) {
-          dbNote = document.createElement('div');
-          dbNote.id = 'database-note';
-          dbNote.className = 'database-note';
-          dbNote.innerHTML = '<p>This page was previously analyzed and loaded from database.</p>';
-          
-          // Add force re-analyze button
-          const reanalyzeBtn = document.createElement('button');
-          reanalyzeBtn.textContent = 'Re-analyze';
-          reanalyzeBtn.className = 'small-button';
-          reanalyzeBtn.addEventListener('click', () => {
-            console.log("Force re-analysis button clicked");
-            // Clear any cached results for this URL to ensure a fresh analysis
-            analysisResult = null;
-            startAnalysis(true); // Pass true to force re-analysis
-          });
-          dbNote.appendChild(reanalyzeBtn);
-          
-          // Add to results container
-          resultsState.appendChild(dbNote);
-        }
+      // Always add a re-analyze button at the bottom 
+      // Remove any existing database note first
+      const existingDbNote = document.getElementById('database-note');
+      if (existingDbNote) {
+        existingDbNote.remove();
       }
+      
+      // Create new database note with re-analyze button
+      const dbNote = document.createElement('div');
+      dbNote.id = 'database-note';
+      dbNote.className = 'database-note';
+      
+      // Set message based on whether it's from database or newly analyzed
+      if (result.from_database) {
+        dbNote.innerHTML = '<p>This page was previously analyzed and loaded from database.</p>';
+      } else {
+        dbNote.innerHTML = '<p>Analysis complete.</p>';
+      }
+      
+      // Add force re-analyze button
+      const reanalyzeBtn = document.createElement('button');
+      reanalyzeBtn.textContent = 'Re-analyze';
+      reanalyzeBtn.className = 'small-button';
+      reanalyzeBtn.addEventListener('click', () => {
+        console.log("Force re-analysis button clicked");
+        // Clear any cached results for this URL to ensure a fresh analysis
+        analysisResult = null;
+        startAnalysis(true); // Pass true to force re-analysis
+      });
+      dbNote.appendChild(reanalyzeBtn);
+      
+      // Add to results container
+      resultsState.appendChild(dbNote);
     } catch (e) {
       console.error("Error displaying results:", e);
       showError("Failed to display results: " + e.message);
@@ -1225,11 +1294,17 @@ document.addEventListener('DOMContentLoaded', () => {
           // If we have limited data, show a warning but still display it
           const limitedData = data.limited_data || data.data.length < 3;
           
+          // Get source name with fallback - use the URL from analysisResult
+          const currentUrl = analysisResult.url || currentArticle?.url;
+          const sourceName = analysisResult.source || (currentUrl ? extractSourceFromUrl(currentUrl) : 'Source');
+          console.log('Entity tracking source name:', sourceName, 'from URL:', currentUrl, 'analysisResult.source:', analysisResult.source);
+          
           // Update visualization with real data
           window.entityTracking.setData(
             data.data, 
             data.entity_name, 
-            data.entity_type || entity.type || entity.entity_type
+            data.entity_type || entity.type || entity.entity_type,
+            sourceName
           );
           
           // Show data info with warning for limited data

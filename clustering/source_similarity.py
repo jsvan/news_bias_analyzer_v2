@@ -150,7 +150,7 @@ class SourceSimilarityComputer(BaseAnalyzer):
                     similarities.append({
                         'source_id_1': source1['id'],
                         'source_id_2': source2['id'],
-                        'similarity_score': correlation,
+                        'similarity_score': float(correlation),
                         'common_entities': common_entities,
                         'calculation_method': 'pearson_common',
                         'time_window_start': start_date,
@@ -205,7 +205,7 @@ class SourceSimilarityComputer(BaseAnalyzer):
                         best_match = {
                             'source_id_1': tier2_source['id'],
                             'source_id_2': tier1_source['id'],
-                            'similarity_score': correlation,
+                            'similarity_score': float(correlation),
                             'common_entities': common_entities,
                             'calculation_method': 'pearson_common',
                             'time_window_start': start_date,

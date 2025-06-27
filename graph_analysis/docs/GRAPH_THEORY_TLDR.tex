@@ -1,0 +1,317 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usepackage{fancyhdr}
+\usepackage{fontawesome5}
+\usepackage{mdframed}
+\usepackage{listings}
+\usepackage{mathtools}
+\usepackage{bbm}
+
+% Custom colors
+\definecolor{darkblue}{RGB}{0, 51, 102}
+\definecolor{lightblue}{RGB}{173, 216, 230}
+\definecolor{darkred}{RGB}{139, 0, 0}
+\definecolor{darkgreen}{RGB}{0, 100, 0}
+\definecolor{orange}{RGB}{255, 140, 0}
+\definecolor{purple}{RGB}{128, 0, 128}
+\definecolor{gray}{RGB}{128, 128, 128}
+
+% Page setup
+\geometry{margin=0.8in, top=1in, bottom=1in}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.4em}
+
+% Header/Footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textcolor{darkblue}{\textbf{Graph Theory in News Bias Analysis}}}
+\fancyhead[R]{\textcolor{gray}{\thepage}}
+\renewcommand{\headrulewidth}{0.5pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{darkblue}\leaders\hrule height \headrulewidth\hfill}}
+
+% Custom boxes
+\tcbuselibrary{skins,breakable}
+
+\newtcolorbox{problembox}[1]{
+    colback=lightblue!20,
+    colframe=darkblue,
+    fonttitle=\bfseries,
+    title=#1,
+    sharp corners,
+    boxrule=1pt,
+    breakable
+}
+
+\newtcolorbox{challengebox}[1]{
+    colback=orange!15,
+    colframe=orange,
+    fonttitle=\bfseries,
+    title=#1,
+    sharp corners,
+    boxrule=1pt,
+    breakable
+}
+
+\newtcolorbox{theorembox}[1]{
+    colback=purple!10,
+    colframe=purple,
+    fonttitle=\bfseries,
+    title=#1,
+    sharp corners,
+    boxrule=1pt,
+    breakable
+}
+
+\newtcolorbox{applicationbox}[1]{
+    colback=darkgreen!10,
+    colframe=darkgreen,
+    fonttitle=\bfseries,
+    title=#1,
+    sharp corners,
+    boxrule=1pt,
+    breakable
+}
+
+% Custom commands
+\newcommand{\bigquestion}[1]{
+\begin{center}
+\begin{tcolorbox}[colback=darkred!15, colframe=darkred, width=0.95\textwidth, arc=3mm, boxrule=2pt]
+\centering \Large \textbf{\textcolor{darkred}{#1}}
+\end{tcolorbox}
+\end{center}
+}
+
+\newcommand{\highlight}[1]{\textcolor{darkblue}{\textbf{#1}}}
+\newcommand{\warning}[1]{\textcolor{darkred}{\textbf{#1}}}
+\newcommand{\success}[1]{\textcolor{darkgreen}{\textbf{#1}}}
+
+% Title formatting
+\title{
+\begin{tcolorbox}[colback=darkblue!90, coltext=white, halign=center, arc=5mm, boxrule=0pt]
+\Huge \textbf{Graph Theory TLDR} \\[0.3cm]
+\Large \textit{Entity Correlation Networks in News Bias Analysis} \\[0.2cm]
+\normalsize \faLightbulb \, Mathematical Foundations for Computational Political Science
+\end{tcolorbox}
+}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+% Abstract box
+\begin{tcolorbox}[colback=gray!10, colframe=gray, title=\faInfoCircle \, Executive Summary, fonttitle=\bfseries]
+We analyze \highlight{dynamic signed multiplex networks} where political entities form correlation graphs that evolve over time across different news sources. This presents novel challenges in \highlight{spectral graph theory}, \highlight{temporal network analysis}, and \highlight{multiplex system dynamics} with potential to establish \warning{Computational Political Graph Theory} as a new mathematical field.
+\end{tcolorbox}
+
+\section{\faChartNetwork \, The Graph Theory Problem}
+
+\begin{problembox}{\faExclamationTriangle \, Core Mathematical Framework}
+We analyze \highlight{dynamic signed graphs} $\mathcal{G} = \{G_s(t)\}_{s \in S, t \in T}$ where:
+
+\begin{align}
+\text{\textbf{Nodes}} \quad V &: \text{political entities } (|V| \approx 10^4) \\
+\text{\textbf{Edges}} \quad E_s(t) &: \text{sentiment correlations for source } s \text{ at time } t \\
+\text{\textbf{Weights}} \quad w_s: E_s(t) &\to [-1,1] \text{ (correlation coefficients)} \\
+\text{\textbf{Sources}} \quad S &: \text{news organizations } (|S| \approx 10^2) \\
+\text{\textbf{Time}} \quad T &: \text{temporal evolution } (|\Delta t| = 1 \text{ week})
+\end{align}
+
+\highlight{Central Question}: Can we characterize the \textbf{spectral signatures} of ideological bias in these multiplex correlation networks?
+\end{problembox}
+
+\subsection{\faCogs \, Mathematical Formulation}
+
+For each news source $s \in S$ at time $t \in T$:
+$$G_s(t) = (V, E_s(t), w_s) \quad \text{where} \quad E_s(t) \subseteq V \times V$$
+
+The \highlight{correlation matrix} for source $s$ is:
+$$\mathbf{C}_s(t) \in \mathbb{R}^{|V| \times |V|}, \quad [\mathbf{C}_s(t)]_{ij} = \text{corr}(\text{sentiment}_i^s(t), \text{sentiment}_j^s(t))$$
+
+We seek to understand:
+\begin{itemize}[leftmargin=2em]
+    \item[\faArrowRight] \textbf{Spectral properties}: $\{\lambda_k(\mathbf{C}_s(t))\}_{k=1}^{|V|}$
+    \item[\faArrowRight] \textbf{Distance metrics}: $d(G_{s_1}(t), G_{s_2}(t))$ for ideological similarity
+    \item[\faArrowRight] \textbf{Temporal dynamics}: $\frac{d}{dt}\mathbf{C}_s(t)$ and changepoint detection
+    \item[\faArrowRight] \textbf{Multiplex structure}: Cross-layer relationships in $\{\mathbf{C}_s(t)\}_{s \in S}$
+\end{itemize}
+
+\section{\faLightbulb \, Novel Graph Theory Challenges}
+
+\begin{challengebox}{\faPuzzlePiece \, Challenge 1: Multiplex Spectral Distance Metrics}
+\textbf{Problem}: Define optimal distance $d: \mathcal{G} \times \mathcal{G} \to \mathbb{R}_+$ between ideological graph layers.
+
+\textbf{Candidates}:
+\begin{align}
+d_{\text{Frob}}(G_{s_1}, G_{s_2}) &= \|\mathbf{C}_{s_1} - \mathbf{C}_{s_2}\|_F \\
+d_{\text{spec}}(G_{s_1}, G_{s_2}) &= \|\lambda(\mathbf{C}_{s_1}) - \lambda(\mathbf{C}_{s_2})\|_2 \\
+d_{\text{info}}(G_{s_1}, G_{s_2}) &= D_{KL}(p_{s_1} \| p_{s_2}) \text{ for eigenvalue distributions}
+\end{align}
+
+\warning{Open Question}: Which metric best captures ideological similarity with theoretical guarantees?
+\end{challengebox}
+
+\begin{challengebox}{\faClockO \, Challenge 2: Temporal Changepoint Detection in Signed Networks}
+\textbf{Problem}: Detect significant structural changes in $\{G_s(t_1), \ldots, G_s(t_n)\}$.
+
+Define \textbf{graph stability measure}:
+$$\mathcal{S}(G_s, [t_1, t_2]) = \mathbb{E}_{t \in [t_1, t_2]} \left[ \|\mathbf{C}_s(t) - \overline{\mathbf{C}}_s\|_F \right]$$
+
+\textbf{Changepoint detection}: Find $\tau^* = \arg\max_\tau \Delta\mathcal{S}(\tau)$ where
+$$\Delta\mathcal{S}(\tau) = \mathcal{S}(G_s, [t_1, \tau]) - \mathcal{S}(G_s, [\tau, t_2])$$
+
+\warning{Research Direction}: Spectral methods for changepoint detection in correlation networks.
+\end{challengebox}
+
+\begin{challengebox}{\faNetworkWired \, Challenge 3: Constrained Clustering on Signed Multiplex Networks}
+\textbf{Problem}: Entity types $\tau: V \to \{\text{politician}, \text{country}, \text{concept}, \text{organization}\}$ create \highlight{structural constraints} on possible correlations.
+
+\textbf{Constraint matrix}: $\mathbf{M} \in \{0,1\}^{|V| \times |V|}$ where $\mathbf{M}_{ij} = 1$ if correlation between entity types $\tau(i), \tau(j)$ is \textit{semantically valid}.
+
+\textbf{Constrained spectral clustering}:
+$$\min_{\mathbf{X}} \text{tr}(\mathbf{X}^T \mathbf{L} \mathbf{X}) \quad \text{s.t.} \quad \mathbf{X}^T\mathbf{X} = \mathbf{I}, \quad \mathbf{X} \odot \mathbf{M} = \mathbf{X}$$
+
+where $\mathbf{L}$ is the signed graph Laplacian and $\odot$ is element-wise product.
+\end{challengebox}
+
+\section{\faFlask \, Theoretical Investigations}
+
+\begin{theorembox}{\faTheoryTitle \, Conjecture 1: Spectral Signatures of Ideological Bias}
+\textbf{Hypothesis}: Ideological differences manifest as \highlight{spectral invariants} in correlation matrices.
+
+Specifically, the \textbf{Fiedler eigenvalue} $\lambda_2(\mathbf{L}_s)$ of the correlation graph Laplacian correlates with ideological polarization:
+$$\text{Polarization}_s \propto \frac{1}{\lambda_2(\mathbf{L}_s)} \cdot \text{Var}_{s' \in S}[\mathbf{C}_{s'}]$$
+
+\textbf{Research Goal}: Prove theoretical relationship between algebraic connectivity and political consensus.
+\end{theorembox}
+
+\begin{theorembox}{\faInfinity \, Conjecture 2: Universal Scaling Laws}
+\textbf{Hypothesis}: Political correlation networks exhibit \highlight{universal structural properties} independent of language/culture.
+
+Power-law degree distributions: $P(k) \sim k^{-\gamma}$ with $\gamma \in [2, 3]$
+
+Small-world properties: $\langle \ell \rangle \sim \log |V|$ (average path length)
+
+\textbf{Research Direction}: Test universality across different political systems and cultural contexts.
+\end{theorembox}
+
+\bigquestion{Can we develop a complete spectral characterization of ideological bias in correlation networks?}
+
+\section{\faRocket \, Cutting-Edge Applications}
+
+\begin{applicationbox}{\faBrain \, Application 1: Ideological Space Embedding}
+Use \highlight{graph neural networks} to embed entities in continuous ideological space:
+
+$$\mathbf{h}_v^{(l+1)} = \sigma\left(\mathbf{W}^{(l)} \cdot \text{AGGREGATE}^{(l)}\left(\{\mathbf{h}_u^{(l)} : u \in \mathcal{N}(v)\}\right)\right)$$
+
+Each news source creates different embeddings $\{\mathbf{h}_v^s\}$ for the same entities $v \in V$.
+
+\textbf{Ideological bias measure}: $\text{Bias}(s_1, s_2) = \frac{1}{|V|} \sum_{v \in V} \|\mathbf{h}_v^{s_1} - \mathbf{h}_v^{s_2}\|_2$
+\end{applicationbox}
+
+\begin{applicationbox}{\faWaveSquare \, Application 2: Sentiment Propagation Dynamics}
+Model sentiment spread using \highlight{graph signal processing}:
+
+$$\frac{d\mathbf{x}(t)}{dt} = -\mathbf{L}\mathbf{x}(t) + \mathbf{f}(t)$$
+
+where $\mathbf{x}(t) \in \mathbb{R}^{|V|}$ is entity sentiment vector and $\mathbf{f}(t)$ represents external news events.
+
+\textbf{Influence centrality}: $\text{Influence}(v) = \sum_{k} \frac{|\langle \mathbf{u}_k, \mathbf{e}_v \rangle|^2}{\lambda_k}$ (spectral influence measure)
+\end{applicationbox}
+
+\begin{applicationbox}{\faSearch \, Application 3: Early Warning via Spectral Monitoring}
+Track \highlight{leading eigenvalues} $\{\lambda_1(t), \lambda_2(t), \ldots, \lambda_k(t)\}$ over time.
+
+\textbf{Narrative instability indicator}:
+$$\mathcal{I}(t) = \sum_{i=1}^k w_i \left|\frac{d\lambda_i(t)}{dt}\right|^2$$
+
+Threshold crossing $\mathcal{I}(t) > \mathcal{I}_{\text{crit}}$ signals potential editorial shifts 2-4 weeks in advance.
+\end{applicationbox}
+
+\section{\faUsers \, Where We Need Your Graph Theory Expertise}
+
+\renewcommand{\arraystretch}{1.5}
+\begin{center}
+\begin{tabular}{|p{4cm}|p{4cm}|p{6cm}|}
+\hline
+\rowcolor{lightblue!30}
+\textbf{Challenge} & \textbf{Skills Needed} & \textbf{Impact} \\
+\hline
+\textcolor{darkred}{\faStar \faStar \faStar} Distance Metrics & Spectral graph theory, Matrix analysis & Define ideological similarity with mathematical rigor \\
+\hline
+\textcolor{darkred}{\faStar \faStar \faStar} Polarization Theory & Algebraic graph theory, Laplacian analysis & Prove spectral-polarization relationships \\
+\hline
+\textcolor{darkred}{\faStar \faStar \faStar} Constrained Clustering & Signed graph theory, Optimization & Handle semantic constraints in clustering \\
+\hline
+\textcolor{darkred}{\faStar \faStar \faStar} Temporal Stability & Dynamic graph theory, Stability analysis & Rigorous changepoint detection methods \\
+\hline
+\textcolor{darkred}{\faStar \faStar \faStar} Multiplex Analysis & Multilayer networks, Tensor methods & Cross-source relationship analysis \\
+\hline
+\end{tabular}
+\end{center}
+
+\section{\faGlobe \, Beyond Politics: Broader Impact}
+
+\begin{tcolorbox}[colback=darkgreen!15, colframe=darkgreen, title=\faLeaf \, Mathematical Contributions, fonttitle=\bfseries]
+\begin{itemize}[leftmargin=2em]
+    \item[\faPlus] Novel \highlight{signed graph analysis} methods with temporal evolution
+    \item[\faPlus] \highlight{Multiplex network distance metrics} with real-world validation  
+    \item[\faPlus] \highlight{Spectral bias detection} applicable to any correlation network
+    \item[\faPlus] Foundation for \warning{Computational Political Graph Theory} field
+\end{itemize}
+\end{tcolorbox}
+
+\begin{tcolorbox}[colback=purple!15, colframe=purple, title=\faIndustry \, Applications Across Domains, fonttitle=\bfseries]
+\begin{description}[leftmargin=3em]
+    \item[\faChartLine \, Financial Networks] Detect market regime changes via correlation shifts
+    \item[\faUsers \, Social Networks] Measure ideological polarization in online communities
+    \item[\faFlask \, Scientific Collaboration] Track research field evolution through citation correlations  
+    \item[\faGlobeAmericas \, International Relations] Quantify diplomatic relationship changes
+\end{description}
+\end{tcolorbox}
+
+\section{\faRoadmap \, Getting Started}
+
+\begin{minipage}{0.48\textwidth}
+\begin{tcolorbox}[colback=darkgreen!20, colframe=darkgreen, title=\faCheck \, We Have]
+\begin{itemize}[label=\textcolor{darkgreen}{\faCheckCircle}]
+    \item News scraping (1000+ articles/day)
+    \item Entity extraction pipeline  
+    \item 100K+ articles, 10K+ entities
+    \item Months of time series data
+    \item Existing sentiment analysis
+\end{itemize}
+\end{tcolorbox}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\begin{tcolorbox}[colback=orange!20, colframe=orange, title=\faStar \, We Need]
+\begin{itemize}[label=\textcolor{orange}{\faStar}]
+    \item Distance metric design
+    \item Spectral analysis framework
+    \item Changepoint detection algorithms
+    \item Theoretical foundations
+    \item Your graph theory expertise!
+\end{itemize}
+\end{tcolorbox}
+\end{minipage}
+
+\vspace{1em}
+
+\begin{center}
+\begin{tcolorbox}[colback=darkblue!90, coltext=white, halign=center, arc=3mm, boxrule=0pt, width=0.8\textwidth]
+\Large \faHandshake \, \textbf{Ready to Build the Mathematical Foundation} \\
+\textbf{for Quantitative Political Analysis?}
+\end{tcolorbox}
+\end{center}
+
+\end{document}

@@ -31,15 +31,28 @@ class ClusterManager(BaseAnalyzer):
         # Initialize statistical database for storing results
         self.statistical_db = StatisticalDBManager()
     
+    def analyze(self):
+        """Run clustering analysis - called by statistical orchestrator."""
+        logger.info("Running monthly clustering analysis...")
+        return self.perform_monthly_clustering()
+    
     def perform_monthly_clustering(self, month_start: datetime = None):
         """Run monthly clustering job for all countries."""
         if month_start is None:
-            # Default to start of current month
-            now = datetime.utcnow()
-            month_start = datetime(now.year, now.month, 1)
-            
-        month_end = self._get_month_end(month_start)
-        logger.info(f"Performing clustering for month {month_start.date()} to {month_end.date()}")
+            # Use the most recent similarity data time window
+            similarity_window = self._get_latest_similarity_window()
+            if similarity_window:
+                month_start, month_end = similarity_window
+                logger.info(f"Using latest similarity window {month_start.date()} to {month_end.date()}")
+            else:
+                # Default to start of current month
+                now = datetime.utcnow()
+                month_start = datetime(now.year, now.month, 1)
+                month_end = self._get_month_end(month_start)
+                logger.info(f"No similarity data found, using default month {month_start.date()} to {month_end.date()}")
+        else:
+            month_end = self._get_month_end(month_start)
+            logger.info(f"Performing clustering for month {month_start.date()} to {month_end.date()}")
         
         # Get active countries
         countries = self._get_countries_for_clustering(month_start, month_end)
@@ -57,6 +70,19 @@ class ClusterManager(BaseAnalyzer):
         else:
             next_month = datetime(month_start.year, month_start.month + 1, 1)
         return next_month - timedelta(seconds=1)
+    
+    def _get_latest_similarity_window(self) -> Optional[Tuple[datetime, datetime]]:
+        """Get the time window of the most recent similarity data."""
+        query = text("""
+            SELECT time_window_start, time_window_end 
+            FROM source_similarity_matrix 
+            ORDER BY created_at DESC 
+            LIMIT 1
+        """)
+        result = self.session.execute(query).fetchone()
+        if result:
+            return result.time_window_start, result.time_window_end
+        return None
     
     def _get_countries_for_clustering(self, start_date: datetime, end_date: datetime) -> List[str]:
         """Get countries with enough sources for clustering."""
@@ -87,33 +113,42 @@ class ClusterManager(BaseAnalyzer):
         # Get active sources
         sources = self.get_active_sources(start_date, end_date, country)
         
-        if len(sources) < 4:  # Need at least 4 for meaningful clustering
-            logger.warning(f"Not enough sources in {country} for clustering")
+        if len(sources) < self.config.MIN_CLUSTER_SIZE * 2:  # Need at least 4 for meaningful clustering
+            logger.warning(f"Not enough sources in {country} for clustering ({len(sources)} sources)")
             return
             
-        # Separate tiers
-        tier1_sources = sources[:self.config.TIER1_SOURCES_PER_COUNTRY]
-        tier2_sources = sources[self.config.TIER1_SOURCES_PER_COUNTRY:]
+        # If we have many sources, separate into tiers; otherwise cluster all sources
+        if len(sources) > self.config.TIER1_SOURCES_PER_COUNTRY + 2:
+            tier1_sources = sources[:self.config.TIER1_SOURCES_PER_COUNTRY]
+            tier2_sources = sources[self.config.TIER1_SOURCES_PER_COUNTRY:]
+            sources_to_cluster = tier2_sources
+            logger.info(f"Clustering {len(tier2_sources)} Tier 2 sources in {country}")
+        else:
+            # Cluster all sources when we don't have enough for tier separation
+            tier1_sources = []
+            tier2_sources = sources
+            sources_to_cluster = sources
+            logger.info(f"Clustering all {len(sources)} sources in {country}")
         
-        if not tier2_sources:
-            logger.info(f"Only Tier 1 sources in {country}, no clustering needed")
+        if len(sources_to_cluster) < self.config.MIN_CLUSTER_SIZE * 2:
+            logger.warning(f"Not enough sources to cluster in {country}")
             return
             
-        # Get similarity matrix for Tier 2 sources
-        similarity_matrix = self._build_similarity_matrix(tier2_sources, start_date, end_date)
+        # Get similarity matrix for sources to cluster
+        similarity_matrix = self._build_similarity_matrix(sources_to_cluster, start_date, end_date)
         
         if similarity_matrix is None:
             logger.warning(f"Could not build similarity matrix for {country}")
             return
             
         # Perform hierarchical clustering
-        clusters = self._hierarchical_clustering(tier2_sources, similarity_matrix)
+        clusters = self._hierarchical_clustering(sources_to_cluster, similarity_matrix)
         
         # Calculate cluster quality metrics
         quality_metrics = self._calculate_cluster_quality(similarity_matrix, clusters)
         
         # Store cluster assignments
-        self._store_cluster_assignments(country, tier1_sources, tier2_sources, 
+        self._store_cluster_assignments(country, tier1_sources, sources_to_cluster, 
                                       clusters, quality_metrics, start_date)
     
     def _build_similarity_matrix(self, 
@@ -184,6 +219,12 @@ class ClusterManager(BaseAnalyzer):
         
         # Convert to condensed form for scipy
         condensed = squareform(distance_matrix)
+        
+        # Check if we have enough data for clustering
+        if len(condensed) == 0 or len(sources) < 2:
+            logger.warning(f"Insufficient data for clustering: {len(sources)} sources")
+            # Return single cluster for all sources
+            return {source['id']: 'cluster_1' for source in sources}
         
         # Perform hierarchical clustering
         linkage_matrix = hierarchy.linkage(condensed, method='average')

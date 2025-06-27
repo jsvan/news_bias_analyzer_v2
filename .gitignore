@@ -1,0 +1,133 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# NodeJS / React
+node_modules/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+.DS_Store
+.npm
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.cache/
+**/.cache/
+**/__pycache__/
+*.cache
+.cache*
+*.cache*
+# Logs and runtime files
+*.log
+logs/*
+!logs/.gitkeep
+
+# Batch processing files
+batches/*
+!batches/.gitkeep
+batch_*.jsonl
+batch_*_metadata.json
+batches.txt
+*.batch
+batch_*.json
+batch_*.jsonl.articles.json
+batch_results_*.jsonl
+analyzer/batches.txt
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# Database
+*.sqlite3
+*.db
+
+# React build output
+frontend/build/
+frontend/*/build/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# Output and temp files
+output/*
+!output/.gitkeep
+temp/*
+!temp/.gitkeep
+temp_scripts/*.tmp
+
+# OpenAI API related files
+.openai_cache/
+*openai*.json
+
+# Test files and scripts
+test_*.sh
+test_*.py
+!tests/test_*.py
+
+# Extension build
+frontend/browser_extension/build/
+
+# Docker
+docker-compose.override.yml
+.docker/
+
+# Scrapers cache
+scraper/**/__pycache__/
+scrapers/**/__pycache__/
+
+# Virtual environment
+venv/
+.venv/
+logs/
+batches/
+
+# Misc
+.DS_Store
+Thumbs.db
+**/.claude/
+.claude/
+**/.claude/settings.local.json

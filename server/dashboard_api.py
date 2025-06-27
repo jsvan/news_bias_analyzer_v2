@@ -58,6 +58,42 @@ app = FastAPI(
     version="0.1.0"
 )
 
+# Configure CORS based on environment
+def get_cors_origins():
+    """Get allowed CORS origins based on environment"""
+    environment = os.getenv("APP_ENV", "development")
+    
+    if environment == "production":
+        # Production: only allow specific domains
+        return [
+            "https://jsv.github.io",  # Replace with your GitHub username
+            "https://your-custom-domain.com",  # Replace with your custom domain if any
+            "https://api.news-bias-analyzer.example.com"  # Your production API domain
+        ]
+    elif environment == "staging":
+        # Staging: allow staging domains
+        return [
+            "https://staging.news-bias-analyzer.example.com",
+            "https://api-staging.news-bias-analyzer.example.com"
+        ]
+    else:
+        # Development: allow all localhost origins
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:4173",  # Vite preview
+            "http://127.0.0.1:4173"
+        ]
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # Database connection
 database_url = os.getenv("DATABASE_URL", "postgresql://newsbias:newsbias@localhost:5432/news_bias")
 db_manager = DatabaseManager(database_url)
@@ -608,13 +644,44 @@ async def log_requests(request: Request, call_next):
     
     return response
 
-# Enable CORS
+# Enable CORS with environment-aware settings
+def get_cors_origins():
+    """Get allowed CORS origins based on environment."""
+    environment = os.getenv("APP_ENV", "development")
+    
+    if environment == "development":
+        return [
+            "http://localhost:3000",  # Vite dev server
+            "http://localhost:4173",  # Vite preview server
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:4173",
+        ]
+    elif environment == "staging":
+        return [
+            "https://staging.news-bias-analyzer.example.com",
+            "https://*.github.io",    # GitHub Pages staging
+        ]
+    elif environment == "production":
+        return [
+            "https://news-bias-analyzer.example.com",
+            "https://jsv.github.io", # GitHub Pages (replace with actual username)
+        ]
+    else:
+        # Fallback to development settings
+        return [
+            "http://localhost:3000",
+        ]
+
+cors_origins = get_cors_origins()
+logger.info(f"Dashboard CORS configured for origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development; restrict in production
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Run with: uvicorn server.dashboard_api:app --reload

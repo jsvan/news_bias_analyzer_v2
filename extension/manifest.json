@@ -9,7 +9,9 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "http://localhost:8000/*"
+    "http://localhost:8000/*",
+    "https://api.news-bias-analyzer.example.com/*",
+    "https://api-staging.news-bias-analyzer.example.com/*"
   ],
   "background": {
     "service_worker": "js/background.js"

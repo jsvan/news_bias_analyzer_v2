@@ -22,6 +22,7 @@ class EntityTrackingViz {
       entityName: 'Entity',
       entityType: 'Unknown',
       dateRange: '30 days',
+      sourceName: 'Source', // Name of the news source
       isMockData: false // Flag to indicate if data is real or mocked
     }, options);
     
@@ -175,12 +176,12 @@ class EntityTrackingViz {
       case 'Source Power':
         lineColor = powerColor;
         isDashed = true;
-        tooltipText = 'Source Power';
+        tooltipText = `${this.options.sourceName} Power`;
         break;
       case 'Source Moral':
         lineColor = moralColor;
         isDashed = true;
-        tooltipText = 'Source Moral';
+        tooltipText = `${this.options.sourceName} Moral`;
         break;
       case 'Global Power':
         lineColor = powerColor;
@@ -278,11 +279,21 @@ class EntityTrackingViz {
     this.ctx.fillText(tooltipText, lineEndX + gap, lineY);
   }
   
+  // Set the source name for display in tooltips
+  setSourceName(sourceName) {
+    this.options.sourceName = sourceName;
+    // Re-render if we have data to update tooltips
+    if (this.data && this.data.length > 0 && !this.isAnimating) {
+      this.render(1);
+    }
+  }
+  
   // Set data for time series
-  setData(data, entityName = '', entityType = '') {
+  setData(data, entityName = '', entityType = '', sourceName = '') {
     this.data = data;
     if (entityName) this.options.entityName = entityName;
     if (entityType) this.options.entityType = entityType;
+    if (sourceName) this.options.sourceName = sourceName;
     
     // Sort data by date
     if (this.data && this.data.length > 0) {
@@ -392,6 +403,9 @@ class EntityTrackingViz {
     
     // Draw title and legend
     this.drawTitleAndLegend();
+    
+    // Draw legend
+    this.drawLegend();
   }
   
   // Draw grid lines
@@ -688,6 +702,81 @@ class EntityTrackingViz {
       width / 2, 
       15
     );
+  }
+
+  // Draw legend showing what the lines represent
+  drawLegend() {
+    if (!this.data || this.data.length === 0) return;
+    
+    const { powerColor, moralColor, textColor, width } = this.options;
+    
+    // Position legend in top right
+    const legendX = width - 10;
+    const legendY = 35;
+    const lineLength = 15;
+    const lineSpacing = 20;
+    
+    this.ctx.font = '10px Arial';
+    this.ctx.textAlign = 'right';
+    this.ctx.textBaseline = 'middle';
+    
+    let currentY = legendY;
+    
+    // Draw source-specific lines (dashed)
+    if (this.options.sourceName && this.options.sourceName !== 'Source') {
+      // Source Power line
+      this.ctx.strokeStyle = powerColor;
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([4, 2]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX - lineLength - 50, currentY);
+      this.ctx.lineTo(legendX - 35, currentY);
+      this.ctx.stroke();
+      
+      this.ctx.fillStyle = textColor;
+      this.ctx.fillText(`${this.options.sourceName} Power`, legendX - 38, currentY);
+      currentY += lineSpacing;
+      
+      // Source Moral line
+      this.ctx.strokeStyle = moralColor;
+      this.ctx.setLineDash([4, 2]);
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX - lineLength - 50, currentY);
+      this.ctx.lineTo(legendX - 35, currentY);
+      this.ctx.stroke();
+      
+      this.ctx.fillText(`${this.options.sourceName} Moral`, legendX - 38, currentY);
+      currentY += lineSpacing;
+    }
+    
+    // Draw global lines if available (solid)
+    if (this.data[0] && this.data[0].global_power_avg !== undefined) {
+      this.ctx.setLineDash([]);
+      this.ctx.globalAlpha = 0.7;
+      
+      // Global Power line
+      this.ctx.strokeStyle = powerColor;
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX - lineLength - 50, currentY);
+      this.ctx.lineTo(legendX - 35, currentY);
+      this.ctx.stroke();
+      
+      this.ctx.fillText('Global Power', legendX - 38, currentY);
+      currentY += lineSpacing;
+      
+      // Global Moral line
+      this.ctx.strokeStyle = moralColor;
+      this.ctx.beginPath();
+      this.ctx.moveTo(legendX - lineLength - 50, currentY);
+      this.ctx.lineTo(legendX - 35, currentY);
+      this.ctx.stroke();
+      
+      this.ctx.fillText('Global Moral', legendX - 38, currentY);
+    }
+    
+    // Reset styles
+    this.ctx.globalAlpha = 1;
+    this.ctx.setLineDash([]);
   }
   
 }

@@ -19,6 +19,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from statistical_database.db_manager import StatisticalDBManager
+from database.config import EntityPruningConfig
 
 logger = logging.getLogger(__name__)
 
@@ -121,21 +122,21 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
                     e.id,
                     e.name,
                     e.entity_type,
-                    e.last_updated,
+                    e.created_at,
                     COUNT(em.id) as mention_count,
-                    EXTRACT(EPOCH FROM (NOW() - e.last_updated)) / 604800 as weeks_old,
-                    LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.last_updated)) / 604800), 12) as threshold
+                    EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800 as weeks_old,
+                    LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800), :max_weeks) as threshold
                 FROM entities e
                 LEFT JOIN entity_mentions em ON e.id = em.entity_id
                 WHERE 
                     -- Skip entities marked for preservation
-                    (e.pruning_metadata->>'preserve' IS NULL OR e.pruning_metadata->>'preserve' != 'true')
-                    -- Only consider entities older than 1 week
-                    AND e.last_updated < NOW() - INTERVAL '7 days'
-                GROUP BY e.id, e.name, e.entity_type, e.last_updated
+                    (e.pruning_metadata->>:preserve_key IS NULL OR e.pruning_metadata->>:preserve_key != :preserve_value)
+                    -- Only consider entities older than configured minimum age
+                    AND e.created_at < NOW() - CAST(:min_days || ' days' AS INTERVAL)
+                GROUP BY e.id, e.name, e.entity_type, e.created_at
                 HAVING 
-                    -- Mention count is below the dynamic threshold
-                    COUNT(em.id) < LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.last_updated)) / 604800), 12)
+                    -- Mention count must be greater than weeks old (not equal)
+                    COUNT(em.id) <= LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800), :max_weeks)
             )
             SELECT 
                 id, 
@@ -148,7 +149,12 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
             ORDER BY mention_count, weeks_old DESC
         """)
         
-        candidates = session.execute(query).fetchall()
+        candidates = session.execute(query, {
+            'max_weeks': EntityPruningConfig.MAX_ENTITY_AGE_WEEKS,
+            'min_days': EntityPruningConfig.MIN_ENTITY_AGE_DAYS,
+            'preserve_key': EntityPruningConfig.PRESERVE_METADATA_KEY,
+            'preserve_value': EntityPruningConfig.PRESERVE_METADATA_VALUE
+        }).fetchall()
         
         if not candidates:
             logger.info("No entities to prune")
@@ -161,9 +167,8 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
         examples = candidates[:10]
         for entity in examples:
             logger.info(f"  - {entity.name} ({entity.entity_type}): "
-                       f"{entity.mention_count} mentions, "
-                       f"{entity.weeks_old} weeks old, "
-                       f"threshold: {entity.threshold}")
+                       f"{entity.mention_count} mentions (needs {entity.threshold}), "
+                       f"{entity.weeks_old} weeks old")
         
         if len(candidates) > 10:
             logger.info(f"  ... and {len(candidates) - 10} more")
@@ -176,22 +181,29 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
         entity_ids = [c.id for c in candidates]
         
         # Delete in batches to avoid overwhelming the database
-        batch_size = 1000
+        batch_size = EntityPruningConfig.PRUNING_BATCH_SIZE
         total_deleted = 0
         
         for i in range(0, len(entity_ids), batch_size):
             batch_ids = entity_ids[i:i + batch_size]
             
-            # Note: CASCADE will handle entity_mentions deletion
-            result = session.execute(
+            # First delete entity_mentions to avoid foreign key constraint violation
+            mentions_result = session.execute(
+                text("DELETE FROM entity_mentions WHERE entity_id = ANY(:ids)"),
+                {"ids": batch_ids}
+            )
+            mentions_deleted = mentions_result.rowcount
+            
+            # Then delete the entities
+            entities_result = session.execute(
                 text("DELETE FROM entities WHERE id = ANY(:ids)"),
                 {"ids": batch_ids}
             )
             
-            batch_deleted = result.rowcount
+            batch_deleted = entities_result.rowcount
             total_deleted += batch_deleted
             
-            logger.info(f"Deleted batch {i//batch_size + 1}: {batch_deleted} entities")
+            logger.info(f"Deleted batch {i//batch_size + 1}: {mentions_deleted} mentions, {batch_deleted} entities")
             session.commit()
         
         logger.info(f"Successfully pruned {total_deleted} low-activity entities")

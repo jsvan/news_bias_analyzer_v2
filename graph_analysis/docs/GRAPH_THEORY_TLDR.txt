@@ -1,0 +1,169 @@
+GRAPH THEORY TLDR: Entity Correlation Networks in News Bias Analysis
+
+THE PROBLEM (Graph Theory Perspective)
+
+We're analyzing DYNAMIC SIGNED GRAPHS where:
+- NODES = political entities (politicians, countries, organizations)
+- EDGES = sentiment correlation between entities when they co-occur in news articles
+- EDGE WEIGHTS = correlation coefficient (-1 to +1) 
+- MULTIPLE GRAPH INSTANCES = one per news source
+- TEMPORAL EVOLUTION = edge weights change over time
+
+CORE QUESTION: Can we characterize the SPECTRAL PROPERTIES and STRUCTURAL EVOLUTION of these correlation networks to detect ideological bias and predict narrative shifts?
+
+MATHEMATICAL FRAMEWORK
+
+Graph Construction:
+G_s(t) = (V, E, w) where:
+- V = entity set (shared across all sources)
+- E = edges between co-occurring entities  
+- w: E → [-1,1] = sentiment correlation weights for source s at time t
+
+Key Graph Properties We're Analyzing:
+1. SPECTRAL CLUSTERING of correlation matrices to identify ideological communities
+2. GRAPH DISTANCE METRICS between sources (Frobenius norm of correlation matrices)
+3. TEMPORAL GRAPH EVOLUTION - how does graph structure change over time?
+4. CENTRALITY MEASURES for entity influence ranking
+5. GRAPH LAPLACIAN EIGENVALUES for polarization quantification
+
+INTERESTING GRAPH THEORY PROBLEMS
+
+1. Multi-layer Network Analysis
+- Each news source = separate layer in multiplex network
+- CHALLENGE: How do we measure "distance" between ideological graph layers?
+- OPEN QUESTION: What spectral properties distinguish ideological differences?
+
+2. Dynamic Community Detection
+- Entities cluster differently across sources (Trump+Military+Economy vs Trump+Controversy+Scandal)
+- CHALLENGE: Detect when entity communities shift across sources over time
+- GRAPH THEORY HOOK: This is essentially TEMPORAL COMMUNITY DETECTION ON SIGNED MULTIPLEX NETWORKS
+
+3. Graph Signal Processing on Ideological Networks
+- Treat sentiment as signals on entity graphs
+- CHALLENGE: How does sentiment "diffuse" through correlation networks?
+- OPEN QUESTION: Can we characterize the SPECTRAL PROPERTIES OF SENTIMENT PROPAGATION?
+
+4. Algebraic Connectivity and Polarization
+- Hypothesis: FIEDLER EIGENVALUE correlates with ideological polarization
+- Lower algebraic connectivity = more polarized entity relationships
+- GRAPH THEORY CHALLENGE: Prove relationship between spectral properties and polarization measures
+
+SPECIFIC TECHNICAL CHALLENGES
+
+1. Correlation Matrix Spectral Analysis
+# For each news source, we have correlation matrix C_s
+# where C_s[i,j] = correlation(entity_i_sentiment, entity_j_sentiment)
+
+Questions:
+- What do the eigenvalue distributions tell us about ideological structure?
+- Can we use matrix factorization to find latent ideological dimensions?
+- How stable are principal eigenvectors across time windows?
+
+2. Graph Distance Metrics for Ideology
+# We need distance d(G_s1, G_s2) between source graphs
+# Current ideas:
+- Frobenius norm: ||C_s1 - C_s2||_F
+- Spectral distance: ||λ(C_s1) - λ(C_s2)||
+- Graph edit distance on correlation networks
+
+Question: Which distance metric best captures ideological similarity?
+
+3. Temporal Graph Changepoint Detection
+# Given time series of graphs G_s(t1), G_s(t2), ..., G_s(tn)
+# Detect when graph structure changes significantly
+
+Graph theory challenge:
+- How do we define "significant change" in weighted graph structure?
+- Can we use spectral methods for changepoint detection?
+- What's the optimal time window for stability vs sensitivity?
+
+4. Signed Graph Clustering with Constraints
+# Entities have types (politician, country, organization, concept)
+# Some correlations should be impossible (e.g., countries can't directly correlate)
+
+Challenge: Constrained spectral clustering on signed graphs
+Question: How do entity type constraints affect clustering algorithms?
+
+COOL APPLICATIONS OF GRAPH THEORY
+
+1. Ideological Space Embedding
+- Use GRAPH EMBEDDING METHODS (node2vec, GraphSAGE) to place entities in ideological space
+- Each news source creates different embeddings for same entities
+- MEASURE IDEOLOGICAL BIAS as embedding distance between sources
+
+2. Influence Propagation Modeling
+- Model sentiment spread using RANDOM WALKS on correlation graphs
+- CENTRALITY MEASURES identify entities that amplify sentiment changes
+- GRAPH NEURAL NETWORKS for predicting sentiment cascades
+
+3. Polarization as Graph Property
+- ALGEBRAIC CONNECTIVITY as polarization measure
+- MODULARITY OPTIMIZATION to find ideological communities
+- SPECTRAL BISECTION for identifying polarizing entities
+
+4. Early Warning via Spectral Analysis
+- Track LEADING EIGENVALUES of correlation matrices over time
+- SPECTRAL CHANGEPOINT DETECTION for editorial shift prediction
+- GRAPH STABILITY METRICS for narrative consistency measurement
+
+WHERE WE NEED GRAPH THEORY EXPERTISE
+
+1. OPTIMAL DISTANCE METRICS ★★★
+PROBLEM: Which distance function best captures ideological similarity between correlation graphs?
+GRAPH THEORY SKILLS NEEDED: Matrix analysis, spectral graph theory, metric space properties
+
+2. SPECTRAL POLARIZATION MEASURES ★★★
+PROBLEM: Can we prove theoretical relationships between graph spectral properties and political polarization?
+GRAPH THEORY SKILLS NEEDED: Algebraic graph theory, Laplacian eigenvalue analysis
+
+3. CONSTRAINED SIGNED GRAPH CLUSTERING ★★★
+PROBLEM: Entity types create constraints on possible correlations - how does this affect clustering algorithms?
+GRAPH THEORY SKILLS NEEDED: Constrained optimization, signed graph theory
+
+4. TEMPORAL GRAPH STABILITY ★★★
+PROBLEM: When is a correlation graph "stable" vs "changing"? Need rigorous mathematical definition.
+GRAPH THEORY SKILLS NEEDED: Dynamic graph theory, stability analysis
+
+5. MULTIPLEX NETWORK ANALYSIS ★★★
+PROBLEM: Each news source is a layer in multiplex network - how do we analyze cross-layer relationships?
+GRAPH THEORY SKILLS NEEDED: Multilayer network theory, tensor methods
+
+THE BIG GRAPH THEORY QUESTION
+
+Can we develop a complete spectral characterization of ideological bias in correlation networks?
+
+Specifically:
+- Do ideological differences have SPECTRAL SIGNATURES?
+- Can we predict graph evolution using SPECTRAL DYNAMICS?
+- Is there a UNIVERSAL STRUCTURE to political correlation networks?
+
+This could be the foundation for a new field: COMPUTATIONAL POLITICAL GRAPH THEORY.
+
+WHY THIS MATTERS BEYOND POLITICS
+
+Mathematical Contributions:
+- New methods for SIGNED GRAPH ANALYSIS with temporal evolution
+- MULTIPLEX NETWORK DISTANCE METRICS with practical validation
+- SPECTRAL METHODS FOR BIAS DETECTION in any correlation network
+
+Broader Applications:
+- FINANCIAL NETWORKS: Detect market regime changes via correlation shifts
+- SOCIAL NETWORKS: Measure ideological polarization in online communities  
+- SCIENTIFIC COLLABORATION: Track research field evolution through citation correlations
+- INTERNATIONAL RELATIONS: Quantify diplomatic relationship changes
+
+GETTING STARTED
+
+We have:
+✓ News scraping infrastructure (1000+ articles/day)
+✓ Entity extraction and sentiment analysis pipeline
+✓ Database with 100K+ articles and 10K+ entities
+✓ Time series data going back months
+
+We need:
+★ GRAPH DISTANCE METRIC design and validation
+★ SPECTRAL ANALYSIS of correlation matrices
+★ TEMPORAL CHANGEPOINT DETECTION algorithms
+★ THEORETICAL FRAMEWORK connecting spectral properties to polarization
+
+Want to help us build the mathematical foundation for quantitative political analysis?

@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:github-pages": "tsc && VITE_GITHUB_PAGES=true VITE_APP_ENV=production vite build",
+    "build:production": "tsc && VITE_APP_ENV=production vite build",
+    "preview": "vite preview",
+    "analyze": "npm run build && npx vite-bundle-analyzer dist/stats.json"
   },
   "dependencies": {
     "@emotion/react": "^11.10.6",

@@ -19,7 +19,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from database.db import get_session
 
 from .intelligence_manager import IntelligenceManager
-from .statistical_database.db_manager import StatisticalDBManager
+from statistical_database.db_manager import StatisticalDBManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])

@@ -27,16 +27,17 @@ from typing import List, Dict, Any, Tuple, Optional
 import openai
 from openai import OpenAI
 import sqlalchemy
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 # Local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
+from database.services import DatabaseService
+from database.config import AnalysisConfig, LoggingConfig
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
 from analyzer.hotelling_t2 import HotellingT2Calculator
-from database.entity_pruning import prune_low_activity_entities, get_pruning_stats
 
 # Setup directories
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -388,72 +389,57 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
             try:
                 analysis_result = json.loads(content)
                 
-                # Store entity mentions and collect for T² calculation
+                # Process entities using service layer
+                db_service = DatabaseService(session)
                 article_entities = []
+                
                 if 'entities' in analysis_result and analysis_result['entities']:
-                    for entity_data in analysis_result['entities']:
-                        # Create or get entity
-                        entity_name = entity_data.get('entity') or entity_data.get('name')
-                        entity_type = entity_data.get('entity_type')
-                        
-                        if not entity_name or not entity_type:
-                            logger.warning(f"Missing entity name or type: {entity_data}")
-                            continue
-                        
-                        entity = session.query(Entity).filter_by(
-                            name=entity_name,
-                            entity_type=entity_type
-                        ).first()
-                        
-                        if not entity:
-                            entity = Entity(
-                                name=entity_name,
-                                entity_type=entity_type
-                            )
-                            session.add(entity)
-                            session.flush()  # Generate ID
-                        
-                        # Get power and moral scores and sanitize them
-                        power_score = sanitize_numeric_value(entity_data.get('power_score', 0))
-                        moral_score = sanitize_numeric_value(entity_data.get('moral_score', 0))
-                        
-                        # Create entity mention
-                        mention = EntityMention(
-                            entity_id=entity.id,
+                    try:
+                        # Process all entities for this article
+                        entity_results = db_service.entities.process_article_entities(
                             article_id=article.id,
-                            power_score=power_score,
-                            moral_score=moral_score,
-                            mentions=entity_data.get('mentions', []),
-                            created_at=article.publish_date or article.scraped_at
+                            entity_data_list=analysis_result['entities'],
+                            article_date=article.publish_date or article.scraped_at
                         )
-                        session.add(mention)
                         
-                        # Collect for T² calculation
-                        article_entities.append({
-                            'entity_id': entity.id,
-                            'power_score': power_score,
-                            'moral_score': moral_score
-                        })
+                        # Collect data for T² calculation
+                        article_entities = [
+                            {
+                                'entity_id': entity.id,
+                                'power_score': mention.power_score,
+                                'moral_score': mention.moral_score
+                            }
+                            for entity, mention in entity_results
+                        ]
+                        
+                    except ValueError as e:
+                        logger.warning(f"Error processing entities for article {article.id}: {e}")
                 
                 # Calculate Hotelling's T² score if we have entities
+                t2_score = None
                 if article_entities:
-                    t2_calculator = HotellingT2Calculator(session)
-                    t2_score = t2_calculator.calculate_article_t2(article_entities)
-                    article.hotelling_t2_score = t2_score
-                    if t2_score:
-                        logger.debug(f"Article {article.id} T² score: {t2_score:.2f}")
+                    try:
+                        t2_calculator = HotellingT2Calculator(session)
+                        t2_score = t2_calculator.calculate_article_t2(article_entities)
+                        if t2_score:
+                            logger.debug(f"Article {article.id} T² score: {t2_score:.2f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate T² score for article {article.id}: {e}")
                 
-                # Update article status
-                article.analysis_status = "completed"
-                article.processed_at = datetime.now()
+                # Update article status using service
+                success = db_service.articles.mark_article_completed(
+                    article_id=article.id,
+                    processed_at=datetime.now(),
+                    hotelling_t2_score=t2_score
+                )
                 
-                # Clear article text to save storage space
-                # The text is no longer needed after analysis since:
-                # 1. All statistical analysis works on sentiment vectors, not text
-                # 2. The extension re-extracts text from pages when needed
-                # 3. Recovery tools only need article IDs to match with OpenAI results
-                article.text = None
-                article.html = None
+                if not success:
+                    logger.error(f"Failed to mark article {article.id} as completed")
+                    continue
+                
+                # Clear article text to save storage space if configured
+                if AnalysisConfig.CLEAR_TEXT_AFTER_ANALYSIS:
+                    db_service.articles.clear_article_text(article.id)
                 
                 processed_count += 1
                 processed_article_ids.append(article.id)
@@ -615,14 +601,19 @@ def remove_batch_from_tracking(batch_id: str):
     write_batches_file(batches)
     logger.info(f"Removed batch {batch_id} from tracking")
 
-def create_new_batch(session: Session):
-    """Create a new batch if under the maximum active batches."""
+def create_new_batch(session: Session) -> bool:
+    """
+    Create a new batch if under the maximum active batches.
+    
+    Returns:
+        True if a new batch was created, False otherwise
+    """
     # Check how many active batches we have
     active_count = count_active_batches()
     
     if active_count >= MAX_ACTIVE_BATCHES:
         logger.info(f"Maximum active batches ({MAX_ACTIVE_BATCHES}) reached. Cannot create new batch.")
-        return
+        return False
     
     # Add delay between batch submissions to avoid overwhelming OpenAI
     logger.info("Adding 10-second delay before submitting new batch...")
@@ -633,13 +624,13 @@ def create_new_batch(session: Session):
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             logger.error("OpenAI API key not found in environment variables")
-            return
+            return False
         
         client = OpenAI(api_key=api_key)
         logger.info("OpenAI client initialized")
     except Exception as e:
         logger.error(f"Error initializing OpenAI client: {e}")
-        return
+        return False
     
     # Get OpenAI model from environment or default to gpt-4.1-nano
     model = os.environ.get("OPENAI_MODEL", "gpt-4.1-nano")
@@ -650,7 +641,12 @@ def create_new_batch(session: Session):
     
     if not articles:
         logger.info("No unanalyzed articles found.")
-        return
+        return False
+    
+    # Check minimum batch size
+    if len(articles) < 50:
+        logger.info(f"Only {len(articles)} unanalyzed articles found. Minimum batch size is 50. Skipping batch creation.")
+        return False
     
     logger.info(f"Found {len(articles)} unanalyzed articles for new batch")
     
@@ -664,21 +660,21 @@ def create_new_batch(session: Session):
     
     if not batch_file_path:
         logger.error("Failed to create batch file")
-        return
+        return False
     
     # Upload batch file to OpenAI
     file_id = upload_batch_file(client, batch_file_path)
     
     if not file_id:
         logger.error("Failed to upload batch file")
-        return
+        return False
     
     # Create OpenAI batch
     batch_id = create_openai_batch(client, file_id)
     
     if not batch_id:
         logger.error("Failed to create OpenAI batch")
-        return
+        return False
     
     # Update article status
     update_articles_status(session, articles, "in_progress", batch_id)
@@ -705,6 +701,7 @@ def create_new_batch(session: Session):
         json.dump(article_map, f)
     
     logger.info(f"Created new batch: {batch_id}")
+    return True
 
 def check_active_batches(session: Session):
     """Check status of active batches and process completed ones."""
@@ -940,6 +937,56 @@ def cleanup_old_batch_files():
     except Exception as e:
         logger.error(f"Error during batch file cleanup: {e}")
 
+def check_if_all_work_complete(session: Session) -> bool:
+    """
+    Check if all analysis work is complete.
+    
+    Returns:
+        True if no unanalyzed articles and no active batches
+    """
+    # Check for unanalyzed articles
+    unanalyzed_count = session.query(NewsArticle).filter(
+        NewsArticle.analysis_status == "unanalyzed",
+        NewsArticle.text != None,
+        NewsArticle.text != ""
+    ).count()
+    
+    # Check for active batches
+    active_batches = read_batches_file()
+    active_batch_count = len(active_batches)
+    
+    logger.info(f"Work status: {unanalyzed_count} unanalyzed articles, {active_batch_count} active batches")
+    
+    return unanalyzed_count == 0 and active_batch_count == 0
+
+def run_post_analysis_tasks():
+    """Run statistics and clustering after all analysis is complete."""
+    logger.info("=== All analysis complete! Running post-analysis tasks ===")
+    
+    try:
+        # Run the statistics command
+        logger.info("Running statistical analysis and clustering...")
+        import subprocess
+        
+        # Get the project root directory
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        run_script = os.path.join(script_dir, "run.sh")
+        
+        # Run statistics with all components
+        result = subprocess.run([run_script, "statistics"], 
+                              capture_output=True, text=True, 
+                              cwd=script_dir)
+        
+        if result.returncode == 0:
+            logger.info("✅ Statistical analysis completed successfully")
+            logger.info(f"Statistics output:\n{result.stdout}")
+        else:
+            logger.error(f"❌ Statistical analysis failed with return code {result.returncode}")
+            logger.error(f"Error output:\n{result.stderr}")
+            
+    except Exception as e:
+        logger.error(f"Error running post-analysis tasks: {e}")
+
 def run_analyzer(daemon_mode=False):
     """Run the batch analyzer main loop."""
     # Acquire lock to ensure only one instance runs
@@ -970,18 +1017,11 @@ def run_analyzer(daemon_mode=False):
         
         if daemon_mode:
             logger.info("Starting analyzer in daemon mode. Press Ctrl+C to exit.")
+            logger.info("📊 Daemon will automatically shut down and run statistics when all articles are processed.")
             
             def signal_handler(sig, frame):
                 logger.info("Received signal to exit. Cleaning up...")
                 
-                # Run entity pruning before exit
-                try:
-                    logger.info("Running entity pruning...")
-                    get_pruning_stats(session)
-                    pruned_count = prune_low_activity_entities(session, dry_run=False)
-                    logger.info(f"Pruned {pruned_count} low-activity entities")
-                except Exception as e:
-                    logger.error(f"Error during entity pruning: {e}")
                 
                 release_lock(lock_file)
                 sys.exit(0)
@@ -991,10 +1031,32 @@ def run_analyzer(daemon_mode=False):
             
             # Track when we last did maintenance cleanup
             last_maintenance = time.time()
+            # Track consecutive idle cycles
+            idle_cycles = 0
+            max_idle_cycles = 3  # Wait 3 cycles (15 minutes) before shutting down
             
             while True:
+                # Check active batches and create new ones
                 check_active_batches(session)
                 create_new_batch(session)
+                
+                # Check if all work is complete
+                if check_if_all_work_complete(session):
+                    idle_cycles += 1
+                    logger.info(f"🏁 No work remaining. Idle cycle {idle_cycles}/{max_idle_cycles}")
+                    
+                    if idle_cycles >= max_idle_cycles:
+                        logger.info("🏁 All analysis work is complete! Shutting down daemon...")
+                        
+                        
+                        # Run post-analysis tasks
+                        run_post_analysis_tasks()
+                        
+                        logger.info("🎉 Analysis daemon completed successfully!")
+                        break
+                else:
+                    # Reset idle counter if there's work
+                    idle_cycles = 0
                 
                 # Run maintenance cleanup every hour
                 now = time.time()

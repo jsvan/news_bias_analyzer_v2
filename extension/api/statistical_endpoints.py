@@ -16,7 +16,7 @@ import random
 import math
 
 # Import database utilities  
-# Note: get_session is provided by main.py as get_db dependency
+from database.db import get_session
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 
 # Import entity mapping utilities
@@ -101,9 +101,7 @@ class AvailableCountriesResponse(BaseModel):
     countries: List[Dict[str, Any]]  # [{"code": "USA", "name": "United States", "sample_size": 123}]
 
 
-def get_db_session():
-    """Database session dependency - will be overridden by main.py"""
-    pass
+# Database session dependency is now imported from database.db
 
 @router.get("/sentiment/distribution", response_model=SentimentDistributionResponse)
 async def get_sentiment_distribution(
@@ -111,7 +109,8 @@ async def get_sentiment_distribution(
     dimension: str = Query("power", regex="^(power|moral)$"),
     country: Optional[str] = None,
     source_id: Optional[int] = None,
-    session: Session = Depends(get_db_session)
+    half_life_days: float = Query(14.0, ge=1.0, le=365.0, description="Half-life for temporal weighting in days"),
+    session: Session = Depends(get_session)
 ):
     """
     Get sentiment distribution data for a specific entity.
@@ -187,7 +186,8 @@ async def get_sentiment_distribution(
         score_field = EntityMention.power_score if dimension == "power" else EntityMention.moral_score
         
         # Query for all mentions across ALL matching entities with the selected dimension
-        mentions_query = session.query(score_field).filter(
+        # Include created_at for temporal weighting
+        mentions_query = session.query(score_field, EntityMention.created_at).filter(
             EntityMention.entity_id.in_(entity_ids),
             score_field.isnot(None)  # Ensure we only get mentions with valid scores
         )
@@ -201,8 +201,26 @@ async def get_sentiment_distribution(
             logger.error(f"Insufficient data for entity '{entity_name}' ({total_mentions} mentions across {len(entity_ids)} entity variants).")
             raise HTTPException(status_code=400, detail=f"Insufficient data for entity '{entity_name}'. Only {total_mentions} mentions found, need at least {min_mentions_required}.")
         
-        # Get all score values  
-        values = [float(score[0]) for score in mentions_query.all()]
+        # Get all score values with timestamps for temporal weighting
+        mention_data = mentions_query.all()
+        current_time = datetime.now()
+        
+        # Apply temporal weighting with exponential decay
+        weighted_values = []
+        for score, created_at in mention_data:
+            if score is not None and created_at is not None:
+                # Calculate days since creation
+                days_old = (current_time - created_at).total_seconds() / (24 * 3600)
+                
+                # Exponential decay: weight = e^(-days_old / half_life)
+                weight = math.exp(-days_old / half_life_days)
+                
+                # Add weighted copies of the value (round weight to avoid fractional repetition)
+                # Use a multiplier to maintain reasonable sample sizes
+                weighted_copies = max(1, round(weight * 10))  # Scale factor of 10
+                weighted_values.extend([float(score)] * weighted_copies)
+        
+        values = weighted_values
         
         # Get the most recent mention score as the current value
         most_recent = session.query(score_field, EntityMention.created_at).filter(
@@ -223,7 +241,7 @@ async def get_sentiment_distribution(
             # Get the source information
             source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
             
-            source_mentions = session.query(score_field).join(
+            source_mentions = session.query(score_field, EntityMention.created_at).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
             ).filter(
                 EntityMention.entity_id.in_(entity_ids),
@@ -232,8 +250,17 @@ async def get_sentiment_distribution(
             ).all()
             
             if source and len(source_mentions) >= 3:
+                # Apply temporal weighting to source data
+                source_weighted_values = []
+                for score, created_at in source_mentions:
+                    if score is not None and created_at is not None:
+                        days_old = (current_time - created_at).total_seconds() / (24 * 3600)
+                        weight = math.exp(-days_old / half_life_days)
+                        weighted_copies = max(1, round(weight * 10))
+                        source_weighted_values.extend([float(score)] * weighted_copies)
+                
                 comparison_data = {
-                    source.name: [float(score[0]) for score in source_mentions]
+                    source.name: source_weighted_values
                 }
                 comparison_label = source.name
         
@@ -263,7 +290,7 @@ async def get_sentiment_distribution(
                 logger.info(f"  - {source_name} ({source_country}): {count} mentions")
             
             # Join with NewsArticle and NewsSource to filter by country
-            country_mentions = session.query(score_field).join(
+            country_mentions = session.query(score_field, EntityMention.created_at).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
             ).join(
                 NewsSource, NewsArticle.source_id == NewsSource.id
@@ -275,27 +302,38 @@ async def get_sentiment_distribution(
             
             logger.info(f"🎯 Query result: Found {len(country_mentions)} country-specific mentions for '{country}'")
             
-            # Debug: Show first few values
-            if country_mentions:
-                sample_values = [float(score[0]) for score in country_mentions[:5]]
-                logger.info(f"📊 Sample values: {sample_values}")
-            
             # Only include country data if we have enough values
             if len(country_mentions) >= 3:
-                comparison_values = [float(score[0]) for score in country_mentions]
+                # Apply temporal weighting to country data
+                country_weighted_values = []
+                for score, created_at in country_mentions:
+                    if score is not None and created_at is not None:
+                        days_old = (current_time - created_at).total_seconds() / (24 * 3600)
+                        weight = math.exp(-days_old / half_life_days)
+                        weighted_copies = max(1, round(weight * 10))
+                        country_weighted_values.extend([float(score)] * weighted_copies)
+                
                 comparison_data = {
-                    country: comparison_values
+                    country: country_weighted_values
                 }
                 comparison_label = country
-                logger.info(f"✅ Created comparison data for '{country}' with {len(country_mentions)} mentions")
-                logger.info(f"📊 Value range: {min(comparison_values):.2f} to {max(comparison_values):.2f}")
+                logger.info(f"✅ Created temporally weighted comparison data for '{country}' with {len(country_mentions)} raw mentions")
+                if country_weighted_values:
+                    logger.info(f"📊 Weighted value range: {min(country_weighted_values):.2f} to {max(country_weighted_values):.2f}")
             else:
                 logger.warning(f"❌ Insufficient country data for '{country}': only {len(country_mentions)} mentions (need 3+)")
                 # Still return some comparison data but with a warning
                 if len(country_mentions) > 0:
-                    comparison_values = [float(score[0]) for score in country_mentions]
+                    country_weighted_values = []
+                    for score, created_at in country_mentions:
+                        if score is not None and created_at is not None:
+                            days_old = (current_time - created_at).total_seconds() / (24 * 3600)
+                            weight = math.exp(-days_old / half_life_days)
+                            weighted_copies = max(1, round(weight * 10))
+                            country_weighted_values.extend([float(score)] * weighted_copies)
+                    
                     comparison_data = {
-                        f"{country} (limited data)": comparison_values
+                        f"{country} (limited data)": country_weighted_values
                     }
                     comparison_label = f"{country} (limited data)"
         
@@ -373,7 +411,7 @@ async def get_entity_tracking(
     days: int = Query(30, ge=1, le=365),
     window_size: int = Query(7, ge=1, le=30),
     source_id: Optional[int] = Query(None, description="Optional source ID to filter mentions"),
-    session: Session = Depends(get_db_session)
+    session: Session = Depends(get_session)
 ):
     """
     Get entity sentiment tracking data over time.
@@ -536,7 +574,7 @@ async def get_topic_clusters(
     article_url: Optional[str] = None,
     view_type: str = Query("topics", regex="^(topics|entities)$"),
     threshold: str = Query("medium", regex="^(weak|medium|strong)$"),
-    session: Session = Depends(get_db_session)
+    session: Session = Depends(get_session)
 ):
     """
     Get topic and entity relationship cluster data.
@@ -661,7 +699,7 @@ async def get_available_countries_for_entity(
     entity_name: str,
     dimension: str = Query("power", regex="^(power|moral)$"),
     min_mentions: int = Query(3, ge=1),
-    session: Session = Depends(get_db_session)
+    session: Session = Depends(get_session)
 ):
     """
     Get countries that have sufficient data for distribution comparison for a specific entity.
@@ -812,7 +850,7 @@ async def get_available_countries_for_entity(
 
 
 @router.get("/entity/global-counts")
-def get_global_entity_counts(session: Session = Depends(get_db_session)):
+def get_global_entity_counts(session: Session = Depends(get_session)):
     """Get global entity mention counts for ordering entities."""
     try:
         if session is None:
@@ -863,11 +901,7 @@ class SimilarArticlesResponse(BaseModel):
     similar_articles: List[SimilarArticleResponse]
     total_count: int
 
-# Database dependency - placeholder, will be overridden by main app
-def get_db_session():
-    """Database session dependency - will be overridden by main.py"""
-    # This is a placeholder that will be overridden by FastAPI dependency injection
-    raise RuntimeError("Database session dependency not properly injected")
+# Database dependency is now imported from database.db
 
 @router.get("/article/{article_id}/similar", response_model=SimilarArticlesResponse)
 def get_similar_articles(
@@ -875,7 +909,7 @@ def get_similar_articles(
     limit: int = Query(10, ge=1, le=50),
     days_window: int = Query(3, ge=1, le=7),
     min_entity_overlap: float = Query(0.3, ge=0.1, le=1.0),
-    session: Session = Depends(get_db_session)
+    session: Session = Depends(get_session)
 ):
     """
     Find articles similar to the given article based on:
@@ -1029,3 +1063,181 @@ def get_similar_articles(
     except Exception as e:
         logger.error(f"Error finding similar articles: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to find similar articles: {str(e)}")
+
+
+# Response models for country entity analysis
+class CountryEntityData(BaseModel):
+    entity_name: str
+    entity_type: str
+    mention_count: int
+    avg_power_score: float
+    avg_moral_score: float
+    newspapers: Dict[str, List[Dict[str, Any]]]  # newspaper_name -> daily_data
+
+class CountryTopEntitiesResponse(BaseModel):
+    country: str
+    entities: List[CountryEntityData]
+    available_newspapers: List[str]
+    time_period_days: int
+
+
+@router.get("/country/{country}/top-entities", response_model=CountryTopEntitiesResponse)
+async def get_country_top_entities(
+    country: str,
+    days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+    limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
+    session: Session = Depends(get_session)
+):
+    """
+    Get the top entities discussed by newspapers in a specific country over the past month,
+    with sentiment flow data for each newspaper.
+    
+    This endpoint provides data for country-specific pages showing the most prominent 
+    entities and their sentiment trajectories across different newspapers within that country.
+    
+    Args:
+        country: The country to analyze (e.g., 'USA', 'UK', 'Germany')
+        days: Number of days to look back (default: 30)
+        limit: Number of top entities to return (default: 10)
+        
+    Returns:
+        Top entities with their sentiment flows across newspapers in that country
+    """
+    try:
+        if session is None:
+            logger.error(f"Database session is None for country analysis '{country}'")
+            raise HTTPException(status_code=500, detail="Database connection not available")
+        
+        logger.info(f"🔍 Getting top {limit} entities for country '{country}' over {days} days")
+        
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # Get all newspapers (sources) in this country
+        country_sources = session.query(NewsSource).filter(
+            func.lower(NewsSource.country) == func.lower(country)
+        ).all()
+        
+        if not country_sources:
+            logger.warning(f"No news sources found for country '{country}'")
+            raise HTTPException(status_code=404, detail=f"No news sources found for country '{country}'")
+        
+        source_ids = [source.id for source in country_sources]
+        source_names = {source.id: source.name for source in country_sources}
+        
+        logger.info(f"📰 Found {len(country_sources)} news sources in {country}: {list(source_names.values())}")
+        
+        # Get top entities by mention count in this country over the time period
+        top_entities_query = session.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label('mention_count'),
+            func.avg(EntityMention.power_score).label('avg_power'),
+            func.avg(EntityMention.moral_score).label('avg_moral')
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id
+        ).join(
+            NewsArticle, EntityMention.article_id == NewsArticle.id
+        ).filter(
+            NewsArticle.source_id.in_(source_ids),
+            EntityMention.created_at >= start_date,
+            EntityMention.created_at <= end_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).having(
+            func.count(EntityMention.id) >= 5  # Minimum mentions required
+        ).order_by(
+            func.count(EntityMention.id).desc()
+        ).limit(limit)
+        
+        top_entities = top_entities_query.all()
+        
+        if not top_entities:
+            logger.warning(f"No entities found with sufficient mentions for country '{country}'")
+            return CountryTopEntitiesResponse(
+                country=country,
+                entities=[],
+                available_newspapers=list(source_names.values()),
+                time_period_days=days
+            )
+        
+        logger.info(f"📊 Found {len(top_entities)} top entities for {country}")
+        
+        # For each top entity, get daily sentiment data by newspaper
+        entities_data = []
+        
+        for entity_id, entity_name, entity_type, total_mentions, avg_power, avg_moral in top_entities:
+            logger.info(f"🔍 Processing entity '{entity_name}' ({total_mentions} mentions)")
+            
+            # Get daily sentiment data for this entity, grouped by source (newspaper)
+            daily_data_query = session.query(
+                func.date(EntityMention.created_at).label('date'),
+                NewsArticle.source_id,
+                func.avg(EntityMention.power_score).label('avg_power'),
+                func.avg(EntityMention.moral_score).label('avg_moral'),
+                func.count(EntityMention.id).label('mention_count')
+            ).join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).filter(
+                EntityMention.entity_id == entity_id,
+                NewsArticle.source_id.in_(source_ids),
+                EntityMention.created_at >= start_date,
+                EntityMention.created_at <= end_date,
+                EntityMention.power_score.isnot(None),
+                EntityMention.moral_score.isnot(None)
+            ).group_by(
+                func.date(EntityMention.created_at),
+                NewsArticle.source_id
+            ).order_by(
+                func.date(EntityMention.created_at),
+                NewsArticle.source_id
+            )
+            
+            daily_results = daily_data_query.all()
+            
+            # Group data by newspaper
+            newspapers_data = {}
+            for date, source_id, power_avg, moral_avg, mentions in daily_results:
+                newspaper_name = source_names.get(source_id, f"Unknown Source {source_id}")
+                
+                if newspaper_name not in newspapers_data:
+                    newspapers_data[newspaper_name] = []
+                
+                newspapers_data[newspaper_name].append({
+                    "date": date.isoformat(),
+                    "power_score": float(power_avg) if power_avg is not None else 0.0,
+                    "moral_score": float(moral_avg) if moral_avg is not None else 0.0,
+                    "mention_count": int(mentions)
+                })
+            
+            # Sort each newspaper's data by date
+            for newspaper_name in newspapers_data:
+                newspapers_data[newspaper_name].sort(key=lambda x: x["date"])
+            
+            entities_data.append(CountryEntityData(
+                entity_name=entity_name,
+                entity_type=entity_type or "unknown",
+                mention_count=int(total_mentions),
+                avg_power_score=float(avg_power) if avg_power is not None else 0.0,
+                avg_moral_score=float(avg_moral) if avg_moral is not None else 0.0,
+                newspapers=newspapers_data
+            ))
+        
+        logger.info(f"✅ Successfully processed {len(entities_data)} entities for country {country}")
+        
+        return CountryTopEntitiesResponse(
+            country=country,
+            entities=entities_data,
+            available_newspapers=list(source_names.values()),
+            time_period_days=days
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get top entities for country {country}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

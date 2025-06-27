@@ -31,11 +31,19 @@ try:
     from intelligence.sentiment_anomaly_detector import SentimentAnomalyDetector
     from intelligence.source_divergence_detector import SourceDivergenceDetector
     from intelligence.polarization_detector import PolarizationDetector
-    from intelligence.clustering_insights_analyzer import ClusteringInsights
+    from intelligence.clustering_insights_analyzer import ClusteringInsightsAnalyzer
     has_intelligence = True
 except ImportError as e:
     print(f"Warning: Could not import intelligence modules: {e}")
     has_intelligence = False
+
+# Import entity pruning
+try:
+    from database.entity_pruning import prune_low_activity_entities, get_pruning_stats
+    has_entity_pruning = True
+except ImportError as e:
+    print(f"Warning: Could not import entity pruning: {e}")
+    has_entity_pruning = False
 
 try:
     from clustering.cluster_manager import ClusterManager
@@ -46,6 +54,8 @@ except ImportError as e:
     has_clustering = False
 
 try:
+    import sys
+    sys.path.append(ROOT_DIR)
     from statistical_database.db_manager import StatisticalDBManager
     has_statistical_db = True
 except ImportError as e:
@@ -103,14 +113,18 @@ class StatisticalOrchestrator:
         self.intelligence_analyzers = {}
         self.clustering_analyzers = {}
         
-        if has_intelligence:
-            self.intelligence_analyzers = {
-                'sentiment_anomaly': SentimentAnomalyDetector(self.session),
-                'source_divergence': SourceDivergenceDetector(self.session),
-                'polarization': PolarizationDetector(self.session),
-                'clustering_insights': ClusteringInsights(self.session)
-            }
-            logger.info(f"Initialized {len(self.intelligence_analyzers)} intelligence analyzers")
+        if has_intelligence and self.statistical_db:
+            try:
+                self.intelligence_analyzers = {
+                    'sentiment_anomaly': SentimentAnomalyDetector(self.session, self.statistical_db),
+                    'source_divergence': SourceDivergenceDetector(self.session, self.statistical_db),
+                    'polarization': PolarizationDetector(self.session, self.statistical_db),
+                    'clustering_insights': ClusteringInsightsAnalyzer(self.session, self.statistical_db)
+                }
+                logger.info(f"Initialized {len(self.intelligence_analyzers)} intelligence analyzers")
+            except Exception as e:
+                logger.error(f"Failed to initialize intelligence analyzers: {e}")
+                self.intelligence_analyzers = {}
         
         if has_clustering:
             self.clustering_analyzers = {
@@ -138,8 +152,12 @@ class StatisticalOrchestrator:
         
         try:
             result = self.statistical_db.get_analysis_state(analysis_type)
-            if result and result.get('last_run_timestamp'):
-                return datetime.fromisoformat(result['last_run_timestamp'])
+            if result and result.get('state_data'):
+                state_data = result['state_data']
+                if isinstance(state_data, dict) and state_data.get('last_run_timestamp'):
+                    return datetime.fromisoformat(state_data['last_run_timestamp'])
+                elif result.get('last_updated'):
+                    return result['last_updated']
         except Exception as e:
             logger.warning(f"Could not get last run time for {analysis_type}: {e}")
         
@@ -161,8 +179,9 @@ class StatisticalOrchestrator:
         try:
             self.statistical_db.store_analysis_state(
                 analysis_type=analysis_type,
-                last_run_timestamp=timestamp.isoformat(),
-                status='completed'
+                time_window_start=timestamp,
+                time_window_end=timestamp,
+                state_data={'status': 'completed', 'last_run_timestamp': timestamp.isoformat()}
             )
         except Exception as e:
             logger.warning(f"Could not set last run time for {analysis_type}: {e}")
@@ -268,7 +287,9 @@ class StatisticalOrchestrator:
                     start_time = time.time()
                     
                     # Run the analysis
-                    if hasattr(analyzer, 'cluster_all_countries'):
+                    if hasattr(analyzer, 'analyze'):
+                        analyzer.analyze()
+                    elif hasattr(analyzer, 'cluster_all_countries'):
                         # For cluster manager
                         analyzer.cluster_all_countries()
                     elif hasattr(analyzer, 'analyze_temporal_patterns'):
@@ -308,6 +329,18 @@ class StatisticalOrchestrator:
         """
         logger.info("Starting comprehensive statistical analysis...")
         start_time = time.time()
+        
+        # Run entity pruning first
+        if has_entity_pruning:
+            try:
+                logger.info("Running entity pruning before statistical analysis...")
+                get_pruning_stats(self.session)
+                pruned_count = prune_low_activity_entities(self.session, dry_run=False)
+                logger.info(f"Pruned {pruned_count} low-activity entities")
+            except Exception as e:
+                logger.error(f"Error during entity pruning: {e}")
+        else:
+            logger.warning("Entity pruning not available")
         
         results = {
             'intelligence': self.run_intelligence_analysis(force),

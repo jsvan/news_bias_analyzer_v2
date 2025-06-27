@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 # Import database connections
 from database.db import get_session
 
-from .statistical_database.db_manager import StatisticalDBManager
+from statistical_database.db_manager import StatisticalDBManager
 from .sentiment_anomaly_detector import SentimentAnomalyDetector
 from .source_divergence_detector import SourceDivergenceDetector
 from .polarization_detector import PolarizationDetector

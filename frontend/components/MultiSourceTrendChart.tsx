@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ResponsiveContainer, 
   LineChart, 
@@ -18,7 +18,8 @@ import {
   ToggleButton, 
   Paper,
   Tooltip as MuiTooltip,
-  Chip
+  Chip,
+  Grid
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 
@@ -52,17 +53,20 @@ const COUNTRY_COLORS: Record<string, string[]> = {
   'default': ['#718096', '#a0aec0', '#cbd5e0', '#e2e8f0'] // Grays for unknown countries
 };
 
-// Line style patterns
-const LINE_STYLES = ['0', '5 5', '10 5', '10 5 5 5', '15 5 15 5'];
+// Line style patterns: Power lines are always dashed, Moral lines are always solid
 
 const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   entityName,
   sourcesTrends,
   height = 400,
-  dimension = 'both'
+  dimension = 'moral'
 }) => {
   const [selectedDimension, setSelectedDimension] = useState<'both' | 'power' | 'moral'>(dimension);
   const [smoothing, setSmoothing] = useState<boolean>(true);
+  const [chartMode, setChartMode] = useState<'sentiment' | 'netsum'>('sentiment');
+
+  // Get all source names first
+  const allSourceNames = Object.keys(sourcesTrends);
 
   // Combine all source data into a single dataset for the chart
   const combineSourceData = () => {
@@ -82,8 +86,28 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       Object.entries(sourcesTrends).forEach(([sourceName, trends]) => {
         const point = trends.find(t => t.date === date);
         if (point) {
-          dataPoint[`${sourceName}_power`] = point.power_score;
-          dataPoint[`${sourceName}_moral`] = point.moral_score;
+          if (chartMode === 'sentiment') {
+            // Current behavior - keep exactly as is, but validate against NaN
+            dataPoint[`${sourceName}_power`] = (typeof point.power_score === 'number' && !isNaN(point.power_score)) ? point.power_score : null;
+            dataPoint[`${sourceName}_moral`] = (typeof point.moral_score === 'number' && !isNaN(point.moral_score)) ? point.moral_score : null;
+          } else {
+            // Net sum calculation - ONLY if both values are valid numbers
+            if (typeof point.power_score === 'number' && !isNaN(point.power_score) && 
+                typeof point.mention_count === 'number' && !isNaN(point.mention_count)) {
+              const netSum = point.power_score * point.mention_count;
+              dataPoint[`${sourceName}_power`] = isNaN(netSum) ? null : netSum;
+            } else {
+              dataPoint[`${sourceName}_power`] = null; // Same as sentiment mode
+            }
+            
+            if (typeof point.moral_score === 'number' && !isNaN(point.moral_score) && 
+                typeof point.mention_count === 'number' && !isNaN(point.mention_count)) {
+              const netSum = point.moral_score * point.mention_count;
+              dataPoint[`${sourceName}_moral`] = isNaN(netSum) ? null : netSum;
+            } else {
+              dataPoint[`${sourceName}_moral`] = null; // Same as sentiment mode
+            }
+          }
           dataPoint[`${sourceName}_mentions`] = point.mention_count;
         }
       });
@@ -92,9 +116,31 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     });
   };
 
-  const combinedData = combineSourceData();
-  const sourceNames = Object.keys(sourcesTrends);
-  const hasData = sourceNames.length > 0 && combinedData.length > 0;
+  const combinedData = useMemo(() => combineSourceData(), [sourcesTrends, chartMode]);
+  
+  // Use all source names - don't filter them out
+  const sourceNames = allSourceNames;
+  
+  // Check if we have valid data for rendering
+  const hasValidData = useMemo(() => {
+    if (sourceNames.length === 0 || combinedData.length === 0) return false;
+    
+    // Check if there's at least one non-null value in the data
+    const hasValidValues = combinedData.some(dataPoint => 
+      sourceNames.some(sourceName => {
+        const powerValue = dataPoint[`${sourceName}_power`];
+        const moralValue = dataPoint[`${sourceName}_moral`];
+        return (typeof powerValue === 'number' && !isNaN(powerValue)) || 
+               (typeof moralValue === 'number' && !isNaN(moralValue));
+      })
+    );
+    
+    return hasValidValues;
+  }, [sourceNames, combinedData]);
+  
+  const hasData = hasValidData;
+
+
 
   // Format date for display
   const formatDate = (date: string) => {
@@ -120,9 +166,8 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       const country = getCountryFromSource(sourceName);
       const isCountryColored = COUNTRY_COLORS[country] !== undefined;
       
-      // Get line style info
-      const lineStyle = getSourceLineStyle(sourceName);
-      const isDashed = lineStyle !== '0';
+      // Determine line style based on dimension
+      const isDashed = dimension === 'Power';
       
       return (
         <Paper 
@@ -168,7 +213,13 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                 fontSize: '0.9rem'
               }}
             >
-              {dimension}: {hoveredEntry.value.toFixed(2)}
+              {dimension}: {
+                typeof hoveredEntry.value === 'number' && !isNaN(hoveredEntry.value) 
+                  ? (chartMode === 'sentiment' 
+                      ? hoveredEntry.value.toFixed(2) 
+                      : `${hoveredEntry.value.toFixed(1)} (net sum)`)
+                  : 'No data'
+              }
             </Typography>
           </Box>
           
@@ -183,14 +234,12 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                 fontSize: '0.7rem'
               }}
             />
-            {isDashed && (
-              <Chip 
-                label="dashed" 
-                size="small" 
-                variant="outlined"
-                sx={{ fontSize: '0.7rem', height: 20 }}
-              />
-            )}
+            <Chip 
+              label={isDashed ? "dashed" : "solid"} 
+              size="small" 
+              variant="outlined"
+              sx={{ fontSize: '0.7rem', height: 20 }}
+            />
           </Box>
         </Paper>
       );
@@ -216,10 +265,30 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     }
   };
 
-  // Get country from source name (assumes format "Source (Country)")
+  const handleChartModeChange = (
+    event: React.MouseEvent<HTMLElement>,
+    newMode: 'sentiment' | 'netsum' | null
+  ) => {
+    if (newMode !== null) {
+      setChartMode(newMode);
+    }
+  };
+
+
+  // Get country from source name (handles both "Source (Country)" and "Country" formats)
   const getCountryFromSource = (sourceName: string) => {
+    // First try to extract from parentheses format "Source (Country)"
     const match = sourceName.match(/\(([^)]+)\)$/);
-    return match ? match[1] : '';
+    if (match) {
+      return match[1];
+    }
+    
+    // If no parentheses, check if the source name itself is a country
+    if (COUNTRY_COLORS[sourceName]) {
+      return sourceName;
+    }
+    
+    return '';
   };
 
   // Group sources by country for better visualization
@@ -238,24 +307,36 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     return countryPalette[sourceIndexInCountry % countryPalette.length];
   };
 
-  // Get line style for source
-  const getSourceLineStyle = (sourceName: string) => {
-    const sourceIndex = sourceNames.indexOf(sourceName);
-    return LINE_STYLES[sourceIndex % LINE_STYLES.length];
-  };
 
   return (
     <Box sx={{ width: '100%', height: height }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="subtitle1" sx={{ mr: 1 }}>
-            {entityName} - Cross-Source Sentiment
+            {entityName} - Cross-Source {chartMode === 'sentiment' ? 'Sentiment' : 'Net Sentiment Sum'}
           </Typography>
-          <MuiTooltip title="Compare how different news sources portray the same entity over time. Each line represents a different newspaper's sentiment.">
+          <MuiTooltip title="Compare how different news sources portray the same entity over time. Each line represents a different newspaper's sentiment."
+          >
             <InfoIcon fontSize="small" color="action" />
           </MuiTooltip>
         </Box>
         <Box sx={{ display: 'flex', gap: 2 }}>
+          <ToggleButtonGroup
+            size="small"
+            value={chartMode}
+            exclusive
+            onChange={handleChartModeChange}
+            aria-label="chart mode selector"
+          >
+            <ToggleButton value="sentiment" aria-label="sentiment mode">
+              Sentiment
+            </ToggleButton>
+            <ToggleButton value="netsum" aria-label="net sum mode">
+              <MuiTooltip title="Shows sentiment score × mention count to reveal impact magnitude">
+                <span>Net Sum</span>
+              </MuiTooltip>
+            </ToggleButton>
+          </ToggleButtonGroup>
           <ToggleButtonGroup
             size="small"
             value={selectedDimension}
@@ -336,6 +417,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       {hasData && (
         <ResponsiveContainer width="100%" height="85%">
           <LineChart
+            key={`${selectedDimension}-${chartMode}`}
             data={combinedData}
             margin={{ top: 20, right: 30, bottom: 20, left: 20 }}
           >
@@ -346,11 +428,11 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
               padding={{ left: 20, right: 20 }}
             />
             <YAxis 
-              domain={[-2, 2]} 
-              tickCount={9} 
+              domain={chartMode === 'sentiment' ? [-2, 2] : [-50, 50]}
+              tickCount={chartMode === 'sentiment' ? 9 : 11}
             >
               <Label 
-                value="Sentiment Score" 
+                value={chartMode === 'sentiment' ? "Sentiment Score" : "Net Sentiment Sum"}
                 angle={-90} 
                 position="insideLeft" 
                 style={{ textAnchor: 'middle' }} 
@@ -361,13 +443,14 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
               cursor={{ stroke: '#666', strokeWidth: 1, strokeDasharray: '3 3' }}
               allowEscapeViewBox={{ x: true, y: true }}
               position={{ x: 'auto', y: 'auto' }}
+              animationDuration={0}
+              animationEasing="linear"
             />
             <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
             
             {/* Render lines for each source */}
             {sourceNames.map((sourceName, index) => {
               const color = getSourceColor(sourceName);
-              const lineStyle = getSourceLineStyle(sourceName);
               const country = getCountryFromSource(sourceName);
               
               return (
@@ -379,7 +462,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                       dataKey={`${sourceName}_power`}
                       stroke={color}
                       strokeWidth={2.5}
-                      strokeDasharray={selectedDimension === 'both' ? lineStyle : "0"}
+                      strokeDasharray="5 5"
                       dot={{ strokeWidth: 2, r: 4, fill: color }}
                       activeDot={{ 
                         r: 6, 
@@ -400,7 +483,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                       dataKey={`${sourceName}_moral`}
                       stroke={color}
                       strokeWidth={2.5}
-                      strokeDasharray={selectedDimension === 'both' ? "0" : lineStyle}
+                      strokeDasharray="0"
                       dot={{ strokeWidth: 2, r: 4, fill: color }}
                       activeDot={{ 
                         r: 6, 
@@ -419,6 +502,78 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
             })}
           </LineChart>
         </ResponsiveContainer>
+      )}
+      
+      {/* Permanent Legend Below Chart */}
+      {hasData && (
+        <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
+            Legend
+          </Typography>
+          <Grid container spacing={1}>
+            {sourceNames.map((sourceName) => {
+              const color = getSourceColor(sourceName);
+              const country = getCountryFromSource(sourceName);
+              
+              return (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={sourceName}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                    {/* Power line if shown */}
+                    {(selectedDimension === 'both' || selectedDimension === 'power') && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box 
+                          sx={{ 
+                            width: 24, 
+                            height: 3, 
+                            background: `linear-gradient(to right, ${color} 60%, transparent 60%)`,
+                            backgroundSize: '8px 3px',
+                            backgroundRepeat: 'repeat-x',
+                            borderRadius: 1
+                          }} 
+                        />
+                        <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                          {sourceName} (Power)
+                        </Typography>
+                      </Box>
+                    )}
+                    
+                    {/* Moral line if shown */}
+                    {(selectedDimension === 'both' || selectedDimension === 'moral') && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Box 
+                          sx={{ 
+                            width: 24, 
+                            height: 3, 
+                            bgcolor: color,
+                            borderRadius: 1
+                          }} 
+                        />
+                        <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                          {sourceName} (Moral)
+                        </Typography>
+                      </Box>
+                    )}
+                    
+                    {/* Country indicator */}
+                    <Box sx={{ ml: 3, mt: 0.5 }}>
+                      <Chip 
+                        label={country} 
+                        size="small" 
+                        sx={{
+                          backgroundColor: `${color}15`,
+                          color: color,
+                          fontSize: '0.65rem',
+                          height: 16,
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </Box>
       )}
     </Box>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Box, 
   Typography, 
@@ -35,6 +35,7 @@ import EntityTrendChart from '../components/EntityTrendChart';
 import SourceBiasChart from '../components/SourceBiasChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import IntelligenceInsights from '../components/IntelligenceInsights';
+import CountryEntityPage from './CountryEntityPage';
 
 // Types
 import { 
@@ -42,7 +43,8 @@ import {
   NewsSource, 
   EntitySentimentSummary,
   SentimentDistributions,
-  TrendData 
+  TrendData,
+  TrendPoint 
 } from '../types';
 
 const Dashboard: React.FC = () => {
@@ -51,7 +53,7 @@ const Dashboard: React.FC = () => {
   const [sources, setSources] = useState<NewsSource[]>([]);
   const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
   const [distributions, setDistributions] = useState<Record<string, SentimentDistributions>>({});
-  const [trends, setTrends] = useState<TrendData[]>([]);
+  const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [sourceComparisons, setSourceComparisons] = useState<any>({});
   
   // Selected items
@@ -60,14 +62,22 @@ const Dashboard: React.FC = () => {
   const [selectedTimeRange, setSelectedTimeRange] = useState<number>(30); // days
   const [selectedTrendEntities, setSelectedTrendEntities] = useState<string[]>([]);
   const [multiEntityTrends, setMultiEntityTrends] = useState<Record<string, any[]>>({});
-  const [selectedCountries, setSelectedCountries] = useState<string[]>(['USA', 'UK', 'Russia', 'China']);
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [sourcesTrends, setSourcesTrends] = useState<Record<string, any[]>>({});
+  
+  // Country analysis state
+  const [selectedCountry, setSelectedCountry] = useState<string>('USA');
   
   // UI state
   const [currentTab, setCurrentTab] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingData, setRefreshingData] = useState<boolean>(false);
+  
+  // Entity autocomplete state
+  const [entitySearchOptions, setEntitySearchOptions] = useState<Entity[]>([]);
+  const [entitySearchLoading, setEntitySearchLoading] = useState<boolean>(false);
+  const [entitySearchInput, setEntitySearchInput] = useState<string>('');
 
 
   // We'll fetch all data directly from the API
@@ -84,6 +94,13 @@ const Dashboard: React.FC = () => {
     fetchInitialData();
   }, []);
 
+  // Fetch initial source trends when entities and selectedEntity are ready
+  useEffect(() => {
+    if (entities.length > 0 && selectedEntity && selectedCountries.length === 0) {
+      fetchSourceTrendsForEntity(selectedEntity, selectedCountries);
+    }
+  }, [entities, selectedEntity, selectedCountries]);
+
   const fetchInitialData = async () => {
     setLoading(true);
     setError(null);
@@ -98,7 +115,7 @@ const Dashboard: React.FC = () => {
       
       // Set some default selected sources if available
       if (sourcesData.length > 0) {
-        setSelectedSources(sourcesData.slice(0, Math.min(3, sourcesData.length)).map(s => s.id));
+        setSelectedSources(sourcesData.slice(0, Math.min(3, sourcesData.length)).map((s: any) => s.id));
       }
       
       // Fetch entities (sorted by mention count)
@@ -218,6 +235,46 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  // Entity search with debouncing
+  const searchEntities = useCallback(async (query: string) => {
+    if (!query || query.length < 2) {
+      // For short queries, show popular entities from cache
+      setEntitySearchOptions(entities.slice(0, 20));
+      return;
+    }
+
+    setEntitySearchLoading(true);
+    try {
+      const searchResults = await entityApi.searchEntities(query, 15);
+      setEntitySearchOptions(searchResults);
+    } catch (err) {
+      console.warn('Entity search failed:', err);
+      // Fallback to local filtering
+      const filtered = entities.filter(entity => 
+        entity.name.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 15);
+      setEntitySearchOptions(filtered);
+    } finally {
+      setEntitySearchLoading(false);
+    }
+  }, [entities]);
+
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      searchEntities(entitySearchInput);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [entitySearchInput, searchEntities]);
+
+  // Initialize entity search options with popular entities
+  useEffect(() => {
+    if (entities.length > 0 && entitySearchOptions.length === 0) {
+      setEntitySearchOptions(entities.slice(0, 20));
+    }
+  }, [entities, entitySearchOptions.length]);
+
   const fetchTrendDataForEntities = async (entityNames: string[]) => {
     if (entityNames.length === 0) {
       setMultiEntityTrends({});
@@ -316,7 +373,7 @@ const Dashboard: React.FC = () => {
     return countries.sort();
   };
 
-  const handleTimeRangeChange = async (event: React.ChangeEvent<{ value: unknown }>) => {
+  const handleTimeRangeChange = async (event: any) => {
     const newRange = event.target.value as number;
     setSelectedTimeRange(newRange);
     
@@ -419,48 +476,51 @@ const Dashboard: React.FC = () => {
             <Tab label="Entity Analysis" />
             <Tab label="Source Comparison" />
             <Tab label="Temporal Trends" />
+            <Tab label="Country Analysis" />
             <Tab label="Statistics & Distributions" />
             <Tab label="Intelligence Insights" />
           </Tabs>
         </Paper>
         
-        {/* Filters section */}
-        <Paper sx={{ p: 2, mb: 4 }}>
-          <Grid container spacing={3} alignItems="center">
-            <Grid item xs={12} sm={6} md={4}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="time-range-label">Time Range</InputLabel>
-                <Select
-                  labelId="time-range-label"
-                  id="time-range-select"
-                  value={selectedTimeRange}
-                  onChange={handleTimeRangeChange}
-                >
-                  <MenuItem value={7}>Last 7 days</MenuItem>
-                  <MenuItem value={30}>Last 30 days</MenuItem>
-                  <MenuItem value={90}>Last 3 months</MenuItem>
-                  <MenuItem value={180}>Last 6 months</MenuItem>
-                  <MenuItem value={365}>Last year</MenuItem>
-                </Select>
-              </FormControl>
+        {/* Filters section - only show for tabs that need them */}
+        {currentTab !== 3 && currentTab !== 2 && ( /* Hide filters for Country Analysis and Temporal Trends tabs */
+          <Paper sx={{ p: 2, mb: 4 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} sm={6} md={4}>
+                <FormControl fullWidth size="small">
+                  <InputLabel id="time-range-label">Time Range</InputLabel>
+                  <Select
+                    labelId="time-range-label"
+                    id="time-range-select"
+                    value={selectedTimeRange}
+                    onChange={handleTimeRangeChange}
+                  >
+                    <MenuItem value={7}>Last 7 days</MenuItem>
+                    <MenuItem value={30}>Last 30 days</MenuItem>
+                    <MenuItem value={90}>Last 3 months</MenuItem>
+                    <MenuItem value={180}>Last 6 months</MenuItem>
+                    <MenuItem value={365}>Last year</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              
+              <Grid item xs={12} sm={6} md={8}>
+                <Autocomplete
+                  id="entity-autocomplete"
+                  options={entities.map(e => ({ label: `${e.name} (${e.mention_count || 0} mentions)`, value: e.name }))}
+                  value={entities.find(e => e.name === selectedEntity) ? { label: `${selectedEntity} (${entities.find(e => e.name === selectedEntity)?.mention_count || 0} mentions)`, value: selectedEntity } : null}
+                  onChange={(event, newValue) => {
+                    if (newValue) setSelectedEntity(newValue.value);
+                  }}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Select Entity (sorted by mention count)" size="small" fullWidth />
+                  )}
+                  isOptionEqualToValue={(option, value) => option.value === value?.value}
+                />
+              </Grid>
             </Grid>
-            
-            <Grid item xs={12} sm={6} md={8}>
-              <Autocomplete
-                id="entity-autocomplete"
-                options={entities.map(e => ({ label: `${e.name} (${e.mention_count || 0} mentions)`, value: e.name }))}
-                value={entities.find(e => e.name === selectedEntity) ? { label: `${selectedEntity} (${entities.find(e => e.name === selectedEntity)?.mention_count || 0} mentions)`, value: selectedEntity } : null}
-                onChange={(event, newValue) => {
-                  if (newValue) setSelectedEntity(newValue.value);
-                }}
-                renderInput={(params) => (
-                  <TextField {...params} label="Select Entity (sorted by mention count)" size="small" fullWidth />
-                )}
-                isOptionEqualToValue={(option, value) => option.value === value?.value}
-              />
-            </Grid>
-          </Grid>
-        </Paper>
+          </Paper>
+        )}
         
         {/* Main content based on selected tab */}
         {currentTab === 0 && (
@@ -616,18 +676,46 @@ const Dashboard: React.FC = () => {
                 <Grid item xs={12} sm={4}>
                   <Autocomplete
                     id="entity-for-trends"
-                    options={entities.slice(0, 50).map(e => ({ label: `${e.name} (${e.mention_count || 0} mentions)`, value: e.name }))}
-                    value={selectedEntity ? { label: `${selectedEntity} (${entities.find(e => e.name === selectedEntity)?.mention_count || 0} mentions)`, value: selectedEntity } : null}
+                    options={entitySearchOptions.map(e => ({ 
+                      label: `${e.name} (${e.mention_count || 0} mentions)`, 
+                      value: e.name,
+                      id: e.id 
+                    }))}
+                    value={selectedEntity ? { 
+                      label: `${selectedEntity} (${entities.find(e => e.name === selectedEntity)?.mention_count || 0} mentions)`, 
+                      value: selectedEntity,
+                      id: entities.find(e => e.name === selectedEntity)?.id || 0
+                    } : null}
                     onChange={(event, newValue) => {
                       if (newValue) {
                         setSelectedEntity(newValue.value);
                         fetchSourceTrendsForEntity(newValue.value, selectedCountries);
                       }
                     }}
+                    onInputChange={(event, newInputValue) => {
+                      setEntitySearchInput(newInputValue);
+                    }}
                     renderInput={(params) => (
-                      <TextField {...params} label="Select Entity" size="small" fullWidth />
+                      <TextField 
+                        {...params} 
+                        label="Search Entity" 
+                        size="small" 
+                        fullWidth
+                        placeholder="Type to search entities..."
+                        InputProps={{
+                          ...params.InputProps,
+                          endAdornment: (
+                            <>
+                              {entitySearchLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                              {params.InputProps.endAdornment}
+                            </>
+                          ),
+                        }}
+                      />
                     )}
                     isOptionEqualToValue={(option, value) => option.value === value?.value}
+                    loading={entitySearchLoading}
+                    filterOptions={(x) => x} // Disable built-in filtering since we handle it server-side
                   />
                 </Grid>
                 
@@ -781,6 +869,15 @@ const Dashboard: React.FC = () => {
         )}
         
         {currentTab === 3 && (
+          <CountryEntityPage
+            selectedCountry={selectedCountry}
+            selectedTimeRange={selectedTimeRange}
+            onCountryChange={setSelectedCountry}
+            onTimeRangeChange={setSelectedTimeRange}
+          />
+        )}
+
+        {currentTab === 4 && (
           <Box>
             <Alert severity="info" sx={{ mb: 3 }}>
               Statistical analysis helps identify unusual entity portrayals and media bias patterns.
@@ -806,7 +903,7 @@ const Dashboard: React.FC = () => {
           </Box>
         )}
 
-        {currentTab === 4 && (
+        {currentTab === 5 && (
           <IntelligenceInsights />
         )}
       </Box>

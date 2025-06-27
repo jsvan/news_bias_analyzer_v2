@@ -201,3 +201,20 @@ export interface ApiError {
   status?: number;
   retry_after?: number;
 }
+
+// Country Analysis Types
+export interface CountryEntityData {
+  entity_name: string;
+  entity_type: string;
+  mention_count: number;
+  avg_power_score: number;
+  avg_moral_score: number;
+  newspapers: Record<string, TrendPoint[]>; // newspaper_name -> daily_data
+}
+
+export interface CountryTopEntitiesResponse {
+  country: string;
+  entities: CountryEntityData[];
+  available_newspapers: string[];
+  time_period_days: number;
+}

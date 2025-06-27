@@ -29,6 +29,11 @@ class TemporalAnalyzer(BaseAnalyzer):
         # Initialize statistical database for storing results
         self.statistical_db = StatisticalDBManager()
     
+    def analyze(self):
+        """Run temporal analysis - called by statistical orchestrator."""
+        logger.info("Running weekly drift metrics analysis...")
+        return self.compute_weekly_drift_metrics()
+    
     def compute_weekly_drift_metrics(self, week_start: datetime = None):
         """Compute drift metrics for all sources."""
         start_date, end_date = self.get_week_boundaries(week_start)
@@ -154,10 +159,11 @@ class TemporalAnalyzer(BaseAnalyzer):
                 HAVING COUNT(DISTINCT na.source_id) >= 5  -- At least 5 sources
                    AND COUNT(*) >= 20  -- At least 20 mentions
             ),
-            source_variance AS (
+            source_averages AS (
                 SELECT 
                     em.entity_id,
-                    VARIANCE(AVG((em.power_score + em.moral_score) / 2.0)) as cross_source_var
+                    na.source_id,
+                    AVG((em.power_score + em.moral_score) / 2.0) as source_avg_sentiment
                 FROM entity_mentions em
                 JOIN news_articles na ON em.article_id = na.id
                 WHERE 
@@ -165,6 +171,13 @@ class TemporalAnalyzer(BaseAnalyzer):
                     AND em.entity_id IN (SELECT entity_id FROM entity_stats)
                 GROUP BY em.entity_id, na.source_id
                 HAVING COUNT(*) >= 2
+            ),
+            source_variance AS (
+                SELECT 
+                    entity_id,
+                    VARIANCE(source_avg_sentiment) as cross_source_var
+                FROM source_averages
+                GROUP BY entity_id
             )
             SELECT 
                 es.entity_id,
