@@ -45,26 +45,18 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
   // Get the selected distribution data
   const getDistributionData = (): DistributionDataPoint[] => {
     // Check which distributions are available
-    const hasGlobal = distributions.global?.pdf?.x && distributions.global?.pdf?.y;
-    const hasNational = distributions.national?.pdf?.x && distributions.national?.pdf?.y;
-    const hasSource = distributions.source?.pdf?.x && distributions.source?.pdf?.y;
+    const hasGlobal = distributions.global?.[dimension]?.pdf?.x && distributions.global?.[dimension]?.pdf?.y;
+    const hasNational = distributions.national?.[dimension]?.pdf?.x && distributions.national?.[dimension]?.pdf?.y;
+    const hasSource = distributions.source?.[dimension]?.pdf?.x && distributions.source?.[dimension]?.pdf?.y;
     
     if (!hasGlobal && !hasNational && !hasSource) {
       return []; // No distribution data available
     }
     
     // Get the pdf data for the selected dimension
-    const globalPdf = dimension === 'power' ? 
-      (distributions.global?.pdf || { x: [], y: [] }) : 
-      (distributions.global?.pdf || { x: [], y: [] });
-      
-    const nationalPdf = dimension === 'power' ? 
-      (distributions.national?.pdf || { x: [], y: [] }) : 
-      (distributions.national?.pdf || { x: [], y: [] });
-    
-    const sourcePdf = dimension === 'power' ? 
-      (distributions.source?.pdf || { x: [], y: [] }) : 
-      (distributions.source?.pdf || { x: [], y: [] });
+    const globalPdf = distributions.global?.[dimension]?.pdf || { x: [], y: [] };
+    const nationalPdf = distributions.national?.[dimension]?.pdf || { x: [], y: [] };
+    const sourcePdf = distributions.source?.[dimension]?.pdf || { x: [], y: [] };
     
     // Create data points for chart
     return globalPdf.x.map((value, index) => {
