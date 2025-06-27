@@ -109,8 +109,7 @@ const Dashboard: React.FC = () => {
       // Fetch real data from the API
       
       // Fetch news sources
-      const sourcesResponse = await api.get('/sources');
-      const sourcesData = sourcesResponse.data || [];
+      const sourcesData = await sourcesApi.getSources();
       setSources(sourcesData);
       
       // Set some default selected sources if available
@@ -119,8 +118,7 @@ const Dashboard: React.FC = () => {
       }
       
       // Fetch entities (sorted by mention count)
-      const entitiesResponse = await api.get('/entities?limit=200');
-      const entitiesData = entitiesResponse.data || [];
+      const entitiesData = await entityApi.getEntities({ limit: 200 });
       setEntities(entitiesData);
       
       // Set default selected entity if available
@@ -130,8 +128,8 @@ const Dashboard: React.FC = () => {
       
       // Fetch trending entities with sentiment scores
       try {
-        const trendingEntitiesResponse = await api.get('/stats/trending_entities');
-        setHighlightedEntities(trendingEntitiesResponse.data || []);
+        // No trending entities endpoint available yet
+        setHighlightedEntities([]);
       } catch (err) {
         console.warn('Could not fetch trending entities:', err);
         setHighlightedEntities([]);
@@ -193,8 +191,8 @@ const Dashboard: React.FC = () => {
       if (entities.length > 0) {
         // Refresh trending entities
         try {
-          const trendingEntitiesResponse = await api.get('/stats/trending_entities');
-          setHighlightedEntities(trendingEntitiesResponse.data || []);
+          // No trending entities endpoint available yet
+          setHighlightedEntities([]);
         } catch (err) {
           console.warn('Could not refresh trending entities:', err);
         }

@@ -54,7 +54,7 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
   const [selectedDimension, setSelectedDimension] = useState<'power' | 'moral'>(dimension);
   const [entityFilter, setEntityFilter] = useState<'all' | 'person' | 'country' | 'organization'>('all');
 
-  const handleSourceChange = (event: React.ChangeEvent<{ value: unknown }>) => {
+  const handleSourceChange = (event: any) => {
     setSelectedSources(event.target.value as number[]);
   };
 
@@ -67,7 +67,7 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
     }
   };
 
-  const handleEntityFilterChange = (event: React.ChangeEvent<{ value: unknown }>) => {
+  const handleEntityFilterChange = (event: any) => {
     setEntityFilter(event.target.value as 'all' | 'person' | 'country' | 'organization');
   };
 
