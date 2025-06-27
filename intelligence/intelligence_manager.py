@@ -37,7 +37,7 @@ class IntelligenceManager:
         self.statistical_db = StatisticalDBManager(statistical_db_path)
         
         # Note: Analysis modules will be initialized with session when analyze() is called
-        # since they require a database session parameter
+        # since they require a database session parameter (fixed constructor issue)
         
         logger.info("Intelligence Manager initialized")
     
