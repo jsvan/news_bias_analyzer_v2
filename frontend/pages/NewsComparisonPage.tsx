@@ -15,7 +15,7 @@ import {
   OutlinedInput,
   SelectChangeEvent
 } from '@mui/material';
-import api from '../services/api';
+import { entityApi, sourcesApi } from '../services/api';
 
 // Simple type definitions
 interface NewsSource {
@@ -65,25 +65,23 @@ const NewsComparisonPage: React.FC = () => {
         setLoading(true);
         
         // Fetch sources
-        const sourcesResponse = await api.get('/similarity/source_list');
-        setSources(sourcesResponse.data);
+        const sourcesData = await sourcesApi.getSources();
+        setSources(sourcesData);
         
         // Default to selecting first 3 sources
-        if (sourcesResponse.data && sourcesResponse.data.length > 0) {
-          setSelectedSources(sourcesResponse.data.slice(0, 3).map((s: NewsSource) => s.id));
+        if (sourcesData && sourcesData.length > 0) {
+          setSelectedSources(sourcesData.slice(0, 3).map((s: NewsSource) => s.id));
         }
         
-        // Fetch topics
-        const topicsResponse = await api.get('/similarity/topic_list');
-        setTopics(topicsResponse.data);
-        
         // Fetch entities
-        const entitiesResponse = await api.get('/similarity/entity_list');
-        setEntities(entitiesResponse.data);
+        const entitiesData = await entityApi.getEntities();
+        setEntities(entitiesData);
+        
+        // Topics API endpoint doesn't exist in our current API, so we'll skip this
         
         // Select first entity if available
-        if (entitiesResponse.data && entitiesResponse.data.length > 0) {
-          setSelectedEntity(entitiesResponse.data[0].name);
+        if (entitiesData && entitiesData.length > 0) {
+          setSelectedEntity(entitiesData[0].name);
         }
         
         setLoading(false);

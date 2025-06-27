@@ -28,7 +28,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import DownloadIcon from '@mui/icons-material/Download';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 
-import { api, entityApi, sourcesApi, statsApi } from '../services/api';
+import { entityApi, sourcesApi, statsApi } from '../services/api';
 import SentimentChart from '../components/SentimentChart';
 import SentimentDistributionChart from '../components/SentimentDistributionChart';
 import EntityTrendChart from '../components/EntityTrendChart';
