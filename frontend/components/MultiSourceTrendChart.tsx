@@ -442,7 +442,6 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
               content={<CustomTooltip />} 
               cursor={{ stroke: '#666', strokeWidth: 1, strokeDasharray: '3 3' }}
               allowEscapeViewBox={{ x: true, y: true }}
-              position={{ x: 'auto', y: 'auto' }}
               animationDuration={0}
               animationEasing="linear"
             />
