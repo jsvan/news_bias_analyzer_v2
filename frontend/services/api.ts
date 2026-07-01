@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { config, isGitHubPages, checkApiAvailability } from './config/environment';
+import { config, isGitHubPages, isStaticMode, checkApiAvailability } from './config/environment';
+import { staticData } from './staticData';
 
 // Create axios instance for backend API
 const api = axios.create({
@@ -13,8 +14,8 @@ const api = axios.create({
 // API availability state
 let apiAvailable = true;
 
-// Check API availability on startup for GitHub Pages
-if (isGitHubPages()) {
+// Check API availability on startup for GitHub Pages (static mode skips the API entirely)
+if (isGitHubPages() && !isStaticMode()) {
   checkApiAvailability(config.apiBaseUrl).then((available) => {
     apiAvailable = available;
     if (!available) {
@@ -76,10 +77,11 @@ const isApiUnavailable = () => isGitHubPages() && !apiAvailable;
 export const entityApi = {
   // Get list of entities
   getEntities: async (params = {}) => {
+    if (isStaticMode()) return staticData.getEntities(params);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real news analysis data.');
     }
-    
+
     const response = await api.get('/entities', { params });
     return response.data;
   },
@@ -106,6 +108,7 @@ export const entityApi = {
   
   // Get entity sentiment distribution
   getEntityDistribution: async (id: number, country?: string, sourceId?: number) => {
+    if (isStaticMode()) return staticData.getEntityDistribution(id);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real distribution data.');
     }
@@ -132,6 +135,7 @@ export const entityApi = {
 
   // Search entities with autocomplete
   searchEntities: async (query: string, limit: number = 15) => {
+    if (isStaticMode()) return staticData.searchEntities(query, limit);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to search real entities.');
     }
@@ -147,6 +151,7 @@ export const entityApi = {
 export const sourcesApi = {
   // Get list of news sources
   getSources: async (params = {}) => {
+    if (isStaticMode()) return staticData.getSources();
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real news sources.');
     }
@@ -191,6 +196,7 @@ export const statsApi = {
   
   // Get historical sentiment data
   getHistoricalSentiment: async (entityId: number, params = {}) => {
+    if (isStaticMode()) return staticData.getHistoricalSentiment(entityId, params);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real historical sentiment data.');
     }
@@ -201,6 +207,7 @@ export const statsApi = {
   
   // Get source-specific historical sentiment data
   getSourceHistoricalSentiment: async (entityId: number, params: any = {}) => {
+    if (isStaticMode()) return staticData.getSourceHistoricalSentiment(entityId, params);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real source historical sentiment data.');
     }
@@ -226,6 +233,7 @@ export const statsApi = {
 
   // Get top entities for a specific country
   getCountryTopEntities: async (country: string, params: any = {}) => {
+    if (isStaticMode()) return staticData.getCountryTopEntities(country, params);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real country entity data.');
     }

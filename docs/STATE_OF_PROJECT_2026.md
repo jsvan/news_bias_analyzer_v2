@@ -63,8 +63,12 @@ Do these on a machine that can run the full stack (DB + servers), not blind:
 
 ## Deployment plan (agreed direction)
 
-- **Dashboard**: precompute JSON snapshots from weekly stats and publish them with the
-  frontend to GitHub Pages. No hosted server needed for the public dashboard.
+- **Dashboard**: precompute JSON snapshots and publish them with the frontend to GitHub
+  Pages. No hosted server needed for the public dashboard. **Plumbing built (July 2026):**
+  `server/export_snapshots.py` dumps the API responses to `frontend/public/snapshots/`,
+  and the frontend auto-switches to them on Pages (`frontend/services/staticData.ts`,
+  `isStaticMode()`). Run the exporter against a real DB, commit, push. New visualizations
+  (compass, contested ranking, SVD map) should be added as new snapshot files + views.
 - **Extension**: needs a live API (`POST /analyze`). Host the consolidated FastAPI app
   on a small VPS/fly.io when ready; until then, localhost via the options page.
 - **Backfill**: seed history per `docs/SEEDING_AND_MODELS.md`, then `./run.sh analyze

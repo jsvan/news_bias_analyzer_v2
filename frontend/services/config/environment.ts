@@ -35,6 +35,15 @@ export const config = getEnvironmentConfig();
 
 export const isGitHubPages = () => config.deploymentContext === 'github-pages';
 
+/**
+ * Static-data mode: serve precomputed JSON snapshots (see server/export_snapshots.py)
+ * instead of a live API. On by default on GitHub Pages (there is no hosted backend
+ * unless VITE_API_BASE_URL is set); opt in elsewhere with VITE_DATA_MODE=static.
+ */
+export const isStaticMode = () =>
+  import.meta.env.VITE_DATA_MODE === 'static' ||
+  (isGitHubPages() && !import.meta.env.VITE_API_BASE_URL);
+
 /** Check if the API is reachable (used on GitHub Pages deployments). */
 export async function checkApiAvailability(apiBaseUrl: string): Promise<boolean> {
   if (!apiBaseUrl) {

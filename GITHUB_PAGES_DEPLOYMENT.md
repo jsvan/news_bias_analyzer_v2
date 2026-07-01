@@ -2,12 +2,19 @@
 
 This guide explains how to deploy the News Bias Analyzer frontend to GitHub Pages while maintaining backend functionality.
 
-> **Reality check (July 2026):** there is currently **no hosted backend**, so the GitHub
-> Pages deployment renders "API unavailable" unless you run the API locally or set
-> `VITE_API_BASE_URL` to a server you host. The agreed plan is to instead publish
-> precomputed JSON snapshots with the frontend so the public dashboard works with no
-> server — see `docs/STATE_OF_PROJECT_2026.md` (Deployment plan). This doc remains
-> accurate for the Pages mechanics themselves.
+> **Reality check (July 2026):** there is currently **no hosted backend**. The dashboard
+> instead supports **static snapshot mode**: on GitHub Pages (without `VITE_API_BASE_URL`)
+> it reads precomputed JSON from `frontend/public/snapshots/` instead of calling an API.
+> To make the public site functional:
+>
+> 1. On the machine with the database: `python -m server.export_snapshots --entities 200`
+> 2. Commit `frontend/public/snapshots/` and push — the Pages workflow ships it.
+>
+> Re-run + re-commit to refresh the data (cron it with the scraper if you like). Static
+> mode degrades gracefully: search covers only snapshotted entities, per-source country
+> filtering falls back to country aggregates, and time ranges clamp to snapshotted ones
+> (see `frontend/services/staticData.ts`). This doc remains accurate for the Pages
+> mechanics themselves.
 
 ## 🚀 Quick Setup
 
