@@ -38,6 +38,7 @@ from database.services import DatabaseService
 from database.config import AnalysisConfig, LoggingConfig
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
 from analyzer.hotelling_t2 import HotellingT2Calculator
+from analyzer.entity_resolution import known_entity_shortlist, format_shortlist_block
 
 # Setup directories
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -146,8 +147,28 @@ def get_unanalyzed_articles(session: Session, limit: int = BATCH_SIZE) -> List[N
         logger.error(f"Error getting unanalyzed articles: {e}")
         return []
 
-def prepare_batch_input(articles: List[NewsArticle], model: str) -> Tuple[str, Dict[str, NewsArticle]]:
-    """Prepare batch input file content and article lookup mapping."""
+def get_known_entities(session: Session, limit: int = 2000) -> List[Tuple[str, int]]:
+    """Top canonical entities by mention count, for known-entity prompt injection."""
+    try:
+        rows = (session.query(Entity.name, func.count(EntityMention.id).label("n"))
+                .join(EntityMention, EntityMention.entity_id == Entity.id)
+                .filter(Entity.canonical_id == None)
+                .group_by(Entity.name)
+                .order_by(func.count(EntityMention.id).desc())
+                .limit(limit).all())
+        return [(name, n) for name, n in rows]
+    except Exception as e:
+        logger.error(f"Error loading known entities: {e}")
+        return []
+
+def prepare_batch_input(articles: List[NewsArticle], model: str,
+                        known_entities: Optional[List[Tuple[str, int]]] = None) -> Tuple[str, Dict[str, NewsArticle]]:
+    """Prepare batch input file content and article lookup mapping.
+
+    If known_entities is provided, each article's prompt gets a shortlist of
+    already-tracked entities matched in its text, so the model reuses canonical
+    names (entity-resolution layer 0 — see docs/ROADMAP_IDEAS_2026.md §12).
+    """
     batch_lines = []
     article_lookup = {}  # Maps custom_id to article
     
@@ -168,6 +189,10 @@ def prepare_batch_input(articles: List[NewsArticle], model: str) -> Tuple[str, D
         
         # Truncate text if too long (15000 chars should be safe)
         analysis_text = f"Title: {title}\n{source_info}\n{text[:15000]}"
+
+        if known_entities:
+            shortlist = known_entity_shortlist(analysis_text, known_entities)
+            analysis_text += format_shortlist_block(shortlist)
         
         # Create batch request line
         batch_line = {
@@ -650,8 +675,12 @@ def create_new_batch(session: Session) -> bool:
     
     logger.info(f"Found {len(articles)} unanalyzed articles for new batch")
     
-    # Prepare batch input
-    batch_content, article_lookup = prepare_batch_input(articles, model)
+    # Prepare batch input (known-entity injection is opt-in until validated on a pilot)
+    known_entities = None
+    if os.environ.get("KNOWN_ENTITY_INJECTION") == "1":
+        known_entities = get_known_entities(session)
+        logger.info(f"Known-entity injection on: {len(known_entities)} canonical names loaded")
+    batch_content, article_lookup = prepare_batch_input(articles, model, known_entities)
     
     # Create batch file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

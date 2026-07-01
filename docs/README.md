@@ -30,6 +30,7 @@ The system includes a web dashboard, browser extension, API backend, data proces
 ### Developer Documentation
 
 - [**State of the Project (2026)**](STATE_OF_PROJECT_2026.md) - Current reality, cleanup log, deferred work, deployment plan
+- [**Roadmap Ideas (2026)**](ROADMAP_IDEAS_2026.md) - Analysis/visualization/product ideas, priorities, entity-resolution design
 - [**Seeding & Models**](SEEDING_AND_MODELS.md) - Bulk article datasets for backfill, model pricing, local-model options
 - [**API Reference**](API_REFERENCE.md) - Detailed API documentation with endpoints, parameters, and responses
 - [**API Usage Examples**](API_USAGE_EXAMPLES.md) - Code examples for using the API in different languages
