@@ -2,8 +2,10 @@
 import { CONFIG } from '../config.js';
 
 export class ApiService {
-  constructor() {
-    this.baseUrl = CONFIG.API_ENDPOINT;
+  // Read live so the user-configured endpoint (loaded async from
+  // chrome.storage in config.js) applies even after construction.
+  get baseUrl() {
+    return CONFIG.API_ENDPOINT;
   }
 
   // Health check endpoint
