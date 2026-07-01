@@ -130,8 +130,13 @@ if API dependence bothers you.
 ## Suggested seeding pipeline (when on the target machine)
 
 1. `./run.sh docker up && ./run.sh docker init` — database up.
-2. New script (to write): stream `stanford-oval/ccnews` year by year, filter to our 124
-   source domains, insert via `insert_articles_batch` with `analysis_status='unanalyzed'`.
+2. `pip install datasets`, then `python -m scrapers.seed_from_ccnews --year 2023 --dry-run`
+   to see match rates and unmatched domains (grow `DOMAIN_ALIASES` in that script if a
+   big source isn't matching), then drop `--dry-run` (add `--limit` for a pilot).
+   The script streams `stanford-oval/ccnews`, filters to our configured source domains,
+   and inserts via the scraper's own `insert_articles_batch` (URL-MD5 ids → automatic
+   dedup, lands as `unanalyzed`). `--self-test` runs its logic checks with no
+   network/deps.
 3. `OPENAI_MODEL=gpt-5-nano ./run.sh analyze daemon` — existing batch daemon picks up the
    backlog automatically (5 concurrent batches max, already enforced).
 4. `./run.sh statistics` — rebuild weekly stats/baselines over the new history.
