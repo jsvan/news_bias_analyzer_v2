@@ -49,41 +49,44 @@ The News Bias Analyzer follows a modular structure:
 
 ```
 news_bias_analyzer/
-├── scrapers/                 # News scraping modules
-│   ├── base_scraper.py       # Base scraper class
-│   ├── rss_scraper.py        # RSS feed scraper
-│   ├── scheduler.py          # Scheduling system
-│   └── news_sources.py       # Source configurations
+├── scrapers/                 # News scraping (RSS + article extraction)
+│   ├── scrape_to_db.py       # Entry point: scrape and insert articles
+│   ├── parallel_scraper.py   # Async RSS fetch + content extraction
+│   └── news_sources.py       # Hardcoded list of ~124 sources / 177 feeds
 │
-├── processors/               # Text processing and OpenAI integration
-│   ├── openai_integration.py # OpenAI API client
-│   ├── article_processor.py  # Article processing pipeline
-│   ├── prompts.py            # LLM prompts
-│   └── config.py             # Configuration management
+├── analyzer/                 # OpenAI entity-sentiment extraction
+│   ├── batch_analyzer.py     # Main path: OpenAI Batch API daemon
+│   ├── openai_integration.py # Synchronous path (used by /analyze endpoint)
+│   ├── prompts.py            # LLM prompts (power/moral scoring)
+│   ├── config.py             # Model + cost configuration
+│   └── hotelling_t2.py       # Weekly statistics / extremeness scoring
 │
-├── database/                 # Database layer
+├── database/                 # Postgres (TimescaleDB) layer
 │   ├── models.py             # SQLAlchemy models
-│   ├── db.py                 # Database manager
-│   ├── migrations/           # Alembic migrations
-│   └── seed.py               # Test data generation
+│   ├── db.py                 # Engine/session management
+│   ├── services.py           # Service facade (uses repositories.py)
+│   └── migrations/           # Alembic migrations
 │
-├── analysis/                 # Statistical analysis
-│   ├── statistical_models.py # Distribution and testing models
-│   └── trend_analysis.py     # Trend detection
+├── server/                   # FastAPI apps (run via server_manager)
+│   ├── extension_api.py      # API for the Chrome extension
+│   └── dashboard_api.py      # API for the web dashboard
 │
-├── api/                      # API service
-│   ├── main.py               # FastAPI application
-│   ├── routes/               # API endpoints
-│   ├── models.py             # Pydantic models
-│   └── auth.py               # Authentication
+├── intelligence/             # Statistical anomaly detection (partial)
+├── clustering/               # Source similarity computation
+├── statistical_database/     # Separate SQLite DB for intelligence results
+├── scheduler/                # Cron-style job scheduler
 │
-├── frontend/                 # Frontend components
-│   └── browser_extension/    # Chrome extension
-│
-├── tests/                    # Test suite
+├── frontend/                 # React + Vite dashboard
+│   └── api/                  # (Python routers imported by dashboard_api)
+├── extension/                # Chrome extension (Manifest V3, unpacked)
+│   └── api/                  # (Python routers imported by extension_api)
 │
 └── docs/                     # Documentation
 ```
+
+Note the wart: `frontend/api/` and `extension/api/` contain *Python* routers
+imported by the servers, despite living inside JS trees. See
+`docs/STATE_OF_PROJECT_2026.md` for planned restructuring.
 
 ## Coding Standards
 
@@ -252,7 +255,7 @@ def test_entity_extraction():
         ]
     }
     
-    with patch('processors.openai_integration.OpenAIProcessor.analyze_text', return_value=mock_response):
+    with patch('analyzer.openai_integration.SentimentAnalyzer.analyze_text', return_value=mock_response):
         processor = ArticleProcessor(use_database=False)
         result = processor.process_article(test_article)
         
@@ -274,7 +277,7 @@ We use GitHub Actions for CI/CD. Workflows include:
 
 ### Local Development
 
-1. Load the extension in Chrome from `frontend/browser_extension`
+1. Load the extension in Chrome from `extension`
 2. Enable Chrome extension debugging
 3. Make changes to the source files
 4. Reload the extension to test changes
@@ -282,7 +285,7 @@ We use GitHub Actions for CI/CD. Workflows include:
 ### Extension Structure
 
 - `manifest.json`: Extension configuration
-- `popup.html`, `popup.js`: Extension popup UI
+- `html/popup.html`, `js/popup-new.js` + `js/components/`: Extension popup UI
 - `content.js`: Content script that runs on pages
 - `background.js`: Background service worker
 

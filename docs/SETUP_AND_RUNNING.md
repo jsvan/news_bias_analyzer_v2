@@ -41,36 +41,12 @@ pip install -r requirements.txt
 
 ### 4. Set Environment Variables
 
-Create a `.env` file in the project root:
-
 ```bash
-touch .env
+cp .env.example .env
+# then edit .env and set your OPENAI_API_KEY
 ```
 
-Add the following content (adjust as needed):
-
-```
-# OpenAI API credentials
-OPENAI_API_KEY=your_openai_api_key_here
-
-# Database connection
-DATABASE_URL=postgresql://newsbias:newsbias@localhost:5432/news_bias
-
-# Logging
-LOG_LEVEL=INFO
-```
-
-Alternatively, you can set these variables in your environment:
-
-```bash
-# macOS/Linux
-export OPENAI_API_KEY=your_openai_api_key_here
-export DATABASE_URL=postgresql://newsbias:newsbias@localhost:5432/news_bias
-
-# Windows
-set OPENAI_API_KEY=your_openai_api_key_here
-set DATABASE_URL=postgresql://newsbias:newsbias@localhost:5432/news_bias
-```
+`run.sh` loads `.env` automatically. See `.env.example` for all supported variables.
 
 ## Database Setup
 
@@ -114,116 +90,57 @@ The News Bias Analyzer Dashboard provides visualization of the collected and ana
 
 ### 1. Starting the Dashboard
 
-The simplest way to run the dashboard is using the provided script:
-
 ```bash
-# Make the script executable if needed
-chmod +x run_dashboard.sh
+# Start the API servers (extension + dashboard APIs)
+./run.sh server
 
-# Run the dashboard (API and frontend)
-./run_dashboard.sh
+# In another terminal, start the frontend dev server
+./run.sh dashboard
 ```
-
-This will:
-- Start the API server on port 8000
-- Start the frontend on port 3001
-- Connect to your database using the DATABASE_URL from environment variables
 
 ### 2. Accessing the Dashboard
 
 Once started, you can access:
-- Dashboard interface: http://localhost:3001
+- Dashboard interface: the URL Vite prints (typically http://localhost:5173)
 - API endpoints: http://localhost:8000
 
 ### 3. Running Components Separately
 
-If you prefer to run components individually:
-
 ```bash
-# Run just the backend API
-./run_dashboard.sh --backend
-
-# Run just the frontend
-./run_dashboard.sh --frontend
-
-# Set up the database
-./run_dashboard.sh --setup-db
+# Only the extension API or only the dashboard API
+./run.sh server extension
+./run.sh server dashboard
 ```
 
 ## Data Collection and Analysis
 
-### 1. Starting the Scraper Scheduler
-
-The scheduler runs scraping jobs at configured intervals (daily, weekly, monthly).
+### 1. Scraping Articles
 
 ```bash
-# Run the full scraper with analysis
-./run_full_scraper.sh
-
-# Run the scraper without analysis
-./run_scraper_no_analysis.sh
+# Scrape all configured sources (limit per feed from SCRAPER_LIMIT_PER_FEED in .env)
+./run.sh scraper
 ```
 
 ### 2. Running Analysis on Articles
 
 ```bash
-# Analyze all articles
-./run_analyze_all.sh
+# Submit unanalyzed articles to the OpenAI Batch API (one-time check)
+./run.sh analyze
 
-# Analyze only articles that haven't been analyzed yet
-./run_analyze_existing.sh
+# Run continuously: submits new batches and collects finished ones
+./run.sh analyze daemon
+
+# Check batch progress
+./run.sh analyze status
 ```
 
-## Testing the Components
-
-### 1. Entity Extraction and Sentiment Analysis
+### 3. Running Statistical Analysis
 
 ```bash
-# Basic entity extraction test
-python -m processors.examples.entity_extraction_example
+# Weekly statistics, intelligence findings, and source clustering
+./run.sh statistics
 
-# With framing analysis
-python -m processors.examples.entity_extraction_example --framing
-
-# Using a specific model
-python -m processors.examples.entity_extraction_example --model gpt-4.1-nano
-```
-
-### 2. Test Scraping a Single Source
-
-```bash
-# Test scraping BBC
-python -m scrapers.rss_scraper BBC
-```
-
-## Advanced Configuration
-
-### Dashboard API Settings
-
-The dashboard API settings are configured in `api/fixed_api.py`. The main settings include:
-
-- Database connection URL
-- CORS configuration for cross-origin requests
-- Sample data for fallback when the database is unavailable
-
-### Using Docker
-
-```bash
-# Start all services
-docker-compose up -d
-
-# Start specific service
-docker-compose up -d api
-```
-
-### Running Statistical Analysis
-
-```bash
-# Generate entity sentiment distributions
-python -m analysis.generate_distributions
-
-# Analyze sentiment trends
-python -m analysis.trend_analysis --entity "United States" --days 90
+# Options: --force, --intelligence-only, --clustering-only, --status
 ```
 
 ## Monitoring and Maintenance
@@ -291,13 +208,6 @@ alembic upgrade head
 ./run.sh analyze recover-batches --today
 ```
 
-### 5. API Usage Monitoring
-
-```bash
-# View OpenAI API usage statistics
-python -m processors.usage_stats
-```
-
 ## Troubleshooting
 
 ### 1. Dashboard Connection Issues
@@ -316,26 +226,26 @@ If the dashboard shows "Failed to load data" or connection errors:
 
 3. Ensure the database connection is working:
    ```bash
-   psql -U newsbias -d news_bias -h localhost
+   psql -U postgres -d news_bias -h localhost   # or: ./run.sh docker shell
    ```
 
 ### 2. Database Connection Errors
 
 - Verify PostgreSQL is running: `pg_isready`
 - Check credentials in `.env` file
-- Ensure database exists: `psql -U newsbias -c "SELECT 1" news_bias`
+- Ensure database exists: `psql -U postgres -c "SELECT 1" news_bias`
 
 ### 3. OpenAI API Errors
 
 - Verify API key is valid
 - Check API rate limits and quotas
-- Test with minimal example: `python -m processors.test_openai_connection`
+- Run the analyzer diagnostic: `./run.sh analyze diag`
 
 ### 4. Scraper Issues
 
 - Check internet connectivity
-- Verify site hasn't changed its structure
-- Test single source: `python -m scrapers.rss_scraper CNN --verbose`
+- Verify the feed hasn't moved: feed URLs live in `scrapers/news_sources.py`
+- Run with a small limit: `SCRAPER_LIMIT_PER_FEED=1 ./run.sh scraper`
 
 ## Security Notes
 

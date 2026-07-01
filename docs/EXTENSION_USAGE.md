@@ -14,7 +14,7 @@ This guide explains how to use the News Bias Analyzer browser extension to analy
    - Open Chrome and navigate to `chrome://extensions/`
    - Enable "Developer mode" (toggle in top-right)
    - Click "Load unpacked"
-   - Select the `frontend/browser_extension` directory from this project
+   - Select the `extension` directory from this project
 
 2. Pin the extension to your toolbar for easy access
 
@@ -27,7 +27,7 @@ This guide explains how to use the News Bias Analyzer browser extension to analy
    Load as a temporary extension:
    - Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
    - Click "Load Temporary Add-on"
-   - Select the `manifest.json` file in the `frontend/browser_extension` directory
+   - Select the `manifest.json` file in the `extension` directory
 
 ## Basic Usage
 

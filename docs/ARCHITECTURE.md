@@ -66,7 +66,7 @@ The system is built on several key principles:
 - Abstraction of individual mentions to their larger cultural/ideological forces
 
 **Technologies**:
-- OpenAI API with gpt-4.1-nano model for cost-efficiency
+- OpenAI API with a cheap small model (default `gpt-4.1-nano`, override via `OPENAI_MODEL`; see `docs/SEEDING_AND_MODELS.md` for current cheaper options)
 - Batch API processing for high-volume analysis
 - Async processing for real-time extension analysis
 

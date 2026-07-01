@@ -2,6 +2,13 @@
 
 This guide explains how to deploy the News Bias Analyzer frontend to GitHub Pages while maintaining backend functionality.
 
+> **Reality check (July 2026):** there is currently **no hosted backend**, so the GitHub
+> Pages deployment renders "API unavailable" unless you run the API locally or set
+> `VITE_API_BASE_URL` to a server you host. The agreed plan is to instead publish
+> precomputed JSON snapshots with the frontend so the public dashboard works with no
+> server — see `docs/STATE_OF_PROJECT_2026.md` (Deployment plan). This doc remains
+> accurate for the Pages mechanics themselves.
+
 ## 🚀 Quick Setup
 
 ### 1. Enable GitHub Pages

@@ -29,12 +29,12 @@ The system includes a web dashboard, browser extension, API backend, data proces
 
 ### Developer Documentation
 
+- [**State of the Project (2026)**](STATE_OF_PROJECT_2026.md) - Current reality, cleanup log, deferred work, deployment plan
+- [**Seeding & Models**](SEEDING_AND_MODELS.md) - Bulk article datasets for backfill, model pricing, local-model options
 - [**API Reference**](API_REFERENCE.md) - Detailed API documentation with endpoints, parameters, and responses
 - [**API Usage Examples**](API_USAGE_EXAMPLES.md) - Code examples for using the API in different languages
 - [**Architecture Overview**](ARCHITECTURE.md) - System design, components, and data flow
 - [**Development Guide**](DEVELOPMENT_GUIDE.md) - Setup, standards, and procedures for developers
-- [**Deployment Infrastructure**](deployment_infrastructure.md) - Docker and infrastructure overview
-- [**AWS Deployment**](aws_deployment.md) - AWS deployment guide for solo developers
 - [**Monitoring Guide**](monitoring_guide.md) - Cost-effective monitoring solutions
 
 ### System Diagrams
@@ -54,10 +54,10 @@ The system includes a web dashboard, browser extension, API backend, data proces
 
 ### For Developers
 
-1. Begin with the [**Architecture Overview**](ARCHITECTURE.md) to understand the system
-2. Set up your development environment using the [**Development Guide**](DEVELOPMENT_GUIDE.md)
-3. Review the [**API Reference**](API_REFERENCE.md) for integration with other systems
-4. Understand deployment options with [**Deployment Infrastructure**](deployment_infrastructure.md)
+1. Begin with the [**State of the Project (2026)**](STATE_OF_PROJECT_2026.md) for current reality
+2. Then the [**Architecture Overview**](ARCHITECTURE.md) to understand the system
+3. Set up your development environment using the [**Development Guide**](DEVELOPMENT_GUIDE.md)
+4. Review the [**API Reference**](API_REFERENCE.md) for integration with other systems
 
 ## Key Concepts
 

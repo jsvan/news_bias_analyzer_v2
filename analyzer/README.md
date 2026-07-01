@@ -3,19 +3,19 @@
 The analyzer component processes news articles to extract entities and analyze how news sources implicitly establish moral direction through entity portrayal. Based on principles from Peter Pomerantsev's work on information manipulation, this component reveals the implicit moral compass embedded in news narratives.
 
 ## Features
-- OpenAI API integration with gpt-4.1-nano for efficient analysis
+- OpenAI API integration with a cheap small model (default gpt-4.1-nano, override via OPENAI_MODEL — see docs/SEEDING_AND_MODELS.md)
 - Entity extraction identifying moral anchors in news content
 - Two-dimensional analysis: power portrayal and alignment with implicit societal vision
 - Identification of strategic entity positioning to guide reader judgment
 - Extraction of key phrases that reveal subtle moral positioning
 
 ## Key Files
-- `openai_integration.py` - Core OpenAI API wrapper using gpt-4.1-nano
-- `article_processor.py` - Main article processing pipeline
+- `batch_analyzer.py` - Main analysis path: OpenAI Batch API daemon
+- `openai_integration.py` - Synchronous OpenAI wrapper (used by the extension API's real-time /analyze)
 - `prompts.py` - Carefully crafted prompts that guide the cultural orientation analysis
-- `config.py` - Configuration settings
-- `direct_analysis.py` - Utility for direct article analysis
-- `batch_analyzer.py` - Efficient batch processing of articles
+- `config.py` - Configuration settings (model, cost limits)
+- `process_local_batches.py` - Recover/continue partially downloaded batches
+- `hotelling_t2.py` - Weekly statistics and article extremeness scoring
 
 ## Philosophical Approach
 
