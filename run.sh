@@ -69,8 +69,6 @@ show_help() {
   echo "  analyze reset-database  Reset database by clearing entity data and article status"
   echo "  statistics [OPTIONS]   Run statistical analysis and clustering with throttling"
   echo "                         Options: --force, --intelligence-only, --clustering-only, --status"
-  echo "  batch                  Run the batch analyzer"
-  echo "  api                    Start the API server"
   echo "  dashboard              Start the web dashboard"
   echo "  extension              Build the browser extension"
   echo "  server [TYPE]          Start the API servers (TYPE: extension, dashboard, or both [default])"
@@ -106,22 +104,6 @@ run_analyzer() {
   python -m analyzer.batch_analyzer --limit $LIMIT
 }
 
-# Run the batch analyzer
-run_batch() {
-  setup_python_env
-  cd "$PROJECT_ROOT"
-  echo -e "${GREEN}Running Batch Analyzer...${NC}"
-  python -m processors.batch_prepare
-}
-
-# Start the API server
-start_api() {
-  setup_python_env
-  cd "$PROJECT_ROOT"
-  echo -e "${GREEN}Starting API Server...${NC}"
-  uvicorn api.app:app --reload --host 0.0.0.0 --port 8000
-}
-
 # Start the dashboard
 start_dashboard() {
   cd "$PROJECT_ROOT/frontend"
@@ -136,10 +118,10 @@ start_dashboard() {
 
 # Build the extension
 build_extension() {
-  cd "$PROJECT_ROOT/frontend/browser_extension"
-  echo -e "${GREEN}Building Browser Extension...${NC}"
-  echo -e "${BLUE}Extension files are in the browser_extension directory${NC}"
-  echo -e "${BLUE}Load the unpacked extension in Chrome from this directory${NC}"
+  cd "$PROJECT_ROOT/extension"
+  echo -e "${GREEN}Browser Extension${NC}"
+  echo -e "${BLUE}The extension is plain unpacked files — no build step needed${NC}"
+  echo -e "${BLUE}Load the unpacked extension in Chrome from: $PROJECT_ROOT/extension${NC}"
 }
 
 # Function previously used for local environment setup (now removed in favor of docker)
@@ -395,12 +377,6 @@ case "$1" in
   statistics)
     shift  # Remove the 'statistics' command, leaving any arguments
     run_statistics "$@"
-    ;;
-  batch)
-    run_batch
-    ;;
-  api)
-    start_api
     ;;
   dashboard)
     start_dashboard
