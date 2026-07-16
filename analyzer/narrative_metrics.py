@@ -164,6 +164,57 @@ def svd_source_map(matrix, n_dims: int = 2):
             var[:n_dims] / var.sum() if var.sum() else var[:n_dims])
 
 
+def residual_series(source_series, global_series):
+    """Per-window deviation of a source's series from the global mean series.
+
+    Isolates "this source moved on its own" (residual shift) from "everyone moved
+    together" (global shift) - run pettitt_test on this instead of the raw series to
+    find source-specific surprise rather than a shared, expected event.
+    """
+    s, g = np.asarray(source_series, float), np.asarray(global_series, float)
+    return s - g
+
+
+def pettitt_test(series):
+    """Pettitt's non-parametric single-changepoint test for a shift in a series' level.
+
+    series: 1D array-like: NaN entries are dropped before testing (a gap means "no data
+    that window," not "no change there") - changepoint_index refers to the position in
+    the *surviving* (non-NaN) sequence, so callers must map it back through the same
+    NaN-filtered index if they need the original window number.
+
+    Returns None if fewer than 8 valid points remain (too little power to say anything).
+    Otherwise a dict: changepoint_index (last index of the "before" segment - the shift
+    falls between it and the next point), statistic (K, Pettitt's U-statistic magnitude),
+    p_value (two-sided, via the standard asymptotic approximation), mean_before,
+    mean_after. Caller decides the significance threshold (e.g. p < 0.05).
+    """
+    x = np.asarray(series, float)
+    valid_idx = np.where(~np.isnan(x))[0]
+    x = x[valid_idx]
+    n = len(x)
+    if n < 8:
+        return None
+
+    # U_t = sum_{i<=t} sum_{j>t} sign(x_i - x_j) for each candidate split t (0-indexed,
+    # "before" = x[:t+1], "after" = x[t+1:]). Vectorized via the full sign matrix rather
+    # than a per-t double loop - same O(n^2) cost, just done once.
+    sign_matrix = np.sign(x[:, None] - x[None, :])
+    U = np.array([sign_matrix[:t + 1, t + 1:].sum() for t in range(n - 1)])
+    k_idx = int(np.argmax(np.abs(U)))
+    K = float(abs(U[k_idx]))
+
+    p_value = min(1.0, 2.0 * np.exp(-6.0 * K ** 2 / (n ** 3 + n ** 2)))
+
+    return {
+        "changepoint_index": int(valid_idx[k_idx]),
+        "statistic": K,
+        "p_value": float(p_value),
+        "mean_before": float(x[:k_idx + 1].mean()),
+        "mean_after": float(x[k_idx + 1:].mean()),
+    }
+
+
 def shrunk_means(cell_sums, cell_counts, prior_strength: float = 10.0):
     """Empirical-Bayes shrinkage for sparse entity×source cells.
 
@@ -240,6 +291,43 @@ def self_test():
     global_mean = 1998.0 / 1001
     assert abs(shrunk[0] - global_mean) < abs(-2.0 - global_mean) * 0.2
     assert abs(shrunk[1] - 2.0) < 0.01
+
+    # residual series: a source identical to the global mean has ~zero residual;
+    # a source that jumps away from an otherwise-flat global mean shows the jump
+    global_series = np.full(20, 0.5)
+    assert np.allclose(residual_series(global_series, global_series), 0.0)
+    source_series = np.concatenate([np.full(10, 0.5), np.full(10, -1.0)])
+    resid = residual_series(source_series, global_series)
+    assert np.allclose(resid[:10], 0.0) and np.allclose(resid[10:], -1.5)
+
+    # Pettitt test: injected breakpoint at the midpoint of a flat-then-shifted series
+    # must be found (within a couple windows) and called significant
+    flat_then_shift = np.concatenate([
+        rng.normal(0.5, 0.15, 30), rng.normal(-1.0, 0.15, 30)
+    ])
+    result = pettitt_test(flat_then_shift)
+    assert result is not None
+    assert abs(result["changepoint_index"] - 29) <= 2, result
+    assert result["p_value"] < 0.05, result
+    assert result["mean_before"] > 0 and result["mean_after"] < 0
+
+    # Pettitt test: pure noise around a constant level should NOT look significant
+    no_shift = rng.normal(0.2, 0.3, 60)
+    null_result = pettitt_test(no_shift)
+    assert null_result is not None and null_result["p_value"] > 0.05, null_result
+
+    # Pettitt test: too few points -> None, not a spurious result
+    assert pettitt_test([1, 2, 3]) is None
+
+    # Pettitt test: NaN gaps are dropped, not treated as zeros - changepoint_index maps
+    # back through the original (pre-drop) index positions
+    with_gaps = np.concatenate([
+        rng.normal(0.5, 0.1, 20), [np.nan, np.nan], rng.normal(-1.2, 0.1, 20)
+    ])
+    gap_result = pettitt_test(with_gaps)
+    # last "before" index is 19 (0-indexed, 20 pre-gap points); the two NaNs at 20,21
+    # are dropped, so no valid index falls between the true break and this result
+    assert gap_result is not None and gap_result["changepoint_index"] == 19, gap_result
 
     print("narrative_metrics self-test OK")
 
