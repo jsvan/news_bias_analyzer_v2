@@ -3,6 +3,50 @@ Collection of prompts for OpenAI API integration.
 This file contains various prompts for different analysis tasks.
 """
 
+# Single source of truth for the entity_type enum - used both in the prompt text below
+# and as the Structured Outputs JSON schema enum (analyzer/batch_analyzer.py,
+# analyzer/openai_integration.py) so the two can't drift apart from each other.
+ENTITY_TYPES = ["country", "person", "business", "organization", "event", "concept"]
+
+# OpenAI Structured Outputs schema for ENTITY_SENTIMENT_PROMPT's response, in strict mode:
+# entity_type can only ever be one of ENTITY_TYPES - the API rejects anything else instead
+# of accepting free-text drift. Pass as response_format={"type": "json_schema",
+# "json_schema": {"name": "entity_sentiment", "strict": True, "schema": ENTITY_SENTIMENT_SCHEMA}}.
+ENTITY_SENTIMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "source_country": {"type": "string"},
+        "entities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "entity": {"type": "string"},
+                    "entity_type": {"type": "string", "enum": ENTITY_TYPES},
+                    "power_score": {"type": "number"},
+                    "moral_score": {"type": "number"},
+                    "mentions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "context": {"type": "string"},
+                            },
+                            "required": ["text", "context"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["entity", "entity_type", "power_score", "moral_score", "mentions"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["source_country", "entities"],
+    "additionalProperties": False,
+}
+
 # Core entity extraction and sentiment scoring prompt
 # Focuses on objective extraction without making evaluative judgments
 ENTITY_SENTIMENT_PROMPT = """
@@ -54,38 +98,24 @@ For each key entity, provide:
 
 VALID ENTITY TYPES WITH EXAMPLES:
 
-**POLITICAL ENTITIES**:
-1. **sovereign_state**: Countries (USA, Israel, China, Russia, Ukraine)
-2. **political_organization**: Parties/groups (GOP, Democrats, Hamas, MAGA movement)
-3. **international_institution**: Global bodies (UN, WHO, NATO, EU, World Bank)
-4. **political_leader**: When representing politics (Trump, Biden, Putin, Zelensky)
-5. **regional_bloc**: Geopolitical groups (Western World, Global South, BRICS)
+Keep typing coarse and general. Do not try to distinguish a political leader from a business
+leader from a celebrity — they are all **person**. Do not try to distinguish a political party
+from a media outlet from an NGO — they are all **organization**. When in doubt, pick the broadest
+category that still fits.
 
-**CORPORATE ENTITIES**:
-6. **major_corporation**: Named companies (Google, Pfizer, BlackRock, ExxonMobil, TikTok)
-7. **industry_sector**: Business categories (Big Tech, Big Pharma, Wall Street, Silicon Valley)
-8. **business_leader**: As business figures (Elon Musk/Tesla, Jeff Bezos/Amazon)
-
-**SOCIAL MOVEMENTS & DEMOGRAPHICS**:
-9. **activist_movement**: Organized movements (BLM, #MeToo, Antifa, climate activists)
-10. **identity_group**: Identity-based groups (LGBTQ+ community, Evangelicals, immigrants)
-11. **demographic_cohort**: Age/class groups (Gen Z, Millennials, "the elite", working class)
-
-**TECHNOLOGY & SCIENCE**:
-12. **specific_technology**: Named tech/products (ChatGPT, COVID vaccines, Bitcoin, drones)
-13. **tech_platform**: Digital platforms (Twitter/X, Facebook, YouTube, Reddit)
-14. **scientific_field**: Research areas (climate science, AI research, epidemiology)
-
-**CULTURAL INSTITUTIONS**:
-15. **media_organization**: News outlets (Fox News, CNN, New York Times, "mainstream media")
-16. **educational_institution**: Schools/academia (Harvard, "public schools", "universities")
-17. **religious_institution**: Religious bodies (Catholic Church, Islam, Evangelicals)
-
-**IDEOLOGICAL CONCEPTS** (when concretized as actors):
-18. **political_ideology**: When personified (socialism, "woke ideology", conservatism)
-
-**EMERGING SYMBOLIC INDIVIDUALS**:
-19. **symbolic_individual**: People positioned as representatives of larger issues (George Floyd, Derek Chauvin, Kyle Rittenhouse, specific victims, whistleblowers, viral incident protagonists)
+1. **country**: Sovereign states (USA, Israel, China, Russia, Ukraine)
+2. **person**: Any individual human — political leaders, business leaders, celebrities, activists,
+   symbolic individuals representing a broader issue (Trump, Elon Musk, George Floyd, Zelensky)
+3. **business**: Companies and corporations (Google, Pfizer, ExxonMobil, TikTok)
+4. **organization**: Everything else collective — political parties/movements (GOP, Hamas, BLM),
+   international institutions (UN, NATO, EU, World Bank), regional blocs (Western World, BRICS),
+   media outlets (Fox News, CNN), NGOs, religious institutions, identity groups, demographic
+   cohorts, industry sectors ("Big Tech", "Wall Street")
+5. **event**: A discrete, named, bounded happening — a war, an election, a disaster, a court
+   ruling, a historical event (the 2008 financial crisis, the Holocaust, a specific election).
+   This is NOT the same as an abstract force — see below.
+6. **concept**: An ideology, technology, or issue discussed as an actor in its own right
+   (socialism, "woke ideology", ChatGPT, Bitcoin, climate science)
 
 AGGREGATION RULES:
 - Roll up to major entities: "[Country] police" → [Country], "[Leader] officials" → [Leader], "[Company] teams" → [Company]
@@ -103,6 +133,11 @@ AGGREGATION RULES:
 - PRINCIPLE: Every action has a responsible actor - find that actor, not the action itself
 - Score the RESPONSIBLE ENTITY based on how the action/concept is portrayed
 - Extract each decision-maker as a separate entity, not grouped together
+- **This is different from the `event` type above**: "economic pressure" or "sanctions" are
+  abstract forces — attribute them to whoever is applying them, don't extract them as entities.
+  "The 2008 financial crisis" is a discrete, named, bounded historical event — that IS extractable
+  as `event`. The test: can you point to a specific start/end and a common name for it? If yes,
+  it's an event. If it's an ongoing policy, pressure, or strategy, find the actor behind it instead.
 
 IMPORTANT GUIDELINES:
 - Base analysis solely on how entities are portrayed in THIS SPECIFIC article
@@ -118,7 +153,7 @@ FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
   "entities": [
     {
       "entity": "Entity Name",
-      "entity_type": "one of the 19 types: sovereign_state|political_organization|international_institution|political_leader|regional_bloc|major_corporation|industry_sector|business_leader|activist_movement|identity_group|demographic_cohort|specific_technology|tech_platform|scientific_field|media_organization|educational_institution|religious_institution|political_ideology|symbolic_individual",
+      "entity_type": "one of: country|person|business|organization|event|concept",
       "power_score": number,
       "moral_score": number,
       "mentions": [

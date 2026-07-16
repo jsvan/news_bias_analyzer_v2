@@ -311,29 +311,42 @@ def get_entities(
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
-    """Get list of entities, optionally filtered by type and search term, ordered by mention count."""
-    # Join with EntityMention to get mention counts and order by them
+    """Get list of entities, optionally filtered by type and search term, ordered by mention count.
+
+    Mentions are counted across every entity merged into a canonical one
+    (Entity.canonical_id, set by analyzer/entity_resolution.py's merge job), and only the
+    canonical row (canonical_id IS NULL) is returned as a top-level entity - this is what
+    stops e.g. two "United States" rows from both appearing in this list.
+    """
+    resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+    mention_counts = db.query(
+        resolved_id.label("resolved_id"),
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).group_by(resolved_id).subquery()
+
     query = db.query(
         Entity.id,
         Entity.name,
         Entity.entity_type,
-        func.count(EntityMention.id).label("mention_count")
-    ).join(
-        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-    ).group_by(
-        Entity.id, Entity.name, Entity.entity_type
+        func.coalesce(mention_counts.c.mention_count, 0).label("mention_count")
+    ).outerjoin(
+        mention_counts, Entity.id == mention_counts.c.resolved_id
+    ).filter(
+        Entity.canonical_id.is_(None)
     )
-    
+
     if entity_type:
         query = query.filter(Entity.entity_type == entity_type)
-    
+
     if search:
         # Case-insensitive search
         query = query.filter(func.lower(Entity.name).like(f"%{search.lower()}%"))
-    
+
     # Order by mention count descending, then by name
     entities = query.order_by(
-        func.count(EntityMention.id).desc(),
+        func.coalesce(mention_counts.c.mention_count, 0).desc(),
         Entity.name
     ).limit(limit).all()
     

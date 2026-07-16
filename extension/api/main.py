@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 import sys
 import os
@@ -40,6 +40,30 @@ except ImportError:
     similarity_router = APIRouter()
     has_similarity_router = False
 
+try:
+    from extension.api.narrative_endpoints import router as narrative_router
+    has_narrative_router = True
+except ImportError:
+    from fastapi import APIRouter
+    narrative_router = APIRouter()
+    has_narrative_router = False
+
+try:
+    from extension.api.embeddings_endpoints import router as embeddings_router
+    has_embeddings_router = True
+except ImportError:
+    from fastapi import APIRouter
+    embeddings_router = APIRouter()
+    has_embeddings_router = False
+
+try:
+    from extension.api.drift_endpoints import router as drift_router
+    has_drift_router = True
+except ImportError:
+    from fastapi import APIRouter
+    drift_router = APIRouter()
+    has_drift_router = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer API",
@@ -71,7 +95,7 @@ def health_check():
     try:
         # Quick test of database connection
         with db_manager.engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
     except Exception:
         db_connected = False
 
@@ -88,19 +112,48 @@ def get_entities(
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db)
 ):
-    """Get list of entities, optionally filtered by type."""
-    query = db.query(Entity)
-    
+    """Get list of entities, optionally filtered by type, ordered by mention count.
+
+    Matches server/extension_api.py::get_entities's fix (Phase 0): mentions are counted
+    across every entity merged into a canonical one (Entity.canonical_id), and only the
+    canonical row (canonical_id IS NULL) is returned - otherwise this route (this
+    FastAPI app's own top-level /entities, distinct from server/extension_api.py's)
+    would still surface duplicate rows and an arbitrary, unordered slice of entities
+    instead of the most-mentioned ones.
+    """
+    resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+    mention_counts = db.query(
+        resolved_id.label("resolved_id"),
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).group_by(resolved_id).subquery()
+
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.coalesce(mention_counts.c.mention_count, 0).label("mention_count")
+    ).outerjoin(
+        mention_counts, Entity.id == mention_counts.c.resolved_id
+    ).filter(
+        Entity.canonical_id.is_(None)
+    )
+
     if entity_type:
         query = query.filter(Entity.entity_type == entity_type)
-    
-    entities = query.limit(limit).all()
-    
+
+    entities = query.order_by(
+        func.coalesce(mention_counts.c.mention_count, 0).desc(),
+        Entity.name
+    ).limit(limit).all()
+
     return [
         {
             "id": entity.id,
             "name": entity.name,
-            "type": entity.entity_type
+            "type": entity.entity_type,
+            "mention_count": entity.mention_count or 0
         }
         for entity in entities
     ]
@@ -256,6 +309,16 @@ if has_article_router:
     
 if has_similarity_router:
     app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
+
+if has_narrative_router:
+    # No prefix - routes already declare their full /narrative/... path.
+    app.include_router(narrative_router, tags=["Narrative"])
+
+if has_embeddings_router:
+    app.include_router(embeddings_router, tags=["Narrative"])
+
+if has_drift_router:
+    app.include_router(drift_router, tags=["Narrative"])
 
 # Enable CORS
 from fastapi.middleware.cors import CORSMiddleware

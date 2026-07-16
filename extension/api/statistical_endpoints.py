@@ -15,15 +15,10 @@ import logging
 import random
 import math
 
-# Import database utilities  
+# Import database utilities
 from database.db import get_session
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
-
-# Import entity mapping utilities
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from utils.entity_mapper import entity_mapper, normalize_entity_name, find_entity_variants
+from analyzer.narrative_metrics import shrunk_means
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,52 +29,36 @@ router = APIRouter()
 
 def find_entity_variants_in_db(entity_name: str, session: Session) -> List[Entity]:
     """
-    Find all variants of an entity in the database using the entity mapper
-    
+    Find an entity by name plus every entity merged into it via canonical_id
+    (analyzer/entity_resolution.py's merge job - see database/models.py Entity.canonical_id).
+
     Args:
         entity_name: The entity name to search for
         session: Database session
-        
+
     Returns:
-        List of Entity objects that are variants of the same entity
+        List of Entity objects: the canonical entity plus any entities merged into it.
     """
     try:
         if session is None:
             logger.error(f"Database session is None for entity '{entity_name}'")
             return []
-            
-        # Normalize the target entity name
-        normalized_name = normalize_entity_name(entity_name)
-        
-        # Get all entities from database
-        all_entities = session.query(Entity).all()
-        
-        # Convert to dict format for entity mapper
-        entity_dicts = []
-        for entity in all_entities:
-            entity_dicts.append({
-                'name': entity.name,
-                'type': entity.entity_type,
-                'id': entity.id,
-                'entity_obj': entity  # Keep reference to original object
-            })
-        
-        # Find variants using entity mapper
-        variants = find_entity_variants(normalized_name, entity_dicts)
-        
-        # Extract the original Entity objects
-        variant_entities = [v['entity_obj'] for v in variants]
-        
-        logger.info(f"🔍 Found {len(variant_entities)} entities for '{entity_name}', using '{normalized_name}' as representative")
-        
-        # Log the entities found
-        for entity in variant_entities[:10]:  # Log first 10
-            logger.info(f"  - {entity.name} ({entity.entity_type})")
-        if len(variant_entities) > 10:
-            logger.info(f"  ... and {len(variant_entities) - 10} more")
-            
+
+        match = session.query(Entity).filter(
+            func.lower(Entity.name) == entity_name.lower()
+        ).first()
+        if not match:
+            logger.info(f"No entity found matching '{entity_name}'")
+            return []
+
+        canonical_id = match.canonical_id or match.id
+        variant_entities = session.query(Entity).filter(
+            func.coalesce(Entity.canonical_id, Entity.id) == canonical_id
+        ).all()
+
+        logger.info(f"Found {len(variant_entities)} entities for '{entity_name}' (canonical_id={canonical_id})")
         return variant_entities
-        
+
     except Exception as e:
         logger.error(f"Error finding entity variants for '{entity_name}': {str(e)}")
         return []
@@ -542,10 +521,9 @@ async def get_entity_tracking(
         
         # Use the first entity variant for metadata
         primary_entity = entity_variants[0]
-        normalized_name = normalize_entity_name(entity_name)
-        
+
         return EntityTrackingResponse(
-            entity_name=normalized_name,
+            entity_name=primary_entity.name,
             entity_type=primary_entity.entity_type or "unknown",
             data=tracking_data,
             has_data=len(tracking_data) > 0,
@@ -1128,11 +1106,13 @@ async def get_country_top_entities(
         
         logger.info(f"📰 Found {len(country_sources)} news sources in {country}: {list(source_names.values())}")
         
-        # Get top entities by mention count in this country over the time period
-        top_entities_query = session.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
+        # Get top entities by mention count in this country over the time period.
+        # Aggregate by canonical_id first (merged entities resolve to one row - see
+        # analyzer/entity_resolution.py), then join back to the canonical row for display,
+        # same fix as server/extension_api.py::get_entities.
+        resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+        agg_subq = session.query(
+            resolved_id.label('resolved_id'),
             func.count(EntityMention.id).label('mention_count'),
             func.avg(EntityMention.power_score).label('avg_power'),
             func.avg(EntityMention.moral_score).label('avg_moral')
@@ -1146,14 +1126,25 @@ async def get_country_top_entities(
             EntityMention.created_at <= end_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
-        ).having(
+        ).group_by(resolved_id).having(
             func.count(EntityMention.id) >= 5  # Minimum mentions required
+        ).subquery()
+
+        top_entities_query = session.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            agg_subq.c.mention_count,
+            agg_subq.c.avg_power,
+            agg_subq.c.avg_moral
+        ).join(
+            agg_subq, Entity.id == agg_subq.c.resolved_id
+        ).filter(
+            Entity.canonical_id.is_(None)
         ).order_by(
-            func.count(EntityMention.id).desc()
+            agg_subq.c.mention_count.desc()
         ).limit(limit)
-        
+
         top_entities = top_entities_query.all()
         
         if not top_entities:
@@ -1198,19 +1189,42 @@ async def get_country_top_entities(
             )
             
             daily_results = daily_data_query.all()
-            
+
+            # Empirical-Bayes shrinkage (analyzer/narrative_metrics.py::shrunk_means):
+            # many day x source cells here have a handful of mentions, and a raw mean
+            # displayed at that n reads as confidently as a 100-mention cell. Shrink each
+            # cell toward this entity's own weighted mean across the period, pulled
+            # harder the fewer mentions a cell has - mention_count stays in the response
+            # so the frontend can still show/filter on raw confidence.
+            power_shrunk = shrunk_means(
+                [float(p) * m for _, _, p, _, m in daily_results if p is not None],
+                [m for _, _, p, _, m in daily_results if p is not None],
+            )
+            moral_shrunk = shrunk_means(
+                [float(mo) * m for _, _, _, mo, m in daily_results if mo is not None],
+                [m for _, _, _, mo, m in daily_results if mo is not None],
+            )
+
             # Group data by newspaper
             newspapers_data = {}
+            power_i = moral_i = 0
             for date, source_id, power_avg, moral_avg, mentions in daily_results:
                 newspaper_name = source_names.get(source_id, f"Unknown Source {source_id}")
-                
+
                 if newspaper_name not in newspapers_data:
                     newspapers_data[newspaper_name] = []
-                
+
+                power_score = float(power_shrunk[power_i]) if power_avg is not None else 0.0
+                if power_avg is not None:
+                    power_i += 1
+                moral_score = float(moral_shrunk[moral_i]) if moral_avg is not None else 0.0
+                if moral_avg is not None:
+                    moral_i += 1
+
                 newspapers_data[newspaper_name].append({
                     "date": date.isoformat(),
-                    "power_score": float(power_avg) if power_avg is not None else 0.0,
-                    "moral_score": float(moral_avg) if moral_avg is not None else 0.0,
+                    "power_score": power_score,
+                    "moral_score": moral_score,
                     "mention_count": int(mentions)
                 })
             
@@ -1240,4 +1254,165 @@ async def get_country_top_entities(
         raise
     except Exception as e:
         logger.error(f"Failed to get top entities for country {country}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+class NewspaperTopEntitiesResponse(BaseModel):
+    newspaper_name: str
+    country: str
+    entities: List[CountryEntityData]
+    time_period_days: int
+
+
+@router.get("/newspaper/{newspaper_name}/top-entities", response_model=NewspaperTopEntitiesResponse)
+async def get_newspaper_top_entities(
+    newspaper_name: str,
+    days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+    limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
+    session: Session = Depends(get_session)
+):
+    """
+    Get the top entities discussed by a specific newspaper over the specified time period.
+    
+    This endpoint provides data for newspaper-specific analysis showing the most prominent 
+    entities and their sentiment trajectories for a single newspaper.
+    
+    Args:
+        newspaper_name: The name of the newspaper to analyze
+        days: Number of days to look back (default: 30)
+        limit: Number of top entities to return (default: 10)
+        
+    Returns:
+        Top entities discussed by the specified newspaper
+    """
+    try:
+        if session is None:
+            logger.error(f"Database session is None for newspaper analysis '{newspaper_name}'")
+            raise HTTPException(status_code=500, detail="Database connection not available")
+        
+        logger.info(f"🔍 Getting top {limit} entities for newspaper '{newspaper_name}' over {days} days")
+        
+        # Calculate date range
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # Find the newspaper source
+        newspaper_source = session.query(NewsSource).filter(
+            NewsSource.name == newspaper_name
+        ).first()
+        
+        if not newspaper_source:
+            # Get all USA sources for debugging
+            usa_sources = session.query(NewsSource.name).filter(
+                func.lower(NewsSource.country) == 'usa'
+            ).all()
+            available_names = [s[0] for s in usa_sources]
+            logger.warning(f"No news source found for newspaper '{newspaper_name}'. USA sources: {available_names}")
+            raise HTTPException(status_code=404, detail=f"No news source found for newspaper '{newspaper_name}'. Available USA sources: {available_names}")
+        
+        logger.info(f"📰 Found newspaper '{newspaper_source.name}' in {newspaper_source.country}")
+        
+        # Get top entities by mention count for this newspaper over the time period
+        top_entities_query = session.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            func.count(EntityMention.id).label('mention_count'),
+            func.avg(EntityMention.power_score).label('avg_power'),
+            func.avg(EntityMention.moral_score).label('avg_moral')
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id
+        ).join(
+            NewsArticle, EntityMention.article_id == NewsArticle.id
+        ).filter(
+            NewsArticle.source_id == newspaper_source.id,
+            EntityMention.created_at >= start_date,
+            EntityMention.created_at <= end_date,
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        ).group_by(
+            Entity.id, Entity.name, Entity.entity_type
+        ).having(
+            func.count(EntityMention.id) >= 3  # Minimum mentions required for individual newspaper
+        ).order_by(
+            func.count(EntityMention.id).desc()
+        ).limit(limit)
+        
+        top_entities = top_entities_query.all()
+        
+        if not top_entities:
+            logger.warning(f"No entities found with sufficient mentions for newspaper '{newspaper_name}'")
+            return NewspaperTopEntitiesResponse(
+                newspaper_name=newspaper_source.name,
+                country=newspaper_source.country,
+                entities=[],
+                time_period_days=days
+            )
+        
+        logger.info(f"📊 Found {len(top_entities)} top entities for {newspaper_name}")
+        
+        # For each top entity, get daily sentiment data for this newspaper
+        entities_data = []
+        
+        for entity_id, entity_name, entity_type, total_mentions, avg_power, avg_moral in top_entities:
+            logger.info(f"🔍 Processing entity '{entity_name}' ({total_mentions} mentions)")
+            
+            # Get daily sentiment data for this entity from this newspaper
+            daily_data_query = session.query(
+                func.date(EntityMention.created_at).label('date'),
+                func.avg(EntityMention.power_score).label('avg_power'),
+                func.avg(EntityMention.moral_score).label('avg_moral'),
+                func.count(EntityMention.id).label('mention_count')
+            ).join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).filter(
+                EntityMention.entity_id == entity_id,
+                NewsArticle.source_id == newspaper_source.id,
+                EntityMention.created_at >= start_date,
+                EntityMention.created_at <= end_date,
+                EntityMention.power_score.isnot(None),
+                EntityMention.moral_score.isnot(None)
+            ).group_by(
+                func.date(EntityMention.created_at)
+            ).order_by(
+                func.date(EntityMention.created_at)
+            )
+            
+            daily_results = daily_data_query.all()
+            
+            # Format daily data for this newspaper
+            newspaper_data = []
+            for date, power_avg, moral_avg, mentions in daily_results:
+                newspaper_data.append({
+                    "date": date.isoformat(),
+                    "power_score": float(power_avg) if power_avg is not None else 0.0,
+                    "moral_score": float(moral_avg) if moral_avg is not None else 0.0,
+                    "mention_count": int(mentions)
+                })
+            
+            # Sort data by date
+            newspaper_data.sort(key=lambda x: x["date"])
+            
+            entities_data.append(CountryEntityData(
+                entity_name=entity_name,
+                entity_type=entity_type or "unknown",
+                mention_count=int(total_mentions),
+                avg_power_score=float(avg_power) if avg_power is not None else 0.0,
+                avg_moral_score=float(avg_moral) if avg_moral is not None else 0.0,
+                newspapers={newspaper_source.name: newspaper_data}
+            ))
+        
+        logger.info(f"✅ Successfully processed {len(entities_data)} entities for newspaper {newspaper_name}")
+        
+        return NewspaperTopEntitiesResponse(
+            newspaper_name=newspaper_source.name,
+            country=newspaper_source.country,
+            entities=entities_data,
+            time_period_days=days
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get top entities for newspaper {newspaper_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

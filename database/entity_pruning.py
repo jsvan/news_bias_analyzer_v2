@@ -99,14 +99,22 @@ def update_entity_last_updated_trigger(session: Session):
 
 def prune_low_activity_entities(session: Session, dry_run: bool = False):
     """
-    Prune entities based on dynamic threshold.
-    
-    Threshold = min(weeks_since_last_update, 12)
-    
+    Prune entities based on a dynamic threshold measured in actual pipeline activity,
+    not wall-clock time.
+
+    Threshold = min(sampling_weeks_since_creation, 12), where a "sampling week" is 7 days
+    that actually had scraping activity (distinct DATE(scraped_at) in news_articles),
+    counted only up to the most recent real scrape - not NOW(). This matters because if the
+    pipeline goes dormant (scheduler not running, no scraping happening), calendar time
+    keeps passing but no new mentions can possibly arrive; a wall-clock threshold would
+    treat that dormancy as "this entity had its chance and didn't get mentioned," which
+    isn't true - it never got sampled at all. Anchoring to the last real sample means an
+    entity's age only advances when the pipeline actually had a chance to mention it again.
+
     Args:
         session: Database session
         dry_run: If True, only report what would be deleted
-    
+
     Returns:
         Number of entities pruned
     """
@@ -114,62 +122,79 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
         # First ensure we have the last_updated column and trigger
         add_last_updated_column(session)
         update_entity_last_updated_trigger(session)
-        
+
         # Find entities to prune
         query = text("""
-            WITH entity_stats AS (
-                SELECT 
+            WITH sample_days AS (
+                SELECT DISTINCT DATE(scraped_at) AS d FROM news_articles
+            ),
+            last_sample AS (
+                SELECT MAX(d) AS ts FROM sample_days
+            ),
+            entity_stats AS (
+                SELECT
                     e.id,
                     e.name,
                     e.entity_type,
                     e.created_at,
                     COUNT(em.id) as mention_count,
-                    EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800 as weeks_old,
-                    LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800), :max_weeks) as threshold
+                    samples.n as samples_since_creation,
+                    LEAST(CEIL(samples.n / 7.0), :max_weeks) as threshold
                 FROM entities e
                 LEFT JOIN entity_mentions em ON e.id = em.entity_id
-                WHERE 
+                CROSS JOIN LATERAL (
+                    SELECT COUNT(*) AS n FROM sample_days sd
+                    WHERE sd.d >= e.created_at::date AND sd.d <= (SELECT ts FROM last_sample)
+                ) samples
+                WHERE
                     -- Skip entities marked for preservation
                     (e.pruning_metadata->>:preserve_key IS NULL OR e.pruning_metadata->>:preserve_key != :preserve_value)
                     -- Only consider entities older than configured minimum age
                     AND e.created_at < NOW() - CAST(:min_days || ' days' AS INTERVAL)
-                GROUP BY e.id, e.name, e.entity_type, e.created_at
-                HAVING 
-                    -- Mention count must be greater than weeks old (not equal)
-                    COUNT(em.id) <= LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 604800), :max_weeks)
+                    -- Never prune an entity other entities have been merged into
+                    -- (would violate entities.canonical_id's FK and orphan the merge history)
+                    AND e.id NOT IN (
+                        SELECT DISTINCT canonical_id FROM entities WHERE canonical_id IS NOT NULL
+                    )
+                GROUP BY e.id, e.name, e.entity_type, e.created_at, samples.n
+                HAVING
+                    -- Mention count must be greater than the sampling-weeks threshold (not equal)
+                    COUNT(em.id) <= LEAST(CEIL(samples.n / 7.0), :max_weeks)
             )
-            SELECT 
-                id, 
-                name, 
-                entity_type, 
-                mention_count, 
-                ROUND(weeks_old::numeric, 1) as weeks_old,
+            SELECT
+                id,
+                name,
+                entity_type,
+                mention_count,
+                samples_since_creation,
+                ROUND(samples_since_creation / 7.0, 1) as sampling_weeks_old,
                 threshold
             FROM entity_stats
-            ORDER BY mention_count, weeks_old DESC
+            ORDER BY mention_count, samples_since_creation DESC
         """)
-        
+
         candidates = session.execute(query, {
             'max_weeks': EntityPruningConfig.MAX_ENTITY_AGE_WEEKS,
             'min_days': EntityPruningConfig.MIN_ENTITY_AGE_DAYS,
             'preserve_key': EntityPruningConfig.PRESERVE_METADATA_KEY,
             'preserve_value': EntityPruningConfig.PRESERVE_METADATA_VALUE
         }).fetchall()
-        
+
         if not candidates:
             logger.info("No entities to prune")
             return 0
-        
+
         # Log summary
         logger.info(f"Found {len(candidates)} entities to prune")
-        
+
         # Show some examples
         examples = candidates[:10]
         for entity in examples:
             logger.info(f"  - {entity.name} ({entity.entity_type}): "
                        f"{entity.mention_count} mentions (needs {entity.threshold}), "
-                       f"{entity.weeks_old} weeks old")
-        
+                       f"{entity.sampling_weeks_old} sampling-weeks old "
+                       f"(active-scraping-days since creation, not calendar time)")
+
         if len(candidates) > 10:
             logger.info(f"  ... and {len(candidates) - 10} more")
         
@@ -229,23 +254,36 @@ def get_pruning_stats(session: Session):
         # Ensure column exists
         add_last_updated_column(session)
         
+        # Same sample-based anchoring as prune_low_activity_entities: age is measured in
+        # distinct scraping-active days since last_updated, capped at the last real sample -
+        # not wall-clock NOW() - so pipeline dormancy doesn't inflate "age".
         stats_query = text("""
-            WITH entity_stats AS (
-                SELECT 
+            WITH sample_days AS (
+                SELECT DISTINCT DATE(scraped_at) AS d FROM news_articles
+            ),
+            last_sample AS (
+                SELECT MAX(d) AS ts FROM sample_days
+            ),
+            entity_stats AS (
+                SELECT
                     e.id,
                     e.entity_type,
                     COUNT(em.id) as mention_count,
-                    LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.last_updated)) / 604800), 12) as threshold,
-                    CASE 
-                        WHEN COUNT(em.id) < LEAST(CEIL(EXTRACT(EPOCH FROM (NOW() - e.last_updated)) / 604800), 12)
-                             AND e.last_updated < NOW() - INTERVAL '7 days'
+                    LEAST(CEIL(samples.n / 7.0), 12) as threshold,
+                    CASE
+                        WHEN COUNT(em.id) < LEAST(CEIL(samples.n / 7.0), 12)
+                             AND samples.n >= 1
                              AND (e.pruning_metadata->>'preserve' IS NULL OR e.pruning_metadata->>'preserve' != 'true')
-                        THEN 1 
-                        ELSE 0 
+                        THEN 1
+                        ELSE 0
                     END as would_prune
                 FROM entities e
                 LEFT JOIN entity_mentions em ON e.id = em.entity_id
-                GROUP BY e.id, e.entity_type, e.last_updated, e.pruning_metadata
+                CROSS JOIN LATERAL (
+                    SELECT COUNT(*) AS n FROM sample_days sd
+                    WHERE sd.d >= e.last_updated::date AND sd.d <= (SELECT ts FROM last_sample)
+                ) samples
+                GROUP BY e.id, e.entity_type, e.last_updated, e.pruning_metadata, samples.n
             )
             SELECT 
                 entity_type,

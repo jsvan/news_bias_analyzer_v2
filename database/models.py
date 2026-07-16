@@ -166,10 +166,15 @@ class Entity(Base):
     canonical_id = Column(Integer, ForeignKey('entities.id'), nullable=True)
     
     mentions = relationship("EntityMention", back_populates="entity")
-    
-    # Unique constraint on name and type
+
+    # Identity is name-only (not name+type - see database/run_migration_014.py): entity_type
+    # is a descriptive attribute, not a partition key, so legitimate type disagreement across
+    # articles about the same real-world entity doesn't fragment it into duplicate rows.
+    # Only canonical (unmerged) rows must have a unique name - merged-away rows are expected
+    # to share their canonical row's name.
     __table_args__ = (
-        Index('idx_entities_name_type', 'name', 'entity_type', unique=True),
+        Index('idx_entities_name_canonical_unique', 'name', unique=True,
+              postgresql_where=text('canonical_id IS NULL')),
     )
     
     def __repr__(self):

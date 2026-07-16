@@ -33,10 +33,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import the prompt from the prompts module instead of duplicating it here
-from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
+from analyzer.prompts import ENTITY_SENTIMENT_PROMPT, ENTITY_SENTIMENT_SCHEMA
 
 # Default system prompt for entity and sentiment extraction
 DEFAULT_SYSTEM_PROMPT = ENTITY_SENTIMENT_PROMPT
+
+# Structured Outputs response_format: entity_type can only ever be one of the 6 categories
+# in ENTITY_SENTIMENT_SCHEMA - see analyzer/prompts.py for the single source of truth.
+ENTITY_SENTIMENT_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "entity_sentiment",
+        "strict": True,
+        "schema": ENTITY_SENTIMENT_SCHEMA,
+    },
+}
 
 class OpenAIProcessor:
     """
@@ -177,7 +188,7 @@ class OpenAIProcessor:
                     
                     response = self.client.chat.completions.create(
                         model=self.model,
-                        response_format={"type": "json_object"},
+                        response_format=ENTITY_SENTIMENT_RESPONSE_FORMAT,
                         messages=[
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": article_text}
@@ -285,7 +296,7 @@ class OpenAIProcessor:
                     # Call OpenAI API
                     response = await self.async_client.chat.completions.create(
                         model=self.model,
-                        response_format={"type": "json_object"},
+                        response_format=ENTITY_SENTIMENT_RESPONSE_FORMAT,
                         messages=[
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": article_text}
@@ -390,10 +401,17 @@ class OpenAIProcessor:
         """
         try:
             prompt = custom_prompt or self.system_prompt
-            
+
+            # Only enforce the entity-sentiment schema when using the default prompt -
+            # a custom_prompt may ask for an entirely different response shape.
+            response_format = (
+                ENTITY_SENTIMENT_RESPONSE_FORMAT if custom_prompt is None
+                else {"type": "json_object"}
+            )
+
             response = self.client.chat.completions.create(
                 model=self.model,
-                response_format={"type": "json_object"},
+                response_format=response_format,
                 messages=[
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": text}

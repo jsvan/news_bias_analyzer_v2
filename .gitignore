@@ -82,6 +82,10 @@ analyzer/batches.txt
 *.sqlite3
 *.db
 
+# Runtime lock/pid files
+analyzer/analyzer.lock
+*.pid
+
 # React build output
 frontend/build/
 frontend/*/build/

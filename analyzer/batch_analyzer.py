@@ -36,7 +36,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 from database.services import DatabaseService
 from database.config import AnalysisConfig, LoggingConfig
-from analyzer.prompts import ENTITY_SENTIMENT_PROMPT
+from analyzer.prompts import ENTITY_SENTIMENT_PROMPT, ENTITY_SENTIMENT_SCHEMA
 from analyzer.hotelling_t2 import HotellingT2Calculator
 from analyzer.entity_resolution import known_entity_shortlist, format_shortlist_block
 
@@ -206,10 +206,17 @@ def prepare_batch_input(articles: List[NewsArticle], model: str,
                     {"role": "user", "content": analysis_text}
                 ],
                 "temperature": 0.2,
-                "response_format": {"type": "json_object"}
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "entity_sentiment",
+                        "strict": True,
+                        "schema": ENTITY_SENTIMENT_SCHEMA,
+                    },
+                },
             }
         }
-        
+
         batch_lines.append(json.dumps(batch_line))
     
     # Join lines with newlines

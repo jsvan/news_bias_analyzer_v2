@@ -7,7 +7,8 @@ Layer 1: deterministic post-hoc normalization (honorifics, punctuation, alias
          table) to propose canonical_id merges — Entity.canonical_id already
          exists in the schema; merges are pointer-based and reversible.
 
-Pure functions, stdlib only. DB job wiring comes later; self-test:
+Pure functions, stdlib only, except run_merge_job() which wires Layer 1 to the DB
+(scheduled weekly — see scheduler/job_scheduler.py). Self-test:
 
     python -m analyzer.entity_resolution
 """
@@ -112,6 +113,39 @@ def propose_merges(entities, fuzzy_threshold: float = 0.85):
             if sim >= fuzzy_threshold:
                 review.append((id_a, id_b, round(sim, 3)))
     return auto, review
+
+
+def run_merge_job(session, fuzzy_threshold: float = 0.85) -> int:
+    """DB wiring for Layer 1: auto-merge canonical entities with colliding merge keys.
+
+    Only the exact-match tier of propose_merges() is applied — the fuzzy "review" band is
+    deliberately left alone (no human review queue exists; the conservative default is to
+    leave near-misses as separate entities rather than risk a bad automatic merge).
+    Non-destructive: sets canonical_id, never deletes or rewrites a row. Intended to run
+    weekly via scheduler/job_scheduler.py.
+
+    Returns the number of entities merged.
+    """
+    from sqlalchemy import text
+
+    candidates = session.execute(text("""
+        SELECT e.id, e.name, e.entity_type, COUNT(em.id) AS mention_count
+        FROM entities e
+        LEFT JOIN entity_mentions em ON em.entity_id = e.id
+        WHERE e.canonical_id IS NULL
+        GROUP BY e.id, e.name, e.entity_type
+    """)).fetchall()
+
+    entities = [(row.id, row.name, row.entity_type, row.mention_count) for row in candidates]
+    auto, _review = propose_merges(entities, fuzzy_threshold=fuzzy_threshold)
+
+    for loser_id, canonical_id, _reason in auto:
+        session.execute(
+            text("UPDATE entities SET canonical_id = :canonical_id WHERE id = :loser_id"),
+            {"canonical_id": canonical_id, "loser_id": loser_id}
+        )
+    session.commit()
+    return len(auto)
 
 
 def known_entity_shortlist(article_text: str, known_entities, limit: int = 30):

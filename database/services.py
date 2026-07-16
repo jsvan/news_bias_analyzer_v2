@@ -13,7 +13,7 @@ from sqlalchemy import func
 
 from .models import Entity, EntityMention, NewsArticle
 from .repositories import RepositoryFactory
-from utils.entity_mapper import normalize_entity_name
+from analyzer.entity_resolution import normalize_name as normalize_entity_name
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ class EntityService:
         if not entity_name or not entity_type:
             raise ValueError("Entity name and type are required")
         
-        # Normalize entity name for deduplication
-        normalized_name = normalize_entity_name(entity_name)
+        # Normalize entity name for deduplication (honorifics/aliases - analyzer/entity_resolution.py)
+        normalized_name = normalize_entity_name(entity_name, entity_type)
         
         # Look for existing entity by normalized name
         entity = self.repos.entities.find_by_normalized_name(normalized_name)

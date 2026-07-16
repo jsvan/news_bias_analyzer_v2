@@ -30,6 +30,11 @@ from clustering.source_similarity import SourceSimilarityComputer
 from clustering.cluster_manager import ClusterManager
 from clustering.temporal_analyzer import TemporalAnalyzer
 from analyzer.hotelling_t2 import update_weekly_statistics
+from analyzer.entity_resolution import run_merge_job
+from database.entity_pruning import prune_low_activity_entities
+from database.refresh_materialized_views import refresh_mv_source_entity_week
+from analyzer.entity_embeddings import run_entity_embedding_job
+from analyzer.drift_detection import run_drift_detection_job
 
 # Setup logging
 LOG_DIR = ROOT_DIR / "logs"
@@ -177,6 +182,117 @@ def update_sentiment_statistics():
         logger.error(f"Error updating sentiment statistics: {e}", exc_info=True)
 
 
+def run_entity_merge():
+    """Auto-merge duplicate-name entities via canonical_id (analyzer/entity_resolution.py).
+
+    Exact-match tier only - no human review queue, so fuzzy near-misses are deliberately
+    left as separate entities rather than risk a bad automatic merge.
+    """
+    logger.info("Starting entity merge job")
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        merged_count = run_merge_job(session)
+
+        session.close()
+        logger.info(f"Entity merge job completed: {merged_count} entities merged")
+
+    except Exception as e:
+        logger.error(f"Error in entity merge job: {e}", exc_info=True)
+
+
+def run_entity_pruning():
+    """Prune low-activity entities (database/entity_pruning.py).
+
+    Runs after run_entity_merge in the weekly schedule so pruning sees post-merge mention
+    counts, not counts fragmented across duplicate rows.
+    """
+    logger.info("Starting entity pruning job")
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        pruned_count = prune_low_activity_entities(session)
+
+        session.close()
+        logger.info(f"Entity pruning job completed: {pruned_count} entities pruned")
+
+    except Exception as e:
+        logger.error(f"Error in entity pruning job: {e}", exc_info=True)
+
+
+def run_mv_refresh():
+    """Refresh mv_source_entity_week (database/refresh_materialized_views.py).
+
+    Runs daily, after the weekly merge/pruning jobs so its canonical_id resolution
+    reflects the latest merges.
+    """
+    logger.info("Starting materialized view refresh")
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        refresh_mv_source_entity_week(session)
+
+        session.close()
+        logger.info("Materialized view refresh completed")
+
+    except Exception as e:
+        logger.error(f"Error refreshing materialized views: {e}", exc_info=True)
+
+
+def run_entity_embeddings():
+    """Recompute entity relatedness embeddings (analyzer/entity_embeddings.py).
+
+    Runs after run_mv_refresh so the sentiment-profile matrix reflects the latest
+    materialized-view data, and after the weekly merge job so entity identity is
+    already resolved through canonical_id before the co-occurrence matrix is built.
+    """
+    logger.info("Starting entity embedding job")
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        n = run_entity_embedding_job(session)
+
+        session.close()
+        logger.info(f"Entity embedding job completed: {n} entities embedded")
+
+    except Exception as e:
+        logger.error(f"Error in entity embedding job: {e}", exc_info=True)
+
+
+def run_drift_detection():
+    """Recompute statistical-surprise drift events (analyzer/drift_detection.py).
+
+    Runs after run_mv_refresh for the same reason as run_entity_embeddings - depends
+    on mv_source_entity_week reflecting the latest data and canonical entity ids.
+    """
+    logger.info("Starting drift detection job")
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        n = run_drift_detection_job(session)
+
+        session.close()
+        logger.info(f"Drift detection job completed: {n} events written")
+
+    except Exception as e:
+        logger.error(f"Error in drift detection job: {e}", exc_info=True)
+
+
 def database_maintenance():
     """Run database maintenance tasks."""
     logger.info("Starting database maintenance")
@@ -203,22 +319,37 @@ def setup_schedule():
     # Hourly jobs
     schedule.every().hour.do(update_sentiment_statistics)
     
-    # Weekly jobs
+    # Weekly jobs - entity merge, then pruning (needs post-merge counts), before similarity
+    # computation at 02:00 so it runs against already-deduped entities.
+    schedule.every().sunday.at("01:00").do(run_entity_merge)
+    schedule.every().sunday.at("01:15").do(run_entity_pruning)
     schedule.every().sunday.at("02:00").do(run_weekly_similarity)
-    
+
     # Monthly jobs (1st of month)
     # Note: schedule doesn't support monthly directly, so we check in the job
     schedule.every().day.at("03:00").do(lambda: run_monthly_clustering() if datetime.now().day == 1 else None)
-    
+
     # Daily maintenance
+    schedule.every().day.at("00:30").do(run_mv_refresh)
     schedule.every().day.at("04:00").do(database_maintenance)
-    
+
+    # Weekly narrative-analysis jobs (Phase 4/5) - after mv refresh and entity merge so
+    # both the co-occurrence/sentiment matrices and the drift series see canonical,
+    # up-to-date data. Staggered 15 minutes apart since both can be CPU/DB heavy.
+    schedule.every().sunday.at("02:30").do(run_entity_embeddings)
+    schedule.every().sunday.at("02:45").do(run_drift_detection)
+
     logger.info("Schedule configured:")
     logger.info("- Scraper: every 30 minutes")
     logger.info("- Analyzer check: every 5 minutes")
     logger.info("- Sentiment statistics: every hour")
+    logger.info("- Entity merge: Sundays at 01:00")
+    logger.info("- Entity pruning: Sundays at 01:15")
     logger.info("- Similarity computation: Sundays at 2 AM")
+    logger.info("- Entity embeddings: Sundays at 02:30")
+    logger.info("- Drift detection: Sundays at 02:45")
     logger.info("- Clustering: 1st of month at 3 AM")
+    logger.info("- Materialized view refresh: Daily at 00:30")
     logger.info("- Database maintenance: Daily at 4 AM")
 
 
