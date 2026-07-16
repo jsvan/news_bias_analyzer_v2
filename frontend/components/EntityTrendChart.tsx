@@ -20,6 +20,7 @@ import {
   Tooltip as MuiTooltip
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
+import { tokens, monoNumber } from '../theme';
 
 // Define interfaces
 interface TrendPoint {
@@ -60,16 +61,19 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <Paper elevation={3} sx={{ p: 2, bgcolor: 'background.paper' }}>
-          <Typography variant="subtitle2">{formatDate(label)}</Typography>
+        <Paper
+          elevation={0}
+          sx={{ p: 2, bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: '8px' }}
+        >
+          <Typography variant="subtitle2" sx={{ color: tokens.ink }}>{formatDate(label)}</Typography>
           {payload.map((entry: any, index: number) => (
             <Box key={`item-${index}`} sx={{ color: entry.color, mt: 1 }}>
-              <Typography variant="caption" sx={{ display: 'block' }}>
+              <Typography variant="caption" sx={{ display: 'block', ...monoNumber }}>
                 {entry.name}: {entry.value.toFixed(2)}
               </Typography>
             </Box>
           ))}
-          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.inkMuted, ...monoNumber }}>
             Mentions: {data.find(d => d.date === label)?.mention_count || 0}
           </Typography>
         </Paper>
@@ -148,13 +152,12 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           height: '80%',
-          bgcolor: 'background.paper',
+          bgcolor: tokens.surfaceSunken,
           borderRadius: 1,
-          border: '1px dashed',
-          borderColor: 'divider',
+          border: `1px dashed ${tokens.border}`,
           p: 3
         }}>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" sx={{ color: tokens.inkMuted }}>
             Not enough trend data available for {entityName}
           </Typography>
         </Box>
@@ -166,33 +169,35 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
             data={data}
             margin={{ top: 20, right: 30, bottom: 20, left: 20 }}
           >
-            <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
-            <XAxis 
-              dataKey="date" 
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
+            <XAxis
+              dataKey="date"
               tickFormatter={formatDate}
               padding={{ left: 20, right: 20 }}
+              tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
             />
-            <YAxis 
-              domain={[-2, 2]} 
-              tickCount={9} 
+            <YAxis
+              domain={[-2, 2]}
+              tickCount={9}
+              tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
             >
-              <Label 
-                value="Sentiment Score" 
-                angle={-90} 
-                position="insideLeft" 
-                style={{ textAnchor: 'middle' }} 
+              <Label
+                value="Sentiment Score"
+                angle={-90}
+                position="insideLeft"
+                style={{ textAnchor: 'middle', fill: tokens.inkMuted, fontSize: 12 }}
               />
             </YAxis>
             <Tooltip content={<CustomTooltip />} />
-            <Legend />
-            <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
-            
+            <Legend wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
+            <ReferenceLine y={0} stroke={tokens.inkMuted} strokeDasharray="3 3" />
+
             {(dimension === 'both' || dimension === 'power') && (
               <Line
                 type={smoothing ? "monotone" : "linear"}
                 name="Power"
                 dataKey="power_score"
-                stroke="#8884d8"
+                stroke={tokens.accent}
                 activeDot={{ r: 8 }}
                 strokeWidth={2}
                 dot={{ strokeWidth: 2 }}
@@ -203,7 +208,7 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
                 type={smoothing ? "monotone" : "linear"}
                 name="Moral"
                 dataKey="moral_score"
-                stroke="#82ca9d"
+                stroke={tokens.categorical[1]}
                 activeDot={{ r: 8 }}
                 strokeWidth={2}
                 dot={{ strokeWidth: 2 }}

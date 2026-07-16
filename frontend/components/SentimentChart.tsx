@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
+import { tokens, archetypeColor, monoNumber } from '../theme';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
@@ -64,28 +65,20 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     setSelectedTypes(typeof value === 'string' ? value.split(',') : value);
   };
 
-  // Generate a color based on entity name (for consistent coloring)
+  // Entity color follows its archetype quadrant, not an arbitrary per-name hash —
+  // the color always means the same thing everywhere in the site.
   const getEntityColor = (entity: string) => {
-    // Simple hash function to generate a color
-    let hash = 0;
-    for (let i = 0; i < entity.length; i++) {
-      hash = entity.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    
-    // Convert to RGB
-    const r = (hash & 0xFF0000) >> 16;
-    const g = (hash & 0x00FF00) >> 8;
-    const b = hash & 0x0000FF;
-    
-    return `rgb(${r}, ${g}, ${b})`;
+    const point = filteredData.find(d => d.entity === entity);
+    if (!point) return tokens.inkMuted;
+    return archetypeColor(point.power_score, point.moral_score);
   };
 
   // Define quadrant labels
   const quadrantLabels = [
-    { x: 2.5, y: 2.5, text: 'HERO', color: '#4caf50' },
-    { x: -2.5, y: 2.5, text: 'VICTIM', color: '#9c27b0' },
-    { x: 2.5, y: -2.5, text: 'VILLAIN', color: '#f44336' },
-    { x: -2.5, y: -2.5, text: 'THREAT', color: '#ff9800' }
+    { x: 1, y: 1, text: 'HERO', color: tokens.hero },
+    { x: -1, y: 1, text: 'VICTIM', color: tokens.victim },
+    { x: 1, y: -1, text: 'VILLAIN', color: tokens.villain },
+    { x: -1, y: -1, text: 'THREAT', color: tokens.threat }
   ];
 
   return (
@@ -157,15 +150,16 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
           <ScatterChart
             margin={{ top: 20, right: 30, bottom: 30, left: 30 }}
           >
-          <CartesianGrid strokeDasharray="3 3" />
+          <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
           <XAxis
             type="number"
             dataKey="power_score"
             domain={[-2, 2]}
             tickCount={9}
             name="Power"
+            tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
           >
-            <Label value="Power Dimension" position="bottom" offset={10} />
+            <Label value="Power Dimension" position="bottom" offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </XAxis>
           <YAxis
             type="number"
@@ -173,8 +167,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             domain={[-2, 2]}
             tickCount={9}
             name="Morality"
+            tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
           >
-            <Label value="Moral Dimension" position="left" angle={-90} offset={10} />
+            <Label value="Moral Dimension" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </YAxis>
           <ZAxis type="number" dataKey="size" range={[20, 100]} />
           <Tooltip
@@ -186,8 +181,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               return `${item?.entity}`;
             }}
             cursor={{ strokeDasharray: '3 3' }}
+            contentStyle={{ border: `1px solid ${tokens.border}`, borderRadius: 8 }}
           />
-          
+
           {/* Render background quadrant labels */}
           {quadrantLabels.map((label, index) => (
             <Scatter
@@ -195,7 +191,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               name=""
               data={[{ power_score: label.x, moral_score: label.y, size: 1, entity: '' }]}
               shape={() => (
-                <text x={0} y={0} dy={5} textAnchor="middle" fill={label.color} style={{ fontWeight: 'bold', opacity: 0.2 }}>
+                <text x={0} y={0} dy={5} textAnchor="middle" fill={label.color} style={{ fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.04em', opacity: 0.28 }}>
                   {label.text}
                 </text>
               )}
@@ -203,24 +199,24 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               legendType="none"
             />
           ))}
-          
+
           {/* Main scatter plot for entities */}
           <Scatter
             name="Entities"
             data={filteredData}
-            fill="#8884d8"
+            fill={tokens.accent}
             isAnimationActive={true}
             shape={(props: any) => {
               const { cx, cy, entity } = props;
               return (
-                <circle 
-                  cx={cx} 
-                  cy={cy} 
-                  r={10} 
-                  fill={getEntityColor(entity)} 
-                  fillOpacity={0.8}
-                  stroke="#fff"
-                  strokeWidth={1}
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={9}
+                  fill={getEntityColor(entity)}
+                  fillOpacity={0.85}
+                  stroke={tokens.surface}
+                  strokeWidth={1.5}
                 />
               );
             }}
@@ -230,11 +226,11 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                 dataKey="entity"
                 position="top"
                 offset={10}
-                style={{ fontSize: '10px', fill: '#333' }}
+                style={{ fontSize: '10px', fill: tokens.ink }}
               />
             )}
           </Scatter>
-          <Legend />
+          <Legend wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
         </ScatterChart>
       </ResponsiveContainer>
       )}

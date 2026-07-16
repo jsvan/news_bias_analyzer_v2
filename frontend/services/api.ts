@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config, isGitHubPages, isStaticMode, checkApiAvailability } from './config/environment';
 import { staticData } from './staticData';
+import { SnapshotMeta } from '../types';
 
 // Create axios instance for backend API
 const api = axios.create({
@@ -181,6 +182,17 @@ export const sourcesApi = {
   }
 };
 
+// Snapshot freshness metadata. Only meaningful in static-snapshot mode (GitHub Pages) -
+// a live API connection reflects the current DB by definition, so there's no separate
+// "snapshot age" to report; callers should treat a null return as "not applicable, don't
+// show a staleness banner" rather than "unknown/stale".
+export const metaApi = {
+  getMeta: async (): Promise<SnapshotMeta | null> => {
+    if (isStaticMode()) return staticData.getMeta();
+    return null;
+  },
+};
+
 // Stats API methods
 export const statsApi = {
   // Get bias distribution data
@@ -250,7 +262,98 @@ export const statsApi = {
     
     const response = await api.get(url);
     return response.data;
+  },
+
+  // Get top entities for a specific newspaper
+  getNewspaperTopEntities: async (newspaperName: string, params: any = {}) => {
+    if (isStaticMode()) return staticData.getNewspaperTopEntities(newspaperName, params);
+    if (isApiUnavailable()) {
+      throw new Error('API unavailable: Please run the backend server to access real newspaper entity data.');
+    }
+    
+    let url = `/stats/newspaper/${encodeURIComponent(newspaperName)}/top-entities`;
+    
+    const queryParams = new URLSearchParams();
+    if (params.days) queryParams.append('days', params.days.toString());
+    if (params.limit) queryParams.append('limit', params.limit.toString());
+    
+    if (queryParams.toString()) {
+      url += `?${queryParams.toString()}`;
+    }
+    
+    const response = await api.get(url);
+    return response.data;
   }
+};
+
+// Intelligence findings API methods — statistical anomaly/divergence detection.
+// No static-snapshot equivalent exists (it requires live backend computation over
+// the full corpus, not something derivable from the entity/country snapshots), so
+// static/demo mode surfaces an honest message instead of a broken data call.
+export const intelligenceApi = {
+  getFindings: async (params: any = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Intelligence findings require a live backend and are not available in this demo.');
+    }
+    const response = await api.get('/intelligence/findings', { params });
+    return response.data;
+  },
+  getTrends: async (params: any = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Intelligence trends require a live backend and are not available in this demo.');
+    }
+    const response = await api.get('/intelligence/trends', { params });
+    return response.data;
+  },
+};
+
+// Narrative statistics (extension/api/narrative_endpoints.py) - wires
+// analyzer/narrative_metrics.py's kernels into real cross-source queries. Live-API only
+// for now; not yet part of the static-snapshot export (server/export_snapshots.py).
+export const narrativeApi = {
+  getContestedRanking: async (params: { days?: number; dimension?: 'power' | 'moral'; limit?: number } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Contested-entity ranking requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/contested', { params });
+    return response.data;
+  },
+};
+
+// Entity relatedness (extension/api/embeddings_endpoints.py) - nearest neighbors from
+// analyzer/entity_embeddings.py's weekly learned embeddings. Two independent vectors:
+// "cooccurrence" (topical - what gets mentioned alongside) and "sentiment" (rhetorical -
+// what gets talked about the same way by the same sources). Live-API only for now.
+export const embeddingsApi = {
+  getRelated: async (entityId: number, params: { vector?: 'cooccurrence' | 'sentiment'; limit?: number } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Related-entity lookups require a live backend and are not available in this demo.');
+    }
+    const response = await api.get(`/narrative/related/${entityId}`, { params });
+    return response.data;
+  },
+};
+
+// Statistical surprise / drift detection (extension/api/drift_endpoints.py) - wires
+// analyzer/narrative_metrics.py::pettitt_test into real changepoint queries. Distinguishes
+// a GLOBAL shift (everyone moved together, an expected real-world event) from a
+// SOURCE-specific residual shift (this source moved alone, unexplained by the global
+// trend - the actually-interesting editorial-stance signal). Live-API only for now.
+export const driftApi = {
+  getEntityDrift: async (entityId: number, params: { dimension?: 'power' | 'moral' } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Drift detection requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get(`/narrative/drift/${entityId}`, { params });
+    return response.data;
+  },
+  getDriftFeed: async (params: { dimension?: 'power' | 'moral'; limit?: number; scope?: 'all' | 'global' | 'source' } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Drift feed requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/drift-feed', { params });
+    return response.data;
+  },
 };
 
 // Export the base API instance

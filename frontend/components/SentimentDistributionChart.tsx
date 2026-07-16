@@ -13,6 +13,13 @@ import {
 } from 'recharts';
 import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip } from '@mui/material';
 import { Distribution, SentimentDistributions } from '../types';
+import { tokens, monoNumber } from '../theme';
+
+// Fixed 3-way comparison (global baseline / national / source) — not a rotating
+// first-appearance palette, since these three roles are always the same slots.
+const GLOBAL_COLOR = tokens.accent;
+const NATIONAL_COLOR = tokens.categorical[1];
+const SOURCE_COLOR = tokens.categorical[2];
 
 interface SentimentDistributionChartProps {
   title?: string;
@@ -152,44 +159,56 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box>
-          <Typography variant="h6">
+          <Typography variant="h6" sx={{ color: tokens.ink }}>
             {title}: {entityName}
           </Typography>
-          <Typography variant="subtitle2" color="text.secondary">
+          <Typography variant="subtitle2" sx={{ color: tokens.inkMuted }}>
             {dimension === 'power' ? 'Power Dimension' : 'Moral Dimension'} Distribution
           </Typography>
           {!hasEnoughData && (
-            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.villain }}>
               Insufficient data for reliable statistical analysis. More data points needed.
             </Typography>
           )}
         </Box>
-        
+
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {/* Toggle which distributions to show */}
           <Box>
             {distributions.global && (
-              <Chip 
-                label="Global" 
-                color={showGlobal ? "primary" : "default"} 
-                sx={{ mx: 0.5 }}
-                onClick={() => showGlobal} 
+              <Chip
+                label="Global"
+                sx={{
+                  mx: 0.5,
+                  bgcolor: showGlobal ? GLOBAL_COLOR : 'transparent',
+                  color: showGlobal ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${showGlobal ? GLOBAL_COLOR : tokens.border}`,
+                }}
+                onClick={() => showGlobal}
               />
             )}
             {distributions.national && (
-              <Chip 
-                label={distributions.national.country} 
-                color={showNational ? "secondary" : "default"} 
-                sx={{ mx: 0.5 }}
-                onClick={() => showNational} 
+              <Chip
+                label={distributions.national.country}
+                sx={{
+                  mx: 0.5,
+                  bgcolor: showNational ? NATIONAL_COLOR : 'transparent',
+                  color: showNational ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${showNational ? NATIONAL_COLOR : tokens.border}`,
+                }}
+                onClick={() => showNational}
               />
             )}
             {distributions.source && (
-              <Chip 
-                label={distributions.source.source_name} 
-                color={showSource ? "success" : "default"} 
-                sx={{ mx: 0.5 }}
-                onClick={() => showSource} 
+              <Chip
+                label={distributions.source.source_name}
+                sx={{
+                  mx: 0.5,
+                  bgcolor: showSource ? SOURCE_COLOR : 'transparent',
+                  color: showSource ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${showSource ? SOURCE_COLOR : tokens.border}`,
+                }}
+                onClick={() => showSource}
               />
             )}
           </Box>
@@ -219,14 +238,15 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           justifyContent: 'center',
           flexDirection: 'column',
           height: '80%',
-          bgcolor: 'rgba(0,0,0,0.03)',
+          bgcolor: tokens.surfaceSunken,
           borderRadius: 1,
+          border: `1px solid ${tokens.border}`,
           p: 3
         }}>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body1" sx={{ mb: 2, color: tokens.inkMuted }}>
             Not enough data available for meaningful statistical visualization
           </Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
             Additional entity mentions are required for reliable distribution analysis
           </Typography>
         </Box>
@@ -238,78 +258,87 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
             data={distributionData}
             margin={{ top: 20, right: 30, bottom: 30, left: 30 }}
           >
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="x" domain={[-2, 2]} tickCount={11}>
-            <Label 
-              value={dimension === 'power' ? 'Power Score' : 'Moral Score'} 
-              position="bottom" 
-              offset={10} 
+          <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
+          <XAxis
+            dataKey="x"
+            domain={[-2, 2]}
+            tickCount={11}
+            tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
+          >
+            <Label
+              value={dimension === 'power' ? 'Power Score' : 'Moral Score'}
+              position="bottom"
+              offset={10}
+              style={{ fill: tokens.inkMuted, fontSize: 12 }}
             />
           </XAxis>
-          <YAxis>
-            <Label value="Probability Density" position="left" angle={-90} offset={10} />
+          <YAxis tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}>
+            <Label value="Probability Density" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </YAxis>
-          <Tooltip 
+          <Tooltip
             formatter={(value: number) => [value.toFixed(4), 'Probability Density']}
             labelFormatter={(label) => `Score: ${label}`}
+            contentStyle={{ border: `1px solid ${tokens.border}`, borderRadius: 8, backgroundColor: tokens.surface }}
+            labelStyle={{ color: tokens.ink }}
+            itemStyle={{ color: tokens.ink, ...monoNumber }}
           />
-          <Legend formatter={(value) => getLegendItems().shift() || value} />
-          
+          <Legend formatter={(value) => getLegendItems().shift() || value} wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
+
           {/* Reference lines for means */}
           {showGlobal && means.global !== undefined && (
-            <ReferenceLine 
-              x={means.global} 
-              stroke="#8884d8" 
-              strokeDasharray="3 3" 
-              label={{ value: 'Global Mean', position: 'top' }}
+            <ReferenceLine
+              x={means.global}
+              stroke={GLOBAL_COLOR}
+              strokeDasharray="3 3"
+              label={{ value: 'Global Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
             />
           )}
-          
+
           {showNational && means.national !== undefined && (
-            <ReferenceLine 
-              x={means.national} 
-              stroke="#82ca9d" 
-              strokeDasharray="3 3" 
-              label={{ value: 'National Mean', position: 'top' }}
+            <ReferenceLine
+              x={means.national}
+              stroke={NATIONAL_COLOR}
+              strokeDasharray="3 3"
+              label={{ value: 'National Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
             />
           )}
-          
+
           {showSource && means.source !== undefined && (
-            <ReferenceLine 
-              x={means.source} 
-              stroke="#ffc658" 
-              strokeDasharray="3 3" 
-              label={{ value: 'Source Mean', position: 'top' }}
+            <ReferenceLine
+              x={means.source}
+              stroke={SOURCE_COLOR}
+              strokeDasharray="3 3"
+              label={{ value: 'Source Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
             />
           )}
-          
+
           {/* Distribution areas */}
           {showGlobal && (
-            <Area 
-              type="monotone" 
-              dataKey="global" 
-              fill="#8884d8" 
-              stroke="#8884d8" 
+            <Area
+              type="monotone"
+              dataKey="global"
+              fill={GLOBAL_COLOR}
+              stroke={GLOBAL_COLOR}
               fillOpacity={0.3}
             />
           )}
-          
+
           {showNational && (
-            <Area 
-              type="monotone" 
-              dataKey="national" 
-              fill="#82ca9d" 
-              stroke="#82ca9d" 
+            <Area
+              type="monotone"
+              dataKey="national"
+              fill={NATIONAL_COLOR}
+              stroke={NATIONAL_COLOR}
               fillOpacity={0.3}
             />
           )}
-          
+
           {showSource && (
-            <Area 
-              type="monotone" 
-              dataKey="source" 
-              fill="#ffc658" 
-              stroke="#ffc658" 
+            <Area
+              type="monotone"
+              dataKey="source"
+              fill={SOURCE_COLOR}
+              stroke={SOURCE_COLOR}
               fillOpacity={0.3}
             />
           )}

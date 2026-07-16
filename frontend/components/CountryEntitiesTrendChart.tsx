@@ -25,6 +25,7 @@ import {
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import { CountryEntityData } from '../types';
+import { tokens, monoNumber } from '../theme';
 
 interface CountryEntitiesTrendChartProps {
   country: string;
@@ -32,14 +33,6 @@ interface CountryEntitiesTrendChartProps {
   height?: number;
   dimension?: 'power' | 'moral' | 'both';
 }
-
-// Color palette for entities (more colors since we'll have many entities)
-const ENTITY_COLORS = [
-  '#e53e3e', '#3182ce', '#38a169', '#d69e2e', '#805ad5', 
-  '#ed8936', '#319795', '#c53030', '#2b6cb0', '#2f855a',
-  '#b7791f', '#553c9a', '#c05621', '#2c7a7b', '#9c4221',
-  '#e56b6f', '#6a4c93', '#f9844a', '#02c39a', '#f15bb5'
-];
 
 const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
   country,
@@ -141,48 +134,49 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
       const entity = entities.find(e => e.entity_name === entityName);
       
       return (
-        <Paper 
-          elevation={6} 
-          sx={{ 
-            p: 2, 
-            bgcolor: 'rgba(255, 255, 255, 0.95)',
-            border: `2px solid ${hoveredEntry.color}`,
-            borderRadius: 2,
-            minWidth: 200
+        <Paper
+          sx={{
+            p: 2,
+            bgcolor: tokens.surface,
+            border: `1px solid ${tokens.border}`,
+            borderRadius: '8px',
+            minWidth: 200,
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, color: tokens.ink }}>
               {entityName}
             </Typography>
             {entity && (
-              <Chip 
-                label={entity.entity_type} 
-                size="small" 
-                sx={{ ml: 1, fontSize: '0.7rem' }}
+              <Chip
+                label={entity.entity_type}
+                size="small"
+                sx={{ ml: 1, fontSize: '0.7rem', borderColor: tokens.border, color: tokens.inkMuted }}
+                variant="outlined"
               />
             )}
           </Box>
-          
-          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
             {formatDate(label)} • {country} Average
           </Typography>
-          
+
           <Box sx={{ mt: 1 }}>
-            <Typography 
-              variant="body2" 
-              sx={{ 
+            <Typography
+              variant="body2"
+              sx={{
+                ...monoNumber,
                 color: hoveredEntry.color,
-                fontWeight: 'bold',
-                fontSize: '0.9rem'
+                fontWeight: 600,
+                fontSize: '0.9rem',
               }}
             >
               {dimension}: {hoveredEntry.value.toFixed(2)}
             </Typography>
           </Box>
-          
+
           {entity && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+            <Typography variant="caption" sx={{ ...monoNumber, display: 'block', mt: 0.5, color: tokens.inkMuted }}>
               {entity.mention_count} total mentions
             </Typography>
           )}
@@ -210,10 +204,11 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
     }
   };
 
-  // Assign colors to entities
+  // Assign colors to entities — rotating categorical palette by first-appearance
+  // order (per-entity, not a fixed country/name -> color map).
   const getEntityColor = (entityName: string) => {
     const index = entityNames.indexOf(entityName);
-    return ENTITY_COLORS[index % ENTITY_COLORS.length];
+    return tokens.categorical[index % tokens.categorical.length];
   };
 
   // Toggle entity visibility
@@ -281,20 +276,20 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
             const isHidden = hiddenEntities.has(entity.entity_name);
             
             return (
-              <Chip 
-                key={entity.entity_name} 
-                label={`${entity.entity_name} (${entity.mention_count})`} 
-                size="small" 
+              <Chip
+                key={entity.entity_name}
+                label={`${entity.entity_name} (${entity.mention_count})`}
+                size="small"
                 onClick={() => toggleEntityVisibility(entity.entity_name)}
                 sx={{
-                  backgroundColor: isHidden ? 'action.hover' : `${color}20`,
-                  color: isHidden ? 'text.secondary' : color,
+                  backgroundColor: isHidden ? tokens.surfaceSunken : `${color}20`,
+                  color: isHidden ? tokens.inkMuted : color,
                   borderColor: color,
-                  fontWeight: 'bold',
+                  fontWeight: 600,
                   cursor: 'pointer',
                   opacity: isHidden ? 0.5 : 1,
                   '&:hover': {
-                    backgroundColor: isHidden ? 'action.selected' : `${color}30`,
+                    backgroundColor: isHidden ? tokens.surfaceSunken : `${color}30`,
                   }
                 }}
                 variant={isHidden ? "outlined" : "filled"}
@@ -310,13 +305,12 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           height: '80%',
-          bgcolor: 'background.paper',
-          borderRadius: 1,
-          border: '1px dashed',
-          borderColor: 'divider',
+          bgcolor: tokens.surface,
+          borderRadius: '10px',
+          border: `1px dashed ${tokens.border}`,
           p: 3
         }}>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" sx={{ color: tokens.inkMuted }}>
             No entity data available for {country}
           </Typography>
         </Box>
@@ -328,29 +322,31 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
             data={combinedData}
             margin={{ top: 20, right: 30, bottom: 20, left: 20 }}
           >
-            <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
-            <XAxis 
-              dataKey="date" 
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
+            <XAxis
+              dataKey="date"
               tickFormatter={formatDate}
               padding={{ left: 20, right: 20 }}
+              tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
             />
-            <YAxis 
-              domain={[-2, 2]} 
-              tickCount={9} 
+            <YAxis
+              domain={[-2, 2]}
+              tickCount={9}
+              tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
             >
-              <Label 
-                value="Sentiment Score" 
-                angle={-90} 
-                position="insideLeft" 
-                style={{ textAnchor: 'middle' }} 
+              <Label
+                value="Sentiment Score"
+                angle={-90}
+                position="insideLeft"
+                style={{ textAnchor: 'middle', fill: tokens.inkMuted }}
               />
             </YAxis>
             {/* @ts-ignore */}
-            <Tooltip 
-              content={<CustomTooltip />} 
-              cursor={{ stroke: '#666', strokeWidth: 1, strokeDasharray: '3 3' }}
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{ stroke: tokens.inkMuted, strokeWidth: 1, strokeDasharray: '3 3' }}
             />
-            <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+            <ReferenceLine y={0} stroke={tokens.inkMuted} strokeDasharray="3 3" />
             
             {/* Render lines for each entity */}
             {entityNames.map((entityName, index) => {

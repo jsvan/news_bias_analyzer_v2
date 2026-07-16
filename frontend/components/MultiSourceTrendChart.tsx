@@ -22,6 +22,7 @@ import {
   Grid
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
+import { tokens, categoricalColor, monoNumber } from '../theme';
 
 // Define interfaces
 interface TrendPoint {
@@ -37,21 +38,6 @@ interface MultiSourceTrendChartProps {
   height?: number;
   dimension?: 'power' | 'moral' | 'both';
 }
-
-// Country-based color palettes
-const COUNTRY_COLORS: Record<string, string[]> = {
-  'USA': ['#e53e3e', '#fc8181', '#feb2b2', '#fed7d7'], // Reds
-  'UK': ['#3182ce', '#63b3ed', '#90cdf4', '#bee3f8'], // Blues  
-  'Russia': ['#38a169', '#68d391', '#9ae6b4', '#c6f6d5'], // Greens
-  'China': ['#d69e2e', '#f6e05e', '#faf089', '#fefcbf'], // Yellows
-  'Germany': ['#805ad5', '#b794f6', '#d6bcfa', '#e9d8fd'], // Purples
-  'France': ['#ed8936', '#fbb454', '#fdd089', '#fdefdb'], // Oranges
-  'Canada': ['#319795', '#4fd1c7', '#81e6d9', '#b2f5ea'], // Teals
-  'Australia': ['#e53e3e', '#fc8181', '#feb2b2', '#fed7d7'], // Reds (share with USA)
-  'Japan': ['#9f7aea', '#c3aed6', '#d6bcfa', '#e9d8fd'], // Light purples
-  'India': ['#f56500', '#fd9801', '#feb454', '#fed7aa'], // Bright oranges
-  'default': ['#718096', '#a0aec0', '#cbd5e0', '#e2e8f0'] // Grays for unknown countries
-};
 
 // Line style patterns: Power lines are always dashed, Moral lines are always solid
 
@@ -164,27 +150,29 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       const sourceName = hoveredEntry.dataKey.replace(/_power|_moral/, '');
       const dimension = hoveredEntry.dataKey.includes('_power') ? 'Power' : 'Moral';
       const country = getCountryFromSource(sourceName);
-      const isCountryColored = COUNTRY_COLORS[country] !== undefined;
-      
+      // Country's base categorical color (no per-source alpha suffix) — safe to
+      // alpha-suffix again below for the chip background.
+      const countryBaseColor = categoricalColor(country, countryOrder);
+
       // Determine line style based on dimension
       const isDashed = dimension === 'Power';
-      
+
       return (
-        <Paper 
-          elevation={6} 
-          sx={{ 
-            p: 2, 
-            bgcolor: 'rgba(255, 255, 255, 0.95)',
+        <Paper
+          elevation={6}
+          sx={{
+            p: 2,
+            bgcolor: tokens.surface,
             border: `2px solid ${hoveredEntry.color}`,
             borderRadius: 2,
             minWidth: 180
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <Box 
-              sx={{ 
-                width: 20, 
-                height: 3, 
+            <Box
+              sx={{
+                width: 20,
+                height: 3,
                 bgcolor: hoveredEntry.color,
                 mr: 1,
                 borderRadius: 1,
@@ -193,52 +181,53 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                   backgroundSize: '8px 3px',
                   backgroundRepeat: 'repeat-x'
                 })
-              }} 
+              }}
             />
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: tokens.ink }}>
               {sourceName}
             </Typography>
           </Box>
-          
-          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
             {formatDate(label)}
           </Typography>
-          
+
           <Box sx={{ mt: 1 }}>
-            <Typography 
-              variant="body2" 
-              sx={{ 
+            <Typography
+              variant="body2"
+              sx={{
+                ...monoNumber,
                 color: hoveredEntry.color,
                 fontWeight: 'bold',
                 fontSize: '0.9rem'
               }}
             >
               {dimension}: {
-                typeof hoveredEntry.value === 'number' && !isNaN(hoveredEntry.value) 
-                  ? (chartMode === 'sentiment' 
-                      ? hoveredEntry.value.toFixed(2) 
+                typeof hoveredEntry.value === 'number' && !isNaN(hoveredEntry.value)
+                  ? (chartMode === 'sentiment'
+                      ? hoveredEntry.value.toFixed(2)
                       : `${hoveredEntry.value.toFixed(1)} (net sum)`)
                   : 'No data'
               }
             </Typography>
           </Box>
-          
+
           <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Chip 
-              label={country} 
-              size="small" 
+            <Chip
+              label={country}
+              size="small"
               sx={{
-                backgroundColor: isCountryColored ? `${hoveredEntry.color}20` : 'action.hover',
-                color: hoveredEntry.color,
+                backgroundColor: `${countryBaseColor}20`,
+                color: countryBaseColor,
                 fontWeight: 'bold',
                 fontSize: '0.7rem'
               }}
             />
-            <Chip 
-              label={isDashed ? "dashed" : "solid"} 
-              size="small" 
+            <Chip
+              label={isDashed ? "dashed" : "solid"}
+              size="small"
               variant="outlined"
-              sx={{ fontSize: '0.7rem', height: 20 }}
+              sx={{ fontSize: '0.7rem', height: 20, borderColor: tokens.border, color: tokens.inkMuted }}
             />
           </Box>
         </Paper>
@@ -282,13 +271,11 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     if (match) {
       return match[1];
     }
-    
-    // If no parentheses, check if the source name itself is a country
-    if (COUNTRY_COLORS[sourceName]) {
-      return sourceName;
-    }
-    
-    return '';
+
+    // No parenthetical country given — treat the bare source name as its own
+    // grouping key. (Previously this checked membership in a hardcoded country
+    // list; that list is gone along with the fixed color map, see below.)
+    return sourceName;
   };
 
   // Group sources by country for better visualization
@@ -299,12 +286,20 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     return acc;
   }, {} as Record<string, string[]>);
 
-  // Assign colors to sources based on country
+  // Countries in first-appearance order, used to assign stable categorical colors —
+  // replaces the old fixed country -> color table (USA=red/UK=blue read as a
+  // partisan "sides" mapping, which the design system bans).
+  const countryOrder = Object.keys(sourcesByCountry);
+
+  // Assign colors to sources based on country: same categorical hue per country,
+  // a lighter alpha shade per source within that country (same visual grouping
+  // the old per-country 4-shade palette gave, without a fixed name->color map).
+  const shadeAlphas = ['', 'CC', '99', '66'];
   const getSourceColor = (sourceName: string) => {
     const country = getCountryFromSource(sourceName);
-    const countryPalette = COUNTRY_COLORS[country] || COUNTRY_COLORS['default'];
+    const baseColor = categoricalColor(country, countryOrder);
     const sourceIndexInCountry = sourcesByCountry[country].indexOf(sourceName);
-    return countryPalette[sourceIndexInCountry % countryPalette.length];
+    return `${baseColor}${shadeAlphas[sourceIndexInCountry % shadeAlphas.length]}`;
   };
 
 
@@ -375,14 +370,13 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       {hasData && (
         <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {Object.entries(sourcesByCountry).map(([country, sources]) => {
-            const countryPalette = COUNTRY_COLORS[country] || COUNTRY_COLORS['default'];
-            const mainColor = countryPalette[0];
-            
+            const mainColor = categoricalColor(country, countryOrder);
+
             return (
-              <Chip 
-                key={country} 
-                label={`${country} (${sources.length})`} 
-                size="small" 
+              <Chip
+                key={country}
+                label={`${country} (${sources.length})`}
+                size="small"
                 sx={{
                   backgroundColor: `${mainColor}20`,
                   color: mainColor,
@@ -402,13 +396,12 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           height: '80%',
-          bgcolor: 'background.paper',
+          bgcolor: tokens.surface,
           borderRadius: 1,
-          border: '1px dashed',
-          borderColor: 'divider',
+          border: `1px dashed ${tokens.border}`,
           p: 3
         }}>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" sx={{ color: tokens.inkMuted }}>
             No source-specific trend data available for {entityName}
           </Typography>
         </Box>
@@ -421,31 +414,35 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
             data={combinedData}
             margin={{ top: 20, right: 30, bottom: 20, left: 20 }}
           >
-            <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
-            <XAxis 
-              dataKey="date" 
+            <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} opacity={0.6} />
+            <XAxis
+              dataKey="date"
               tickFormatter={formatDate}
               padding={{ left: 20, right: 20 }}
+              stroke={tokens.border}
+              tick={{ fill: tokens.inkMuted, fontSize: 11 }}
             />
-            <YAxis 
+            <YAxis
               domain={chartMode === 'sentiment' ? [-2, 2] : [-50, 50]}
               tickCount={chartMode === 'sentiment' ? 9 : 11}
+              stroke={tokens.border}
+              tick={{ fill: tokens.inkMuted, fontSize: 11 }}
             >
-              <Label 
+              <Label
                 value={chartMode === 'sentiment' ? "Sentiment Score" : "Net Sentiment Sum"}
-                angle={-90} 
-                position="insideLeft" 
-                style={{ textAnchor: 'middle' }} 
+                angle={-90}
+                position="insideLeft"
+                style={{ textAnchor: 'middle', fill: tokens.inkMuted }}
               />
             </YAxis>
-            <Tooltip 
-              content={<CustomTooltip />} 
-              cursor={{ stroke: '#666', strokeWidth: 1, strokeDasharray: '3 3' }}
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{ stroke: tokens.inkMuted, strokeWidth: 1, strokeDasharray: '3 3' }}
               allowEscapeViewBox={{ x: true, y: true }}
               animationDuration={0}
               animationEasing="linear"
             />
-            <ReferenceLine y={0} stroke="#666" strokeDasharray="3 3" />
+            <ReferenceLine y={0} stroke={tokens.inkMuted} strokeDasharray="3 3" />
             
             {/* Render lines for each source */}
             {sourceNames.map((sourceName, index) => {
@@ -505,15 +502,19 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       
       {/* Permanent Legend Below Chart */}
       {hasData && (
-        <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
+        <Box sx={{ mt: 2, p: 2, bgcolor: tokens.surface, borderRadius: 1, border: `1px solid ${tokens.border}` }}>
+          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold', color: tokens.ink }}>
             Legend
           </Typography>
           <Grid container spacing={1}>
             {sourceNames.map((sourceName) => {
               const color = getSourceColor(sourceName);
               const country = getCountryFromSource(sourceName);
-              
+              // Chip background needs the plain country color — `color` above may
+              // already carry an alpha suffix, and stacking a second one on top
+              // of it would produce an invalid hex string.
+              const countryBaseColor = categoricalColor(country, countryOrder);
+
               return (
                 <Grid item xs={12} sm={6} md={4} lg={3} key={sourceName}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -530,7 +531,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                             borderRadius: 1
                           }} 
                         />
-                        <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                        <Typography variant="caption" sx={{ fontSize: '0.75rem', color: tokens.ink }}>
                           {sourceName} (Power)
                         </Typography>
                       </Box>
@@ -547,7 +548,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                             borderRadius: 1
                           }} 
                         />
-                        <Typography variant="caption" sx={{ fontSize: '0.75rem' }}>
+                        <Typography variant="caption" sx={{ fontSize: '0.75rem', color: tokens.ink }}>
                           {sourceName} (Moral)
                         </Typography>
                       </Box>
@@ -555,12 +556,12 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                     
                     {/* Country indicator */}
                     <Box sx={{ ml: 3, mt: 0.5 }}>
-                      <Chip 
-                        label={country} 
-                        size="small" 
+                      <Chip
+                        label={country}
+                        size="small"
                         sx={{
-                          backgroundColor: `${color}15`,
-                          color: color,
+                          backgroundColor: `${countryBaseColor}15`,
+                          color: countryBaseColor,
                           fontSize: '0.65rem',
                           height: 16,
                           fontWeight: 'bold'

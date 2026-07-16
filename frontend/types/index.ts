@@ -10,7 +10,22 @@ export interface Entity {
   avg_moral_score?: number;
 }
 
-export type EntityType = 'person' | 'country' | 'organization' | 'political_party' | 'company' | string;
+// Matches analyzer/prompts.py::ENTITY_TYPES (single source of truth) - 6 coarse categories,
+// deliberately no fine-grained person/org sub-typing (e.g. no separate "political_leader"
+// vs "business_leader" - both collapse to "person").
+export type EntityType = 'country' | 'person' | 'business' | 'organization' | 'event' | 'concept' | string;
+
+// Matches server/export_snapshots.py's meta.json shape. generated_at is snapshot build
+// time; most_recent_article_date is the honest freshness signal - they can diverge a lot
+// if scraping has stalled, which is exactly the case the staleness banner exists for.
+export interface SnapshotMeta {
+  generated_at: string;
+  most_recent_article_date: string | null;
+  entity_count: number;
+  hist_days: number[];
+  country_days: number[];
+  countries: string[];
+}
 
 // Sentiment Data Types
 export interface SentimentPoint {
@@ -216,5 +231,12 @@ export interface CountryTopEntitiesResponse {
   country: string;
   entities: CountryEntityData[];
   available_newspapers: string[];
+  time_period_days: number;
+}
+
+export interface NewspaperTopEntitiesResponse {
+  newspaper_name: string;
+  country: string;
+  entities: CountryEntityData[];
   time_period_days: number;
 }

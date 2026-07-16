@@ -43,6 +43,8 @@ function load(relPath: string): Promise<any> {
 const entityBundle = (id: number) => load(`entity/${id}.json`);
 
 export const staticData = {
+  getMeta: async () => load('meta.json'),
+
   getEntities: async (params: any = {}) => {
     const entities = await load('entities.json');
     let result = entities;
@@ -89,5 +91,34 @@ export const staticData = {
   getCountryTopEntities: async (country: string, params: any = {}) => {
     const days = nearestDays(params.days ?? 30, COUNTRY_DAYS);
     return load(`country/${country}_${days}.json`);
+  },
+
+  // Derived from the country snapshot's per-entity `newspapers` breakdown —
+  // there's no separate per-newspaper snapshot file, so this filters/reshapes
+  // the country data we already have rather than requiring a new export.
+  getNewspaperTopEntities: async (newspaperName: string, params: any = {}) => {
+    const sources = await load('sources.json');
+    const source = sources.find((s: any) => s.name === newspaperName);
+    const country = source?.country ?? 'Unknown';
+    const days = nearestDays(params.days ?? 30, COUNTRY_DAYS);
+    const countryData = await load(`country/${country}_${days}.json`);
+
+    const entities = (countryData.entities ?? [])
+      .filter((e: any) => e.newspapers?.[newspaperName]?.length)
+      .map((e: any) => {
+        const trends = e.newspapers[newspaperName];
+        return {
+          entity_name: e.entity_name,
+          entity_type: e.entity_type,
+          mention_count: trends.reduce((s: number, t: any) => s + t.mention_count, 0),
+          avg_power_score: trends.reduce((s: number, t: any) => s + t.power_score, 0) / trends.length,
+          avg_moral_score: trends.reduce((s: number, t: any) => s + t.moral_score, 0) / trends.length,
+          newspapers: { [newspaperName]: trends },
+        };
+      })
+      .sort((a: any, b: any) => b.mention_count - a.mention_count)
+      .slice(0, params.limit ?? 10);
+
+    return { newspaper_name: newspaperName, country, entities, time_period_days: days };
   },
 };

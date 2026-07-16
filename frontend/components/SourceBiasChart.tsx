@@ -23,6 +23,7 @@ import {
   Chip
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
+import { tokens, monoNumber } from '../theme';
 
 // Define interfaces
 interface SourceBiasPoint {
@@ -103,11 +104,14 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
-        <Paper elevation={3} sx={{ p: 2, bgcolor: 'background.paper' }}>
-          <Typography variant="subtitle2">{label}</Typography>
+        <Paper
+          elevation={0}
+          sx={{ p: 2, bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: '8px' }}
+        >
+          <Typography variant="subtitle2" sx={{ color: tokens.ink }}>{label}</Typography>
           {payload.map((entry: any, index: number) => (
             <Box key={`item-${index}`} sx={{ color: entry.color, mt: 1 }}>
-              <Typography variant="caption" sx={{ display: 'block' }}>
+              <Typography variant="caption" sx={{ display: 'block', ...monoNumber }}>
                 {entry.name}: {entry.value.toFixed(2)}
               </Typography>
             </Box>
@@ -122,7 +126,7 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
     <Box sx={{ width: '100%', height }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Typography variant="h6" sx={{ mr: 1 }}>
+          <Typography variant="h6" sx={{ mr: 1, color: tokens.ink }}>
             {title}
           </Typography>
           <MuiTooltip title="This chart shows how different news sources portray the same entities. The further from center, the more positive the sentiment.">
@@ -198,13 +202,12 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
           alignItems: 'center',
           justifyContent: 'center',
           height: '80%',
-          bgcolor: 'background.paper',
-          borderRadius: 1,
-          border: '1px dashed',
-          borderColor: 'divider',
+          bgcolor: tokens.surface,
+          borderRadius: '10px',
+          border: `1px dashed ${tokens.border}`,
           p: 3
         }}>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" sx={{ color: tokens.inkMuted }}>
             Not enough data available for comparison. Select different entity types or sources.
           </Typography>
         </Box>
@@ -213,9 +216,9 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
       {hasEnoughData && (
         <ResponsiveContainer width="100%" height="90%">
           <RadarChart outerRadius={150} data={radarData}>
-            <PolarGrid />
-            <PolarAngleAxis dataKey="entity" />
-            <PolarRadiusAxis domain={[-2, 2]} tickCount={5} />
+            <PolarGrid stroke={tokens.border} />
+            <PolarAngleAxis dataKey="entity" tick={{ fill: tokens.inkMuted, fontSize: 12 }} />
+            <PolarRadiusAxis domain={[-2, 2]} tickCount={5} tick={{ fill: tokens.inkMuted, fontSize: 11 }} />
             <Tooltip content={<CustomTooltip />} />
 
             {/* Create a radar for each selected source */}
@@ -224,8 +227,7 @@ const SourceBiasChart: React.FC<SourceBiasChartProps> = ({
               if (!source) return null;
 
               // Generate a different color for each source
-              const colors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#0088fe', '#00c49f'];
-              const color = colors[index % colors.length];
+              const color = tokens.categorical[index % tokens.categorical.length];
 
               return (
                 <Radar

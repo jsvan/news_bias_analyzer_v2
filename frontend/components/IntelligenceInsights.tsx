@@ -28,6 +28,8 @@ import {
   CompareArrows,
   Grain
 } from '@mui/icons-material';
+import { tokens, monoNumber } from '../theme';
+import { intelligenceApi } from '../services/api';
 
 interface IntelligenceFinding {
   id: number;
@@ -73,17 +75,10 @@ const IntelligenceInsights: React.FC = () => {
       setLoading(true);
       
       // Load findings and trends in parallel
-      const [findingsResponse, trendsResponse] = await Promise.all([
-        fetch('/intelligence/findings?limit=20'),
-        fetch('/intelligence/trends?weeks_back=12')
+      const [findingsData, trendsData] = await Promise.all([
+        intelligenceApi.getFindings({ limit: 20 }),
+        intelligenceApi.getTrends({ weeks_back: 12 })
       ]);
-
-      if (!findingsResponse.ok || !trendsResponse.ok) {
-        throw new Error('Failed to load intelligence data');
-      }
-
-      const findingsData = await findingsResponse.json();
-      const trendsData = await trendsResponse.json();
 
       setFindings(findingsData);
       setTrends(trendsData);
@@ -249,114 +244,129 @@ const IntelligenceInsights: React.FC = () => {
           <Tab label={`Polarization (${filterFindings('polarization').length})`} />
         </Tabs>
 
-        <CardContent>
+        <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
           {getTabFindings().length === 0 ? (
-            <Alert severity="info">
-              No {selectedTab === 0 ? '' : 'significant '}findings detected in the current analysis period.
-            </Alert>
+            <Box sx={{ p: 2 }}>
+              <Alert severity="info">
+                No {selectedTab === 0 ? '' : 'significant '}findings detected in the current analysis period.
+              </Alert>
+            </Box>
           ) : (
-            <Grid container spacing={2}>
-              {getTabFindings().map((finding) => (
-                <Grid item xs={12} key={finding.id}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Box display="flex" alignItems="flex-start" justifyContent="space-between">
-                        <Box display="flex" alignItems="center" gap={1} flex={1}>
-                          {getCategoryIcon(finding.dashboard_category)}
-                          <Box>
-                            <Typography variant="h6" component="div">
-                              {finding.title}
-                            </Typography>
-                            <Typography variant="body2" color="textSecondary">
-                              {finding.description}
-                            </Typography>
-                          </Box>
-                        </Box>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          <Chip
-                            label={finding.dashboard_category}
-                            color={getCategoryColor(finding.dashboard_category)}
-                            size="small"
-                          />
-                          <IconButton
-                            size="small"
-                            onClick={() => toggleCardExpansion(finding.id)}
-                          >
-                            {expandedCards.has(finding.id) ? <ExpandLess /> : <ExpandMore />}
-                          </IconButton>
-                        </Box>
-                      </Box>
+            getTabFindings().map((finding, i) => {
+              const isExpanded = expandedCards.has(finding.id);
+              return (
+                <Box key={finding.id} sx={{ borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}` }}>
+                  <Box
+                    onClick={() => toggleCardExpansion(finding.id)}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1.5,
+                      px: 2,
+                      py: 1.5,
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: tokens.surfaceSunken },
+                    }}
+                  >
+                    <Box sx={{ mt: 0.25, flexShrink: 0 }}>
+                      {getCategoryIcon(finding.dashboard_category)}
+                    </Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="subtitle2" sx={{ color: tokens.ink }}>
+                        {finding.title}
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                        {finding.description}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={finding.dashboard_category}
+                      color={getCategoryColor(finding.dashboard_category) as any}
+                      size="small"
+                      sx={{ flexShrink: 0 }}
+                    />
+                    <IconButton
+                      size="small"
+                      onClick={(e) => { e.stopPropagation(); toggleCardExpansion(finding.id); }}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      {isExpanded ? <ExpandLess /> : <ExpandMore />}
+                    </IconButton>
+                  </Box>
 
-                      <Collapse in={expandedCards.has(finding.id)}>
-                        <Divider sx={{ my: 2 }} />
-                        <Grid container spacing={2}>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <Typography variant="body2" color="textSecondary">
-                              Statistical Significance
-                            </Typography>
-                            <Typography variant="body1">
-                              {formatPValue(finding.p_value)}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <Typography variant="body2" color="textSecondary">
-                              Severity Score
-                            </Typography>
-                            <Typography variant="body1">
-                              {(finding.severity_score * 100).toFixed(0)}%
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <Typography variant="body2" color="textSecondary">
-                              Baseline Value
-                            </Typography>
-                            <Typography variant="body1">
-                              {finding.baseline_value.toFixed(2)}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={12} sm={6} md={3}>
-                            <Typography variant="body2" color="textSecondary">
-                              Current Value
-                            </Typography>
-                            <Typography variant="body1">
-                              {finding.current_value.toFixed(2)}
-                              {finding.change_magnitude && (
-                                <Typography
-                                  component="span"
-                                  color={finding.change_magnitude > 0 ? 'success.main' : 'error.main'}
-                                  sx={{ ml: 1 }}
-                                >
-                                  ({finding.change_magnitude > 0 ? '+' : ''}
-                                  {finding.change_magnitude.toFixed(2)})
-                                </Typography>
-                              )}
-                            </Typography>
-                          </Grid>
-                          {finding.consecutive_days && (
-                            <Grid item xs={12} sm={6} md={3}>
-                              <Typography variant="body2" color="textSecondary">
-                                Duration
-                              </Typography>
-                              <Typography variant="body1">
-                                {finding.consecutive_days} consecutive days
-                              </Typography>
-                            </Grid>
-                          )}
-                          <Grid item xs={12} sm={6} md={3}>
-                            <Typography variant="body2" color="textSecondary">
-                              Detected
-                            </Typography>
-                            <Typography variant="body1">
-                              {new Date(finding.detection_date).toLocaleDateString()}
-                            </Typography>
-                          </Grid>
+                  <Collapse in={isExpanded}>
+                    <Box sx={{ pl: '52px', pr: 2, pb: 2 }}>
+                      <Divider sx={{ mb: 2, borderColor: tokens.border }} />
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6} md={3}>
+                          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                            Statistical Significance
+                          </Typography>
+                          <Typography variant="body1" sx={monoNumber}>
+                            {formatPValue(finding.p_value)}
+                          </Typography>
                         </Grid>
-                      </Collapse>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
+                        <Grid item xs={12} sm={6} md={3}>
+                          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                            Severity Score
+                          </Typography>
+                          <Typography variant="body1" sx={monoNumber}>
+                            {(finding.severity_score * 100).toFixed(0)}%
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6} md={3}>
+                          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                            Baseline Value
+                          </Typography>
+                          <Typography variant="body1" sx={monoNumber}>
+                            {finding.baseline_value.toFixed(2)}
+                          </Typography>
+                        </Grid>
+                        <Grid item xs={12} sm={6} md={3}>
+                          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                            Current Value
+                          </Typography>
+                          <Typography variant="body1" sx={monoNumber}>
+                            {finding.current_value.toFixed(2)}
+                            {finding.change_magnitude && (
+                              <Typography
+                                component="span"
+                                sx={{
+                                  ...monoNumber,
+                                  ml: 1,
+                                  color: finding.change_magnitude > 0 ? tokens.hero : tokens.villain,
+                                }}
+                              >
+                                ({finding.change_magnitude > 0 ? '+' : ''}
+                                {finding.change_magnitude.toFixed(2)})
+                              </Typography>
+                            )}
+                          </Typography>
+                        </Grid>
+                        {finding.consecutive_days && (
+                          <Grid item xs={12} sm={6} md={3}>
+                            <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                              Duration
+                            </Typography>
+                            <Typography variant="body1">
+                              {finding.consecutive_days} consecutive days
+                            </Typography>
+                          </Grid>
+                        )}
+                        <Grid item xs={12} sm={6} md={3}>
+                          <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                            Detected
+                          </Typography>
+                          <Typography variant="body1">
+                            {new Date(finding.detection_date).toLocaleDateString()}
+                          </Typography>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  </Collapse>
+                </Box>
+              );
+            })
           )}
         </CardContent>
       </Card>
