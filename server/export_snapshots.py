@@ -6,7 +6,10 @@ their return values to files — the snapshot shapes therefore always match the
 API shapes, with nothing duplicated.
 
 Output layout (under --out, default frontend/public/snapshots/):
-    meta.json                    {generated_at, entity_count, hist_days, countries}
+    meta.json                    {generated_at, most_recent_article_date, entity_count,
+                                  hist_days, countries} — generated_at is snapshot build
+                                  time; most_recent_article_date is the honest freshness
+                                  signal (the two can diverge a lot if scraping stalls)
     entities.json                top-N entities (dashboard list + client-side search)
     sources.json                 all sources
     entity/{id}.json             {entity, distribution, historical: {days: ...},
@@ -46,8 +49,9 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     """Drive the export given fetcher callables (injected so it's testable).
 
     fetchers: entities(limit), sources(), distribution(id), historical(id, days),
-              source_historical(id, days), country_top(country, days) — each
-              returns a JSON-serializable value or raises to skip.
+              source_historical(id, days), country_top(country, days),
+              most_recent_article_date() — each returns a JSON-serializable value or
+              raises to skip (most_recent_article_date raising just omits the field).
     """
     counts = {"entities": 0, "entity_files": 0, "country_files": 0, "skipped": 0}
 
@@ -82,13 +86,21 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             write_json(out_dir, f"country/{country}_{days}.json", data)
             counts["country_files"] += 1
 
-    write_json(out_dir, "meta.json", {
+    meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entity_count": counts["entities"],
         "hist_days": HIST_DAYS,
         "country_days": COUNTRY_DAYS,
         "countries": COUNTRIES,
-    })
+    }
+    try:
+        # Distinct from generated_at (snapshot build time): the actual most recent
+        # article date, so the frontend can honestly say "data current through X"
+        # instead of implying the snapshot's build time reflects live data.
+        meta["most_recent_article_date"] = fetchers["most_recent_article_date"]()
+    except Exception as ex:
+        print(f"  skip most_recent_article_date: {ex}")
+    write_json(out_dir, "meta.json", meta)
     return counts
 
 
@@ -96,6 +108,8 @@ def live_fetchers(session):
     """Wrap the real API handlers. Imported lazily — needs the full server env."""
     import asyncio
     from fastapi.encoders import jsonable_encoder
+    from sqlalchemy import func
+    from database.models import NewsArticle
     from server.extension_api import (
         get_entities, get_sources, get_entity_distribution,
         get_historical_sentiment, get_source_historical_sentiment,
@@ -104,6 +118,10 @@ def live_fetchers(session):
 
     def run(coro):
         return jsonable_encoder(asyncio.run(coro))
+
+    def most_recent_article_date():
+        ts = session.query(func.max(NewsArticle.scraped_at)).scalar()
+        return ts.isoformat() if ts else None
 
     return {
         "entities": lambda limit: jsonable_encoder(
@@ -117,6 +135,7 @@ def live_fetchers(session):
             get_source_historical_sentiment(eid, days=days, countries=None, db=session)),
         "country_top": lambda country, days: run(
             get_country_top_entities(country, days=days, limit=10, session=session)),
+        "most_recent_article_date": most_recent_article_date,
     }
 
 
@@ -158,6 +177,7 @@ def self_test():
                                               "available_newspapers": [],
                                               "time_period_days": days}
                        if country != "India" else (_ for _ in ()).throw(ValueError("no data")),
+        "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
     with tempfile.TemporaryDirectory() as out:
@@ -180,6 +200,7 @@ def self_test():
         with open(os.path.join(out, "meta.json")) as f:
             meta = json.load(f)
         assert meta["entity_count"] == 2 and meta["hist_days"] == HIST_DAYS
+        assert meta["most_recent_article_date"] == "2026-01-01T00:00:00+00:00"
 
     print("export_snapshots self-test OK")
 
