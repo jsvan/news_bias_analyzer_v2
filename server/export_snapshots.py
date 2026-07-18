@@ -128,7 +128,9 @@ def live_fetchers(session):
             get_entities(entity_type=None, search=None, limit=limit, db=session)),
         "sources": lambda: jsonable_encoder(get_sources(db=session)),
         "distribution": lambda eid: run(
-            get_entity_distribution(eid, country=None, source_id=None, db=session)),
+            # days=None explicitly: called as a plain function, the FastAPI
+            # Query default object would otherwise be passed through (truthy).
+            get_entity_distribution(eid, country=None, source_id=None, days=None, db=session)),
         "historical": lambda eid, days: run(
             get_historical_sentiment(eid, days=days, db=session)),
         "source_historical": lambda eid, days: run(

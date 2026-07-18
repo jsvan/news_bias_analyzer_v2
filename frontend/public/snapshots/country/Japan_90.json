@@ -1,1 +1,1 @@
-{"country":"Japan","entities":[],"available_newspapers":["NHK World","Kyodo News","Asahi Shimbun","Mainichi Shimbun"],"time_period_days":90}
+{"country":"Japan","entities":[{"entity_name":"Japan","entity_type":"country","mention_count":12,"avg_power_score":0.0,"avg_moral_score":-0.08333333333333333,"newspapers":{}},{"entity_name":"United States","entity_type":"country","mention_count":5,"avg_power_score":1.0,"avg_moral_score":-0.2,"newspapers":{}}],"available_newspapers":["NHK World","Kyodo News","Asahi Shimbun","Mainichi Shimbun","Yomiuri Shimbun"],"time_period_days":90}
