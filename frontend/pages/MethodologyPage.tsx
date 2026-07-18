@@ -367,7 +367,7 @@ country_a=USA&country_b=UK:
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="lagged-correlation" title="Lead-lag correlation" status="designed">
+      <Section id="lagged-correlation" title="Lead-lag correlation" status="computed">
         <Bullets
           items={[
             'Does one sphere\'s sentiment move first, and does another follow — not answerable by the dashboard today.',
@@ -382,12 +382,12 @@ best_lag = argmax |corr|`}
 → lagged_correlation recovers best_lag=+2, corr>0.90, p<0.05`}
         </Example>
         <Meta>
-          <Kernel>lagged_correlation</Kernel> · self-tested only — no endpoint, no frontend caller
+          <Kernel>lagged_correlation</Kernel> · <Kernel>synchrony_endpoints.py::get_lead_lag</Kernel> → <Kernel>GET /narrative/lead-lag</Kernel> · live endpoint, no dashboard caller yet
         </Meta>
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="synchrony" title="Synchrony score" status="designed">
+      <Section id="synchrony" title="Synchrony score" status="computed">
         <Bullets
           items={[
             'For one entity, do sources in a cluster move together (coordinated) or independently (organic)?',
@@ -402,8 +402,7 @@ only sources with full (no-gap) coverage across the window are compared`}
 5 fully independent sources                        → synchrony_score < 0.30`}
         </Example>
         <Meta>
-          <Kernel>synchrony_score</Kernel> · self-tested, used for real inside <Kernel>event_study.py</Kernel> (below) — but that script is
-          standalone, so this kernel has no endpoint and no dashboard caller
+          <Kernel>synchrony_score</Kernel> · <Kernel>synchrony_endpoints.py::get_synchrony</Kernel> → <Kernel>GET /narrative/synchrony</Kernel> (per-cluster, with an all-sources baseline) · also used inside <Kernel>event_study.py</Kernel> · live endpoint, no dashboard caller yet
         </Meta>
       </Section>
 

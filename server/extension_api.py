@@ -47,6 +47,7 @@ from server.routers.similarity_endpoints import router as similarity_router
 from server.routers.narrative_endpoints import router as narrative_router
 from server.routers.embeddings_endpoints import router as embeddings_router
 from server.routers.drift_endpoints import router as drift_router
+from server.routers.synchrony_endpoints import router as synchrony_router
 from server.routers.dashboard_endpoints import router as dashboard_router
 from intelligence.api_endpoints import router as intelligence_router  # scheduled for removal with intelligence/
 
@@ -1536,6 +1537,7 @@ app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
 app.include_router(narrative_router, tags=["Narrative"])
 app.include_router(embeddings_router, tags=["Narrative"])
 app.include_router(drift_router, tags=["Narrative"])
+app.include_router(synchrony_router, tags=["Narrative"])
 app.include_router(dashboard_router, tags=["Dashboard"])
 app.include_router(intelligence_router)  # declares its own /intelligence prefix
 
