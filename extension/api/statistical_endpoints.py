@@ -1062,22 +1062,22 @@ class CountryTopEntitiesResponse(BaseModel):
 @router.get("/country/{country}/top-entities", response_model=CountryTopEntitiesResponse)
 async def get_country_top_entities(
     country: str,
-    days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+    days: Optional[int] = Query(None, ge=7, le=90, description="Number of days to look back; omit for all time"),
     limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
     session: Session = Depends(get_session)
 ):
     """
     Get the top entities discussed by newspapers in a specific country over the past month,
     with sentiment flow data for each newspaper.
-    
-    This endpoint provides data for country-specific pages showing the most prominent 
+
+    This endpoint provides data for country-specific pages showing the most prominent
     entities and their sentiment trajectories across different newspapers within that country.
-    
+
     Args:
         country: The country to analyze (e.g., 'USA', 'UK', 'Germany')
-        days: Number of days to look back (default: 30)
+        days: Number of days to look back; omit/None for all time
         limit: Number of top entities to return (default: 10)
-        
+
     Returns:
         Top entities with their sentiment flows across newspapers in that country
     """
@@ -1085,12 +1085,16 @@ async def get_country_top_entities(
         if session is None:
             logger.error(f"Database session is None for country analysis '{country}'")
             raise HTTPException(status_code=500, detail="Database connection not available")
-        
-        logger.info(f"🔍 Getting top {limit} entities for country '{country}' over {days} days")
-        
-        # Calculate date range
+
+        logger.info(f"🔍 Getting top {limit} entities for country '{country}' over "
+                    f"{days if days is not None else 'all time'}")
+
+        # Calculate date range. days=None (all time) -> no date filter at all, not a
+        # huge-but-still-bounded window - real coverage can predate any fixed lookback.
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
+        start_date = end_date - timedelta(days=days) if days is not None else None
+        date_filters = [EntityMention.created_at >= start_date, EntityMention.created_at <= end_date] \
+            if start_date is not None else []
         
         # Get all newspapers (sources) in this country
         country_sources = session.query(NewsSource).filter(
@@ -1122,8 +1126,7 @@ async def get_country_top_entities(
             NewsArticle, EntityMention.article_id == NewsArticle.id
         ).filter(
             NewsArticle.source_id.in_(source_ids),
-            EntityMention.created_at >= start_date,
-            EntityMention.created_at <= end_date,
+            *date_filters,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
         ).group_by(resolved_id).having(
@@ -1153,7 +1156,7 @@ async def get_country_top_entities(
                 country=country,
                 entities=[],
                 available_newspapers=list(source_names.values()),
-                time_period_days=days
+                time_period_days=days or 0
             )
         
         logger.info(f"📊 Found {len(top_entities)} top entities for {country}")
@@ -1176,8 +1179,7 @@ async def get_country_top_entities(
             ).filter(
                 EntityMention.entity_id == entity_id,
                 NewsArticle.source_id.in_(source_ids),
-                EntityMention.created_at >= start_date,
-                EntityMention.created_at <= end_date,
+                *date_filters,
                 EntityMention.power_score.isnot(None),
                 EntityMention.moral_score.isnot(None)
             ).group_by(
@@ -1247,9 +1249,9 @@ async def get_country_top_entities(
             country=country,
             entities=entities_data,
             available_newspapers=list(source_names.values()),
-            time_period_days=days
+            time_period_days=days or 0
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1267,21 +1269,21 @@ class NewspaperTopEntitiesResponse(BaseModel):
 @router.get("/newspaper/{newspaper_name}/top-entities", response_model=NewspaperTopEntitiesResponse)
 async def get_newspaper_top_entities(
     newspaper_name: str,
-    days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+    days: Optional[int] = Query(None, ge=7, le=90, description="Number of days to look back; omit for all time"),
     limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
     session: Session = Depends(get_session)
 ):
     """
     Get the top entities discussed by a specific newspaper over the specified time period.
-    
-    This endpoint provides data for newspaper-specific analysis showing the most prominent 
+
+    This endpoint provides data for newspaper-specific analysis showing the most prominent
     entities and their sentiment trajectories for a single newspaper.
-    
+
     Args:
         newspaper_name: The name of the newspaper to analyze
-        days: Number of days to look back (default: 30)
+        days: Number of days to look back; omit/None for all time
         limit: Number of top entities to return (default: 10)
-        
+
     Returns:
         Top entities discussed by the specified newspaper
     """
@@ -1289,12 +1291,15 @@ async def get_newspaper_top_entities(
         if session is None:
             logger.error(f"Database session is None for newspaper analysis '{newspaper_name}'")
             raise HTTPException(status_code=500, detail="Database connection not available")
-        
-        logger.info(f"🔍 Getting top {limit} entities for newspaper '{newspaper_name}' over {days} days")
-        
-        # Calculate date range
+
+        logger.info(f"🔍 Getting top {limit} entities for newspaper '{newspaper_name}' over "
+                    f"{days if days is not None else 'all time'}")
+
+        # Calculate date range. days=None (all time) -> no date filter at all.
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
+        start_date = end_date - timedelta(days=days) if days is not None else None
+        date_filters = [EntityMention.created_at >= start_date, EntityMention.created_at <= end_date] \
+            if start_date is not None else []
         
         # Find the newspaper source
         newspaper_source = session.query(NewsSource).filter(
@@ -1326,8 +1331,7 @@ async def get_newspaper_top_entities(
             NewsArticle, EntityMention.article_id == NewsArticle.id
         ).filter(
             NewsArticle.source_id == newspaper_source.id,
-            EntityMention.created_at >= start_date,
-            EntityMention.created_at <= end_date,
+            *date_filters,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
         ).group_by(
@@ -1346,7 +1350,7 @@ async def get_newspaper_top_entities(
                 newspaper_name=newspaper_source.name,
                 country=newspaper_source.country,
                 entities=[],
-                time_period_days=days
+                time_period_days=days or 0
             )
         
         logger.info(f"📊 Found {len(top_entities)} top entities for {newspaper_name}")
@@ -1368,8 +1372,7 @@ async def get_newspaper_top_entities(
             ).filter(
                 EntityMention.entity_id == entity_id,
                 NewsArticle.source_id == newspaper_source.id,
-                EntityMention.created_at >= start_date,
-                EntityMention.created_at <= end_date,
+                *date_filters,
                 EntityMention.power_score.isnot(None),
                 EntityMention.moral_score.isnot(None)
             ).group_by(
@@ -1408,9 +1411,9 @@ async def get_newspaper_top_entities(
             newspaper_name=newspaper_source.name,
             country=newspaper_source.country,
             entities=entities_data,
-            time_period_days=days
+            time_period_days=days or 0
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

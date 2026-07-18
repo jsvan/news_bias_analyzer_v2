@@ -91,6 +91,14 @@ except ImportError:
     drift_router = APIRouter()
     has_drift_router = False
 
+try:
+    from intelligence.api_endpoints import router as intelligence_router
+    has_intelligence_router = True
+except ImportError:
+    from fastapi import APIRouter
+    intelligence_router = APIRouter()
+    has_intelligence_router = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer Extension API",
@@ -1148,62 +1156,57 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
 @app.get("/stats/trending_entities", response_model=List[Dict[str, Any]])
 async def get_trending_entities(
     limit: int = Query(10, ge=1, le=100),
-    days: int = Query(30, ge=1, le=365),
+    days: Optional[int] = Query(None, ge=1, le=3650),
     db: Session = Depends(get_db)
 ):
-    """
-    Get trending entities with their sentiment scores.
-    These are entities that have been mentioned frequently in the recent past.
+    """Most-mentioned entities with average power/moral scores. Omit days for all-time.
+
+    Aggregates across merged entities via Entity.canonical_id (same resolution as
+    /entities), so e.g. two "Donald Trump" rows surface as one canonical point.
     """
     try:
-        # Get date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Query for trending entities based on mention count
-        trending_query = db.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
+        resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+        agg = db.query(
+            resolved_id.label('resolved_id'),
             func.count(EntityMention.id).label('mention_count'),
             func.avg(EntityMention.power_score).label('avg_power'),
             func.avg(EntityMention.moral_score).label('avg_moral')
         ).join(
             EntityMention, Entity.id == EntityMention.entity_id
-        ).join(
-            NewsArticle, EntityMention.article_id == NewsArticle.id
         ).filter(
-            NewsArticle.publish_date >= start_date
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
+            EntityMention.power_score.isnot(None),
+            EntityMention.moral_score.isnot(None)
+        )
+
+        if days:
+            agg = agg.filter(EntityMention.created_at >= datetime.utcnow() - timedelta(days=days))
+
+        agg = agg.group_by(resolved_id).subquery()
+
+        trending = db.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            agg.c.mention_count,
+            agg.c.avg_power,
+            agg.c.avg_moral
+        ).join(
+            agg, Entity.id == agg.c.resolved_id
         ).order_by(
-            func.count(EntityMention.id).desc()
+            agg.c.mention_count.desc()
         ).limit(limit).all()
-        
-        # Format the results
-        result = []
-        for entity in trending_query:
-            # Calculate global percentile (simplified)
-            # In a real implementation, this would involve more sophisticated statistical analysis
-            global_percentile = 50  # Default to median
-            
-            # Get mentions count from all time for comparison
-            all_time_count = db.query(func.count(EntityMention.id)).filter(
-                EntityMention.entity_id == entity.id
-            ).scalar() or 0
-            
-            # Add to results
-            result.append({
+
+        return [
+            {
+                'id': entity.id,
                 'entity': entity.name,
                 'type': entity.entity_type,
-                'power_score': float(entity.avg_power) if entity.avg_power else 0,
-                'moral_score': float(entity.avg_moral) if entity.avg_moral else 0,
-                'global_percentile': global_percentile,
+                'power_score': float(entity.avg_power) if entity.avg_power is not None else 0,
+                'moral_score': float(entity.avg_moral) if entity.avg_moral is not None else 0,
                 'mention_count': entity.mention_count,
-                'all_time_mentions': all_time_count
-            })
-        
-        return result
+            }
+            for entity in trending
+        ]
     except Exception as e:
         logger.error(f"Error fetching trending entities: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch trending entities: {str(e)}")
@@ -1214,18 +1217,19 @@ async def get_entity_distribution(
     entity_id: int,
     country: Optional[str] = Query(None),
     source_id: Optional[int] = Query(None),
+    days: Optional[int] = Query(None, ge=1, le=3650),
     db: Session = Depends(get_db)
 ):
-    """Get sentiment distribution data for a specific entity."""
+    """Get sentiment distribution data for a specific entity. Omit days for all-time."""
     try:
         # Check if entity exists
         entity = db.query(Entity).filter(Entity.id == entity_id).first()
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
-        
-        # Get entity mentions for the last 90 days
+
+        # Calculate date range; no days param = all time
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=90)
+        start_date = end_date - timedelta(days=days) if days else datetime(1970, 1, 1)
         
         # Base query for entity mentions
         query = db.query(
@@ -1302,13 +1306,13 @@ async def get_entity_distribution(
                         "mean": float(power_mean),
                         "std": float(power_std),
                         "count": len(mentions),
-                        "pdf": [{"x": float(x), "y": float(y)} for x, y in zip(power_range, power_pdf)]
+                        "pdf": {"x": [float(v) for v in power_range], "y": [float(v) for v in power_pdf]}
                     },
                     "moral": {
                         "mean": float(moral_mean),
                         "std": float(moral_std),
                         "count": len(mentions),
-                        "pdf": [{"x": float(x), "y": float(y)} for x, y in zip(moral_range, moral_pdf)]
+                        "pdf": {"x": [float(v) for v in moral_range], "y": [float(v) for v in moral_pdf]}
                     }
                 }
             }
@@ -1334,19 +1338,19 @@ async def get_entity_distribution(
 @app.get("/stats/historical_sentiment", response_model=Dict[str, Any])
 async def get_historical_sentiment(
     entity_id: int,
-    days: int = Query(30, ge=1, le=365),
+    days: Optional[int] = Query(None, ge=1, le=3650),
     db: Session = Depends(get_db)
 ):
-    """Get historical sentiment data for a specific entity."""
+    """Get historical sentiment data for a specific entity. Omit days for all-time."""
     try:
         # Check if entity exists
         entity = db.query(Entity).filter(Entity.id == entity_id).first()
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
-        
-        # Calculate date range
+
+        # Calculate date range; no days param = all time
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        start_date = end_date - timedelta(days=days) if days else datetime(1970, 1, 1)
         
         # Get daily sentiment averages
         daily_sentiment = db.query(
@@ -1413,21 +1417,21 @@ async def get_historical_sentiment(
 @app.get("/stats/source_historical_sentiment", response_model=Dict[str, Any])
 async def get_source_historical_sentiment(
     entity_id: int,
-    days: int = Query(30, ge=1, le=365),
+    days: Optional[int] = Query(None, ge=1, le=3650),
     countries: Optional[List[str]] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get historical sentiment data for a specific entity broken down by news source."""
+    """Get historical sentiment data for a specific entity broken down by news source. Omit days for all-time."""
     try:
         logger.info(f"Source historical sentiment request: entity_id={entity_id}, days={days}, countries={countries}")
         # Check if entity exists
         entity = db.query(Entity).filter(Entity.id == entity_id).first()
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
-        
-        # Calculate date range
+
+        # Calculate date range; no days param = all time
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        start_date = end_date - timedelta(days=days) if days else datetime(1970, 1, 1)
         
         # Base query for source-specific daily sentiment averages
         query = db.query(
@@ -1590,8 +1594,9 @@ if has_stats_router:
         from extension.api.statistical_endpoints import (
             get_sentiment_distribution, get_entity_tracking, get_available_countries_for_entity,
             get_global_entity_counts, get_similar_articles, get_country_top_entities,
+            get_newspaper_top_entities,
             SentimentDistributionResponse, EntityTrackingResponse, AvailableCountriesResponse,
-            SimilarArticlesResponse, CountryTopEntitiesResponse
+            SimilarArticlesResponse, CountryTopEntitiesResponse, NewspaperTopEntitiesResponse
         )
         
         # Create a new router specifically for this app with our database dependency
@@ -1645,12 +1650,21 @@ if has_stats_router:
         @stats_router_local.get("/country/{country}/top-entities", response_model=CountryTopEntitiesResponse)
         async def country_top_entities_endpoint(
             country: str,
-            days: int = Query(30, ge=7, le=90, description="Number of days to look back"),
+            days: Optional[int] = Query(None, ge=7, le=90, description="Days to look back; omit for all time"),
             limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
             session: Session = Depends(get_db)
         ):
             return await get_country_top_entities(country, days, limit, session)
-        
+
+        @stats_router_local.get("/newspaper/{newspaper_name}/top-entities", response_model=NewspaperTopEntitiesResponse)
+        async def newspaper_top_entities_endpoint(
+            newspaper_name: str,
+            days: Optional[int] = Query(None, ge=7, le=90, description="Days to look back; omit for all time"),
+            limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
+            session: Session = Depends(get_db)
+        ):
+            return await get_newspaper_top_entities(newspaper_name, days, limit, session)
+
         app.include_router(stats_router_local, prefix="/stats", tags=["Statistics"])
     except Exception as e:
         logger.error(f"Failed to configure stats router: {e}")
@@ -1665,6 +1679,9 @@ if has_embeddings_router:
     app.include_router(embeddings_router, tags=["Narrative"])
 if has_drift_router:
     app.include_router(drift_router, tags=["Narrative"])
+if has_intelligence_router:
+    # Routes declare their own /intelligence prefix.
+    app.include_router(intelligence_router)
 
 # Add request logging middleware
 @app.middleware("http")
