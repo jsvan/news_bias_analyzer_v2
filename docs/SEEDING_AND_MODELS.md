@@ -38,7 +38,7 @@ The best fit by a wide margin.
 | Dataset | Size / coverage | Use for | Access |
 |---|---|---|---|
 | **POLUSA** | 0.9M articles, 18 US outlets, 2017–2019, **labeled by political leaning** | Validating our divergence metrics against known groupings (paper-grade sanity check) | Zenodo record 3946057, request form, research-only |
-| **All The News 2.0** | 2.7M articles, 27 US outlets, 2016–2020, single CSV (~8.8 GB) | Quick US-only bulk load | HF mirror: `rjac/all-the-news-2-1-Component-one` |
+| **All The News 2.0** | 2.7M articles, 27 US outlets, 2016–2020 (2020 is thin - taper off early in the year) | US outlet depth, incl. Reuters/Washington Post which are otherwise permanently unreachable live (see Blocked Sources) | `scrapers/seed_from_all_the_news.py`, HF mirror `rjac/all-the-news-2-1-Component-one` |
 
 ### Evaluated and rejected (don't re-litigate)
 
@@ -137,6 +137,14 @@ if API dependence bothers you.
    and inserts via the scraper's own `insert_articles_batch` (URL-MD5 ids → automatic
    dedup, lands as `unanalyzed`). `--self-test` runs its logic checks with no
    network/deps.
-3. `OPENAI_MODEL=gpt-5-nano ./run.sh analyze daemon` — existing batch daemon picks up the
+3. `pip install huggingface_hub pyarrow`, then
+   `python -m scrapers.seed_from_all_the_news --year 2020 --dry-run` /
+   `--limit N` the same way. Matches by `publication` name (no domain guessing needed)
+   against a fixed 26-outlet map in the script. Downloads one parquet shard at a time
+   and deletes it from the HF cache when done - streaming this dataset directly
+   (`datasets.load_dataset(..., streaming=True)`) was found to stall indefinitely
+   (2026-07-18), so don't reach for that pattern here even though it's what
+   `seed_from_ccnews.py` uses successfully.
+4. `OPENAI_MODEL=gpt-5-nano ./run.sh analyze daemon` — existing batch daemon picks up the
    backlog automatically (5 concurrent batches max, already enforced).
-4. `./run.sh statistics` — rebuild weekly stats/baselines over the new history.
+5. `./run.sh statistics` — rebuild weekly stats/baselines over the new history.

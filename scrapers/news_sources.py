@@ -961,6 +961,110 @@ def get_news_sources() -> List[Dict[str, Any]]:
                 "https://moxie.foxbusiness.com/google-publisher/latest.xml",
             ]
         },
+        # Added 2026-07-18: outlets surfaced via the All The News 2.0 backfill
+        # (scrapers/seed_from_all_the_news.py) with live RSS feeds confirmed by curl.
+        {
+            "name": "Vox",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.vox.com/rss/index.xml"]
+        },
+        {
+            "name": "TMZ",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.tmz.com/rss.xml"]
+        },
+        {
+            "name": "Business Insider",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://feeds.businessinsider.com/custom/all"]
+        },
+        {
+            "name": "Vice",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.vice.com/en/feed/"]
+        },
+        {
+            "name": "Hyperallergic",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://hyperallergic.com/feed/"]
+        },
+        {
+            "name": "TechCrunch",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://techcrunch.com/feed/"]
+        },
+        {
+            "name": "Axios",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://api.axios.com/feed/"]
+        },
+        {
+            "name": "Refinery 29",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.refinery29.com/en-us/rss.xml"]
+        },
+        {
+            "name": "The Verge",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.theverge.com/rss/index.xml"]
+        },
+        {
+            "name": "Mashable",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://mashable.com/feeds/rss/all"]
+        },
+        {
+            "name": "Economist",
+            "country": "UK",
+            "language": "en",
+            "rss_feeds": ["https://www.economist.com/latest/rss.xml"]
+        },
+        {
+            "name": "Gizmodo",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://gizmodo.com/rss"]
+        },
+        {
+            "name": "Wired",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.wired.com/feed/rss"]
+        },
+        {
+            "name": "CNBC",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"]
+        },
+        {
+            "name": "The Hill",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://thehill.com/feed/"]
+        },
+        {
+            "name": "New Yorker",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://www.newyorker.com/feed/everything"]
+        },
+        {
+            "name": "New Republic",
+            "country": "USA",
+            "language": "en",
+            "rss_feeds": ["https://newrepublic.com/rss.xml"]
+        },
     ]
 
     
