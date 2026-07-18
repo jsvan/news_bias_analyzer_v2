@@ -61,9 +61,11 @@ coverage-volume feed. Access: CSV dumps (gdeltproject.org/data.html) or BigQuery
 
 ## Part 2: Model choice for entity-sentiment extraction
 
-The task is simple, high-volume extraction → optimize for cost. Current default in code
-is `gpt-4.1-nano` (`analyzer/config.py`), which still works but is legacy-priced above
-newer options.
+The task is simple, high-volume extraction → optimize for cost. Default in code is
+`gpt-5-nano` (`analyzer/config.py`, flipped 2026-07-18 after a 50-article pilot;
+`OPENAI_MODEL` env var still overrides). Note: gpt-5-family models reject the
+`temperature` and `max_tokens` params — `analyzer/openai_integration.py::sampling_params`
+handles that per model family; don't hardcode those knobs in new call sites.
 
 ### API pricing (per 1M tokens, standard tier, July 2026)
 
@@ -90,10 +92,17 @@ Assume ~1.6k input tokens/article (prompt + truncated text) and ~300 output toke
   not with the full 461M.
 
 Before any big run: (1) re-verify prices at developers.openai.com/api/docs/pricing,
-(2) run a ~500-article pilot and compare entity/sentiment outputs against a sample of
-existing gpt-4.1-nano results to confirm quality didn't regress, (3) note the
-`estimate_cost()` table in `analyzer/openai_integration.py` is stale 2023 pricing —
-don't trust the $50/day limiter's math.
+(2) run a pilot and compare entity/sentiment outputs against existing results.
+Pilot results (2026-07-18, 50 articles, vs stored gpt-4.1-nano output, with a
+same-model rerun as control): gpt-5-nano re-found 60% of the stored entities vs the
+old model's own 50% rerun recall (no recall regression; it extracts more entities,
+6.1 vs 3.4 per article), but exact score agreement with the old model is lower
+(33%/49% power/moral vs the control's 57%/58%) — a cross-model scoring-style break
+that longitudinal analyses (drift detection) should expect around the switch date
+(2026-07-18 — no per-row model column exists, so the date is the only marker). The
+`estimate_cost()` table in
+`analyzer/openai_integration.py` was re-verified against OpenAI's model pages the
+same day, so the $50/day limiter math is current again.
 
 ### Structured outputs (do this when touching the analyzer)
 

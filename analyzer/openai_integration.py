@@ -49,6 +49,20 @@ ENTITY_SENTIMENT_RESPONSE_FORMAT = {
     },
 }
 
+
+def sampling_params(model: str, temperature: float, max_tokens: int) -> dict:
+    """Sampling kwargs the given model actually accepts.
+
+    gpt-5-family reasoning models reject BOTH temperature and max_tokens
+    (verified against the live API 2026-07-18 during the gpt-5-nano pilot);
+    they run uncapped with their own default sampling. Older chat models keep
+    the explicit knobs.
+    """
+    if model.startswith("gpt-5"):
+        return {}
+    return {"temperature": temperature, "max_tokens": max_tokens}
+
+
 class OpenAIProcessor:
     """
     Processor for OpenAI API integration, handling entity extraction and sentiment analysis.
@@ -56,7 +70,7 @@ class OpenAIProcessor:
     
     def __init__(self, 
                  api_key: str = None, 
-                 model: str = "gpt-4.1-nano",
+                 model: str = "gpt-5-nano",
                  system_prompt: str = None,
                  max_tokens: int = 4000,
                  temperature: float = 0.1,
@@ -193,8 +207,7 @@ class OpenAIProcessor:
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": article_text}
                         ],
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens
+                        **sampling_params(self.model, self.temperature, self.max_tokens)
                     )
                     
                     # Log the model from the response
@@ -301,8 +314,7 @@ class OpenAIProcessor:
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": article_text}
                         ],
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens
+                        **sampling_params(self.model, self.temperature, self.max_tokens)
                     )
                     break  # Success, exit the retry loop
                 except Exception as e:
@@ -416,8 +428,7 @@ class OpenAIProcessor:
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": text}
                 ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
+                **sampling_params(self.model, self.temperature, self.max_tokens)
             )
             
             # Update stats
@@ -441,31 +452,37 @@ class OpenAIProcessor:
             "estimated_cost": f"${self.estimate_cost():.4f}"
         }
     
+    # Per-1M-token prices, verified 2026-07-18 against
+    # developers.openai.com/api/docs/models/{model}. The $50/day limiter math
+    # in config.py depends on these being right - re-verify when models change.
+    # (first-listed prefix match wins; batch API halves nothing here - these
+    # are standard-tier rates, so the limiter errs conservative for batch runs)
+    PRICES_PER_1M = {
+        "gpt-5-nano": (0.05, 0.40),
+        "gpt-4.1-nano": (0.10, 0.40),
+        "gpt-5.4-nano": (0.20, 1.25),
+        "gpt-4": (10.0, 30.0),   # legacy catch-all, deliberately pessimistic
+        "gpt-5": (1.25, 10.0),   # non-nano gpt-5 family catch-all
+    }
+
     def estimate_cost(self) -> float:
-        """
-        Estimate the cost of API calls made.
-        Based on approximate pricing, should be updated as OpenAI prices change.
-        """
-        # These are approximate prices and should be updated
-        if "gpt-4" in self.model:
-            input_cost_per_token = 0.00001  # $0.01 per 1K tokens
-            output_cost_per_token = 0.00003  # $0.03 per 1K tokens
-        else:  # Assume GPT-3.5 Turbo
-            input_cost_per_token = 0.0000015  # $0.0015 per 1K tokens
-            output_cost_per_token = 0.000002  # $0.002 per 1K tokens
-        
+        """Estimate the cost of API calls made, from PRICES_PER_1M."""
+        for prefix, (in_price, out_price) in self.PRICES_PER_1M.items():
+            if self.model.startswith(prefix):
+                break
+        else:
+            in_price, out_price = 1.25, 10.0  # unknown model: assume mid-tier
+
         # Assuming a 3:1 ratio of input to output tokens
         input_tokens = self.total_tokens_used * 0.75
         output_tokens = self.total_tokens_used * 0.25
-        
-        cost = (input_tokens * input_cost_per_token) + (output_tokens * output_cost_per_token)
-        return cost
+        return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
 
 
 class SentimentAnalyzer:
     """High-level interface for sentiment analysis using OpenAI."""
     
-    def __init__(self, api_key: str = None, model: str = "gpt-4.1-nano"):
+    def __init__(self, api_key: str = None, model: str = "gpt-5-nano"):
         """
         Initialize the sentiment analyzer.
         

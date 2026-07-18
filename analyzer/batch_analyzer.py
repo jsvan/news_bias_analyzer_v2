@@ -37,6 +37,7 @@ from database.models import NewsArticle, Entity, EntityMention, NewsSource
 from database.services import DatabaseService
 from database.config import AnalysisConfig, LoggingConfig
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT, ENTITY_SENTIMENT_SCHEMA
+from analyzer.openai_integration import sampling_params
 from analyzer.hotelling_t2 import HotellingT2Calculator
 from analyzer.entity_resolution import known_entity_shortlist, format_shortlist_block
 
@@ -194,27 +195,31 @@ def prepare_batch_input(articles: List[NewsArticle], model: str,
             shortlist = known_entity_shortlist(analysis_text, known_entities)
             analysis_text += format_shortlist_block(shortlist)
         
-        # Create batch request line
+        # Create batch request line. gpt-5-family models reject the temperature
+        # param outright (every batch line would fail) - sampling_params knows
+        # which knobs each model accepts.
+        body = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": ENTITY_SENTIMENT_PROMPT},
+                {"role": "user", "content": analysis_text}
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "entity_sentiment",
+                    "strict": True,
+                    "schema": ENTITY_SENTIMENT_SCHEMA,
+                },
+            },
+        }
+        if "temperature" in sampling_params(model, 0.2, 0):
+            body["temperature"] = 0.2
         batch_line = {
             "custom_id": custom_id,
             "method": "POST",
             "url": "/v1/chat/completions",
-            "body": {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": ENTITY_SENTIMENT_PROMPT},
-                    {"role": "user", "content": analysis_text}
-                ],
-                "temperature": 0.2,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "entity_sentiment",
-                        "strict": True,
-                        "schema": ENTITY_SENTIMENT_SCHEMA,
-                    },
-                },
-            }
+            "body": body,
         }
 
         batch_lines.append(json.dumps(batch_line))
@@ -664,8 +669,8 @@ def create_new_batch(session: Session) -> bool:
         logger.error(f"Error initializing OpenAI client: {e}")
         return False
     
-    # Get OpenAI model from environment or default to gpt-4.1-nano
-    model = os.environ.get("OPENAI_MODEL", "gpt-4.1-nano")
+    # Get OpenAI model from environment or default to gpt-5-nano
+    model = os.environ.get("OPENAI_MODEL", "gpt-5-nano")
     logger.info(f"Using OpenAI model: {model}")
     
     # Get unanalyzed articles
