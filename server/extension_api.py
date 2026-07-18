@@ -67,6 +67,30 @@ except ImportError:
     similarity_router = APIRouter()
     has_similarity_router = False
 
+try:
+    from extension.api.narrative_endpoints import router as narrative_router
+    has_narrative_router = True
+except ImportError:
+    from fastapi import APIRouter
+    narrative_router = APIRouter()
+    has_narrative_router = False
+
+try:
+    from extension.api.embeddings_endpoints import router as embeddings_router
+    has_embeddings_router = True
+except ImportError:
+    from fastapi import APIRouter
+    embeddings_router = APIRouter()
+    has_embeddings_router = False
+
+try:
+    from extension.api.drift_endpoints import router as drift_router
+    has_drift_router = True
+except ImportError:
+    from fastapi import APIRouter
+    drift_router = APIRouter()
+    has_drift_router = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer Extension API",
@@ -1634,6 +1658,13 @@ if has_stats_router:
         app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
 if has_similarity_router:
     app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
+if has_narrative_router:
+    # No prefix - routes already declare their full /narrative/... path.
+    app.include_router(narrative_router, tags=["Narrative"])
+if has_embeddings_router:
+    app.include_router(embeddings_router, tags=["Narrative"])
+if has_drift_router:
+    app.include_router(drift_router, tags=["Narrative"])
 
 # Add request logging middleware
 @app.middleware("http")
