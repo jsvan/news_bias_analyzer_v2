@@ -5,6 +5,7 @@ import { tokens } from '../theme';
 const SECTIONS = [
   { to: '/entities', label: 'Entities' },
   { to: '/sources', label: 'Sources' },
+  { to: '/source-space', label: 'Source Space' },
   { to: '/countries', label: 'Countries' },
   { to: '/world', label: 'World' },
   { to: '/compare/entities', label: 'Compare', activeMatch: '/compare' },

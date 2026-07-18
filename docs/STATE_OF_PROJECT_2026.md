@@ -80,7 +80,10 @@ Do these on a machine that can run the full stack (DB + servers), not blind:
 
 ## Roadmap (unchanged in spirit from todo.txt)
 
-The highest-value unbuilt feature is **source similarity** (todo.txt items 1–5):
-Pearson correlation on common entities, weekly similarity matrix, clustering. It's the
-feature that makes the project's thesis visible. Build it before adding new data
-machinery.
+~~The highest-value unbuilt feature is **source similarity** (todo.txt items 1–5).~~
+**Built (2026-07-18):** Pearson correlation on common entities
+(`analyzer/source_similarity.py`, pure kernels + self-test), weekly matrix +
+clustering job (`clustering/source_similarity.py`, over `mv_source_entity_week`,
+trailing 4-week window), `/similarity/matrix` + `/similarity/sources/{id}/neighbors`
+endpoints, and the "Source Space" page. Verified against a hand-recomputed
+BBC/Guardian pair (r = 0.5587 over 71 common entities, exact match).

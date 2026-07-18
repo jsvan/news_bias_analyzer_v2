@@ -21,12 +21,22 @@ class SimilarityAPI(BaseAnalyzer):
                               source_id: int, 
                               limit: int = 20,
                               week: Optional[datetime] = None) -> List[Dict]:
-        """Get most similar sources for a given source."""
+        """Get most similar sources for a given source.
+
+        Uses the most recent stored window by default - the corpus (and the
+        weekly job) can lag the calendar, so "this calendar week" would
+        usually match nothing.
+        """
         if week is None:
-            week = datetime.utcnow()
-        
-        start_date, end_date = self.get_week_boundaries(week)
-        
+            latest = self.session.execute(text(
+                "SELECT MAX(time_window_end) FROM source_similarity_matrix"
+            )).scalar()
+            if latest is None:
+                return []
+            start_date = end_date = latest
+        else:
+            start_date, end_date = self.get_week_boundaries(week)
+
         query = text("""
             SELECT 
                 CASE 
@@ -43,10 +53,10 @@ class SimilarityAPI(BaseAnalyzer):
                 WHEN ssm.source_id_1 = :source_id THEN ssm.source_id_2
                 ELSE ssm.source_id_1
             END
-            WHERE 
+            WHERE
                 (:source_id = ssm.source_id_1 OR :source_id = ssm.source_id_2)
-                AND ssm.time_window_start >= :start_date
-                AND ssm.time_window_end <= :end_date
+                -- match on the window's END so multi-week windows are found
+                AND ssm.time_window_end BETWEEN :start_date AND :end_date
             ORDER BY ssm.similarity_score DESC
             LIMIT :limit
         """)
@@ -258,7 +268,8 @@ class SimilarityAPI(BaseAnalyzer):
         
         clusters = []
         for row in results:
-            members = json.loads(row.members)
+            # psycopg2 already deserializes json_agg; only parse if it's a string
+            members = json.loads(row.members) if isinstance(row.members, str) else row.members
             clusters.append({
                 'cluster_id': row.cluster_id,
                 'level': row.cluster_level,

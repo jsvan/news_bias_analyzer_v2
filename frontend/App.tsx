@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import EntityAnalysisPage from './pages/EntityAnalysisPage';
 import EntityProfilePage from './pages/EntityProfilePage';
 import SourcesIndexPage from './pages/SourcesIndexPage';
+import SourceSpacePage from './pages/SourceSpacePage';
 import SourceProfilePage from './pages/SourceProfilePage';
 import CountryEntityPage from './pages/CountryEntityPage';
 import WorldViewPage from './pages/WorldViewPage';
@@ -25,6 +26,7 @@ const App: React.FC = () => (
           <Route path="/entities" element={<EntityAnalysisPage />} />
           <Route path="/entities/:id" element={<EntityProfilePage />} />
           <Route path="/sources" element={<SourcesIndexPage />} />
+          <Route path="/source-space" element={<SourceSpacePage />} />
           <Route path="/sources/:name" element={<SourceProfilePage />} />
           <Route path="/countries" element={<CountryEntityPage />} />
           <Route path="/world" element={<WorldViewPage />} />

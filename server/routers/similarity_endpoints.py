@@ -8,6 +8,8 @@ for the browser extension.
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from pydantic import BaseModel
 import logging
 import sys
 from pathlib import Path
@@ -23,6 +25,146 @@ from clustering.similarity_api import SimilarityAPI
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# --- Weekly similarity matrix (clustering/source_similarity.py's output) ---
+
+class MatrixSource(BaseModel):
+    source_id: int
+    name: str
+    country: Optional[str] = None
+    cluster: Optional[str] = None
+    is_centroid: bool = False
+
+
+class MatrixPair(BaseModel):
+    source_id_1: int
+    source_id_2: int
+    score: float
+    common_entities: int
+
+
+class SimilarityMatrixResponse(BaseModel):
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    sources: List[MatrixSource]
+    pairs: List[MatrixPair]
+
+
+class NeighborEntry(BaseModel):
+    source_id: int
+    name: str
+    country: Optional[str] = None
+    score: float
+    common_entities: int
+
+
+class SourceNeighborsResponse(BaseModel):
+    source_id: int
+    source_name: str
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    nearest: List[NeighborEntry]
+    farthest: List[NeighborEntry]
+
+
+@router.get("/matrix", response_model=SimilarityMatrixResponse)
+async def get_similarity_matrix(session: Session = Depends(get_session)):
+    """The latest stored source-similarity matrix plus cluster assignments.
+
+    Pearson correlation of mean moral scores over common entities
+    (analyzer/source_similarity.py kernels, computed weekly by
+    clustering/source_similarity.py). Pairs below the 10-common-entities
+    floor are absent - unknown, not zero. Sources close in correlation-space
+    see the world alike; /narrative/source-map is the same thesis in
+    SVD-space.
+    """
+    latest = session.execute(text(
+        "SELECT MAX(time_window_end) FROM source_similarity_matrix"
+    )).scalar()
+    if latest is None:
+        return SimilarityMatrixResponse(sources=[], pairs=[])
+
+    pairs = session.execute(text("""
+        SELECT source_id_1, source_id_2, similarity_score, common_entities,
+               time_window_start
+        FROM source_similarity_matrix
+        WHERE time_window_end = :end
+    """), {"end": latest}).fetchall()
+    window_start = pairs[0].time_window_start if pairs else None
+
+    source_ids = sorted({r.source_id_1 for r in pairs} | {r.source_id_2 for r in pairs})
+    clusters = {r.source_id: r for r in session.execute(text("""
+        SELECT source_id, cluster_id, is_centroid
+        FROM source_clusters
+        WHERE assigned_date = (SELECT MAX(assigned_date) FROM source_clusters)
+    """)).fetchall()}
+    names = {s.id: s for s in session.query(NewsSource).filter(NewsSource.id.in_(source_ids)).all()}
+
+    return SimilarityMatrixResponse(
+        window_start=window_start.date().isoformat() if window_start else None,
+        window_end=latest.date().isoformat(),
+        sources=[MatrixSource(
+            source_id=sid,
+            name=names[sid].name if sid in names else str(sid),
+            country=names[sid].country if sid in names else None,
+            cluster=clusters[sid].cluster_id if sid in clusters else None,
+            is_centroid=bool(clusters[sid].is_centroid) if sid in clusters else False,
+        ) for sid in source_ids],
+        pairs=[MatrixPair(
+            source_id_1=r.source_id_1, source_id_2=r.source_id_2,
+            score=round(float(r.similarity_score), 4),
+            common_entities=r.common_entities,
+        ) for r in pairs],
+    )
+
+
+@router.get("/sources/{source_id}/neighbors", response_model=SourceNeighborsResponse)
+async def get_source_neighbors(
+    source_id: int,
+    limit: int = Query(5, ge=1, le=20),
+    session: Session = Depends(get_session)
+):
+    """A source's nearest and farthest neighbors in the latest similarity matrix."""
+    source = session.query(NewsSource).filter(NewsSource.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source {source_id} not found")
+
+    latest = session.execute(text(
+        "SELECT MAX(time_window_end) FROM source_similarity_matrix"
+    )).scalar()
+    if latest is None:
+        return SourceNeighborsResponse(source_id=source_id, source_name=source.name,
+                                       nearest=[], farthest=[])
+
+    rows = session.execute(text("""
+        SELECT CASE WHEN source_id_1 = :sid THEN source_id_2 ELSE source_id_1 END AS other_id,
+               similarity_score, common_entities, time_window_start
+        FROM source_similarity_matrix
+        WHERE time_window_end = :end
+          AND (source_id_1 = :sid OR source_id_2 = :sid)
+        ORDER BY similarity_score DESC
+    """), {"sid": source_id, "end": latest}).fetchall()
+
+    other_ids = [r.other_id for r in rows]
+    names = {s.id: s for s in session.query(NewsSource).filter(NewsSource.id.in_(other_ids)).all()}
+
+    def entry(r):
+        s = names.get(r.other_id)
+        return NeighborEntry(source_id=r.other_id,
+                             name=s.name if s else str(r.other_id),
+                             country=s.country if s else None,
+                             score=round(float(r.similarity_score), 4),
+                             common_entities=r.common_entities)
+
+    return SourceNeighborsResponse(
+        source_id=source_id,
+        source_name=source.name,
+        window_start=rows[0].time_window_start.date().isoformat() if rows else None,
+        window_end=latest.date().isoformat(),
+        nearest=[entry(r) for r in rows[:limit]],
+        farthest=[entry(r) for r in rows[-limit:]][::-1] if len(rows) > limit else [],
+    )
 
 @router.get("/articles/similar", response_model=List[Dict[str, Any]])
 async def get_similar_articles(

@@ -372,5 +372,27 @@ export const driftApi = {
   },
 };
 
+// Source similarity (server/routers/similarity_endpoints.py) - the weekly Pearson
+// matrix over common entities (analyzer/source_similarity.py kernels, computed by
+// clustering/source_similarity.py) plus cluster assignments and per-source
+// nearest/farthest neighbors. Correlation-space counterpart of the SVD source map -
+// same thesis, different geometry. Live-API only for now.
+export const similarityApi = {
+  getMatrix: async () => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('The source-similarity matrix requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/similarity/matrix');
+    return response.data;
+  },
+  getSourceNeighbors: async (sourceId: number, params: { limit?: number } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Source neighbors require a live backend and are not available in this demo.');
+    }
+    const response = await api.get(`/similarity/sources/${sourceId}/neighbors`, { params });
+    return response.data;
+  },
+};
+
 // Export the base API instance
 export { api };
