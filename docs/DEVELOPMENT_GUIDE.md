@@ -67,9 +67,10 @@ news_bias_analyzer/
 │   ├── services.py           # Service facade (uses repositories.py)
 │   └── migrations/           # Alembic migrations
 │
-├── server/                   # FastAPI apps (run via server_manager)
-│   ├── extension_api.py      # API for the Chrome extension
-│   └── dashboard_api.py      # API for the web dashboard
+├── server/                   # The single FastAPI app
+│   ├── extension_api.py      # App module (port 8000; serves extension + dashboard)
+│   ├── deps.py               # Shared DB session dependency
+│   └── routers/              # One module per endpoint group
 │
 ├── intelligence/             # Statistical anomaly detection (partial)
 ├── clustering/               # Source similarity computation
@@ -77,16 +78,10 @@ news_bias_analyzer/
 ├── scheduler/                # Cron-style job scheduler
 │
 ├── frontend/                 # React + Vite dashboard
-│   └── api/                  # (Python routers imported by dashboard_api)
 ├── extension/                # Chrome extension (Manifest V3, unpacked)
-│   └── api/                  # (Python routers imported by extension_api)
 │
 └── docs/                     # Documentation
 ```
-
-Note the wart: `frontend/api/` and `extension/api/` contain *Python* routers
-imported by the servers, despite living inside JS trees. See
-`docs/STATE_OF_PROJECT_2026.md` for planned restructuring.
 
 ## Coding Standards
 

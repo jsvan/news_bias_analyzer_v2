@@ -1,49 +1,36 @@
 # News Bias Analyzer Server
 
-This directory contains the server implementations for the browser extension and the dashboard frontend.
+One consolidated FastAPI app serves the browser extension, the dashboard
+frontend, and the snapshot exporter.
 
 ## Components
 
-- `extension_api.py`: API server for the browser extension
-- `dashboard_api.py`: API server for the dashboard frontend
-- `server_manager.py`: Utility to run both servers in parallel
+- `extension_api.py`: the single FastAPI app (port 8000). Declares the core
+  endpoints (`/entities`, `/sources`, `/analyze`, `/stats/*` basics) and mounts
+  every router.
+- `deps.py`: shared database dependency (`get_db`) — one engine, sessions
+  closed per request.
+- `routers/`: one module per endpoint group, each declared in exactly one place:
+  - `statistical_endpoints.py` (`/stats/*` distributions, tracking, top-entities)
+  - `similarity_endpoints.py` (`/similarity/*`)
+  - `narrative_endpoints.py`, `embeddings_endpoints.py`, `drift_endpoints.py`
+    (`/narrative/*`)
+  - `dashboard_endpoints.py` (entity/source detail pages)
+- `export_snapshots.py`: dumps API responses to `frontend/public/snapshots/`
+  for the GitHub Pages static dashboard.
 
 ## Usage
 
-The servers can be started using the main run script:
-
 ```bash
-# Start both servers (extension API on port 8000, dashboard API on port 8001)
 ./run.sh server
-
-# Start only the extension API server (port 8000)
-./run.sh server extension
-
-# Start only the dashboard API server (port 8001)
-./run.sh server dashboard
+# equivalent to: uvicorn server.extension_api:app --host 0.0.0.0 --port 8000
 ```
 
-## API Endpoints
+The full route table is at http://localhost:8000/docs.
 
-### Extension API (Port 8000)
+## History
 
-- `/health`: Health check endpoint
-- `/entities`: List entities in the database
-- `/entity/{entity_id}/sentiment`: Get sentiment data for a specific entity
-- `/sources`: List all news sources
-- `/trends`: Get sentiment trends for entities
-
-### Dashboard API (Port 8001)
-
-- `/health`: Health check endpoint
-- `/entities`: List entities in the database
-- `/entities/{entity_id}`: Get detailed information about a specific entity
-- `/entities/{entity_id}/sentiment`: Get sentiment data for a specific entity
-- `/sources`: List all news sources
-- `/sources/{source_id}`: Get detailed information about a specific news source
-- `/sources/{source_id}/sentiment`: Get sentiment data for a specific news source
-
-## Development
-
-Both servers use FastAPI and can be extended by adding new endpoints or routers.
-The servers are configured to reload automatically when code changes are detected.
+`dashboard_api.py` (a second app on port 8001), `server_manager.py` (a
+subprocess babysitter), and the Python router trees inside `extension/api/` and
+`frontend/api/` were consolidated into this layout in July 2026 — one app, one
+port, one `uvicorn` command.

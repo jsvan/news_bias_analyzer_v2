@@ -108,7 +108,7 @@ def compute_entity_volatility(entity_id, time_window):
 
 ### 5. API Endpoints
 
-**File**: `/extension/api/similarity_endpoints.py`
+**File**: `/server/routers/similarity_endpoints.py`
 
 ```python
 @app.get("/api/source/{source_id}/similarity")

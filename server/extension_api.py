@@ -36,68 +36,19 @@ logger = logging.getLogger("extension_api")
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 # Import database models and utilities
-from database.db import DatabaseManager
 from database.models import NewsArticle, Entity, EntityMention, NewsSource, Topic, Quote, QuoteTopic, PublicFigure
 
-# Import any existing routers
-try:
-    from extension.api.article_endpoints import router as article_router
-    has_article_router = True
-except ImportError:
-    # If the extension router is not available, create a dummy router
-    from fastapi import APIRouter
-    article_router = APIRouter()
-    has_article_router = False
-
-try:
-    from extension.api.statistical_endpoints import router as stats_router
-    has_stats_router = True
-except ImportError:
-    # If the stats router is not available, create a dummy router
-    from fastapi import APIRouter
-    stats_router = APIRouter()
-    has_stats_router = False
-
-try:
-    from extension.api.similarity_endpoints import router as similarity_router
-    has_similarity_router = True
-except ImportError:
-    # If the similarity router is not available, create a dummy router
-    from fastapi import APIRouter
-    similarity_router = APIRouter()
-    has_similarity_router = False
-
-try:
-    from extension.api.narrative_endpoints import router as narrative_router
-    has_narrative_router = True
-except ImportError:
-    from fastapi import APIRouter
-    narrative_router = APIRouter()
-    has_narrative_router = False
-
-try:
-    from extension.api.embeddings_endpoints import router as embeddings_router
-    has_embeddings_router = True
-except ImportError:
-    from fastapi import APIRouter
-    embeddings_router = APIRouter()
-    has_embeddings_router = False
-
-try:
-    from extension.api.drift_endpoints import router as drift_router
-    has_drift_router = True
-except ImportError:
-    from fastapi import APIRouter
-    drift_router = APIRouter()
-    has_drift_router = False
-
-try:
-    from intelligence.api_endpoints import router as intelligence_router
-    has_intelligence_router = True
-except ImportError:
-    from fastapi import APIRouter
-    intelligence_router = APIRouter()
-    has_intelligence_router = False
+# Routers. Imports are deliberately NOT wrapped in try/except: a router that fails
+# to import must fail the whole server loudly, not silently drop its routes (that
+# pattern hid dead endpoints for months - see the retired extension/api/main.py).
+from server.deps import get_db
+from server.routers.statistical_endpoints import router as stats_router
+from server.routers.similarity_endpoints import router as similarity_router
+from server.routers.narrative_endpoints import router as narrative_router
+from server.routers.embeddings_endpoints import router as embeddings_router
+from server.routers.drift_endpoints import router as drift_router
+from server.routers.dashboard_endpoints import router as dashboard_router
+from intelligence.api_endpoints import router as intelligence_router  # scheduled for removal with intelligence/
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -146,17 +97,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database connection
-database_url = os.getenv("DATABASE_URL", "postgresql://newsbias:newsbias@localhost:5432/news_bias")
-db_manager = DatabaseManager(database_url)
-
-# Dependency to get database session
-def get_db():
-    db = db_manager.get_session()
-    try:
-        yield db
-    finally:
-        db.close()
+# Database connection + per-request session dependency live in server/deps.py
+# (shared with every router) - imported above.
+from server.deps import db_manager
 
 # Caching for entity autocomplete
 POPULAR_ENTITIES_CACHE = {}
@@ -325,7 +268,7 @@ def health_check():
     try:
         # Quick test of database connection
         with db_manager.engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
     except Exception:
         db_connected = False
 
@@ -1584,104 +1527,17 @@ async def get_source_historical_sentiment(
         logger.error(f"Error fetching source historical sentiment: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch source historical sentiment: {str(e)}")
 
-# Include routers if available
-if has_article_router:
-    app.include_router(article_router, prefix="/articles", tags=["Articles"])
-if has_stats_router:
-    # Import and reconfigure stats router with our database dependency
-    try:
-        # Import all the endpoint functions and models from the stats module
-        from extension.api.statistical_endpoints import (
-            get_sentiment_distribution, get_entity_tracking, get_available_countries_for_entity,
-            get_global_entity_counts, get_similar_articles, get_country_top_entities,
-            get_newspaper_top_entities,
-            SentimentDistributionResponse, EntityTrackingResponse, AvailableCountriesResponse,
-            SimilarArticlesResponse, CountryTopEntitiesResponse, NewspaperTopEntitiesResponse
-        )
-        
-        # Create a new router specifically for this app with our database dependency
-        stats_router_local = APIRouter()
-        
-        # Re-register endpoints with our database dependency
-        @stats_router_local.get("/sentiment/distribution", response_model=SentimentDistributionResponse)
-        async def sentiment_distribution_endpoint(
-            entity_name: str,
-            dimension: str = Query("power", regex="^(power|moral)$"),
-            country: Optional[str] = None,
-            source_id: Optional[int] = None,
-            half_life_days: float = Query(14.0, ge=1.0, le=365.0, description="Half-life for temporal weighting in days"),
-            session: Session = Depends(get_db)
-        ):
-            return await get_sentiment_distribution(entity_name, dimension, country, source_id, half_life_days, session)
-        
-        @stats_router_local.get("/entity/tracking", response_model=EntityTrackingResponse)
-        async def entity_tracking_endpoint(
-            entity_name: str,
-            days: int = Query(30, ge=1, le=365),
-            window_size: int = Query(7, ge=1, le=30),
-            source_id: Optional[int] = Query(None, description="Optional source ID to filter mentions"),
-            session: Session = Depends(get_db)
-        ):
-            return await get_entity_tracking(entity_name, days, window_size, source_id, session)
-        
-        @stats_router_local.get("/entity/available-countries", response_model=AvailableCountriesResponse)
-        async def available_countries_endpoint(
-            entity_name: str,
-            dimension: str = Query("power", regex="^(power|moral)$"),
-            min_mentions: int = Query(3, ge=1),
-            session: Session = Depends(get_db)
-        ):
-            return await get_available_countries_for_entity(entity_name, dimension, min_mentions, session)
-        
-        @stats_router_local.get("/entity/global-counts")
-        def global_counts_endpoint(session: Session = Depends(get_db)):
-            return get_global_entity_counts(session)
-        
-        @stats_router_local.get("/article/{article_id}/similar", response_model=SimilarArticlesResponse)
-        def similar_articles_endpoint(
-            article_id: str,
-            limit: int = Query(10, ge=1, le=50),
-            days_window: int = Query(3, ge=1, le=7),
-            min_entity_overlap: float = Query(0.3, ge=0.1, le=1.0),
-            session: Session = Depends(get_db)
-        ):
-            return get_similar_articles(article_id, limit, days_window, min_entity_overlap, session)
-        
-        @stats_router_local.get("/country/{country}/top-entities", response_model=CountryTopEntitiesResponse)
-        async def country_top_entities_endpoint(
-            country: str,
-            days: Optional[int] = Query(None, ge=7, le=90, description="Days to look back; omit for all time"),
-            limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
-            session: Session = Depends(get_db)
-        ):
-            return await get_country_top_entities(country, days, limit, session)
-
-        @stats_router_local.get("/newspaper/{newspaper_name}/top-entities", response_model=NewspaperTopEntitiesResponse)
-        async def newspaper_top_entities_endpoint(
-            newspaper_name: str,
-            days: Optional[int] = Query(None, ge=7, le=90, description="Days to look back; omit for all time"),
-            limit: int = Query(10, ge=5, le=20, description="Number of top entities to return"),
-            session: Session = Depends(get_db)
-        ):
-            return await get_newspaper_top_entities(newspaper_name, days, limit, session)
-
-        app.include_router(stats_router_local, prefix="/stats", tags=["Statistics"])
-    except Exception as e:
-        logger.error(f"Failed to configure stats router: {e}")
-        # Fall back to original approach if imports fail
-        app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
-if has_similarity_router:
-    app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
-if has_narrative_router:
-    # No prefix - routes already declare their full /narrative/... path.
-    app.include_router(narrative_router, tags=["Narrative"])
-if has_embeddings_router:
-    app.include_router(embeddings_router, tags=["Narrative"])
-if has_drift_router:
-    app.include_router(drift_router, tags=["Narrative"])
-if has_intelligence_router:
-    # Routes declare their own /intelligence prefix.
-    app.include_router(intelligence_router)
+# Register routers. Each endpoint is declared in exactly one place (its router
+# module); the wrapper re-declarations that used to shadow router signatures here
+# are gone - all routers share server.deps.get_db.
+app.include_router(stats_router, prefix="/stats", tags=["Statistics"])
+app.include_router(similarity_router, prefix="/similarity", tags=["Similarity"])
+# No prefix on the rest - routes declare their full paths (/narrative/..., etc.).
+app.include_router(narrative_router, tags=["Narrative"])
+app.include_router(embeddings_router, tags=["Narrative"])
+app.include_router(drift_router, tags=["Narrative"])
+app.include_router(dashboard_router, tags=["Dashboard"])
+app.include_router(intelligence_router)  # declares its own /intelligence prefix
 
 # Add request logging middleware
 @app.middleware("http")
@@ -1701,53 +1557,6 @@ async def log_requests(request: Request, call_next):
     logger.info(f"Response: {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.4f}s")
     
     return response
-
-# Enable CORS with environment-aware settings
-def get_cors_origins():
-    """Get allowed CORS origins based on environment."""
-    environment = os.getenv("APP_ENV", "development")
-    
-    if environment == "development":
-        return [
-            "http://localhost:3000",  # Vite dev server
-            "http://localhost:4173",  # Vite preview server
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:4173",
-            "chrome-extension://*",   # Chrome extension (any ID)
-            "moz-extension://*",      # Firefox extension
-        ]
-    elif environment == "staging":
-        return [
-            "https://staging.news-bias-analyzer.example.com",
-            "https://*.github.io",    # GitHub Pages staging
-            "chrome-extension://*",   # Chrome extension
-            "moz-extension://*",      # Firefox extension
-        ]
-    elif environment == "production":
-        return [
-            "https://news-bias-analyzer.example.com",
-            "https://jsv.github.io", # GitHub Pages (replace with actual username)
-            "chrome-extension://*",   # Chrome extension
-            "moz-extension://*",      # Firefox extension
-        ]
-    else:
-        # Fallback to development settings
-        return [
-            "http://localhost:3000",
-            "chrome-extension://*",
-        ]
-
-cors_origins = get_cors_origins()
-logger.info(f"CORS configured for origins: {cors_origins}")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
 
 # Run with: uvicorn server.extension_api:app --reload
 if __name__ == "__main__":

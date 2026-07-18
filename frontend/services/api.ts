@@ -323,7 +323,7 @@ export const intelligenceApi = {
   },
 };
 
-// Narrative statistics (extension/api/narrative_endpoints.py) - wires
+// Narrative statistics (server/routers/narrative_endpoints.py) - wires
 // analyzer/narrative_metrics.py's kernels into real cross-source queries. Live-API only
 // for now; not yet part of the static-snapshot export (server/export_snapshots.py).
 export const narrativeApi = {
@@ -336,7 +336,7 @@ export const narrativeApi = {
   },
 };
 
-// Entity relatedness (extension/api/embeddings_endpoints.py) - nearest neighbors from
+// Entity relatedness (server/routers/embeddings_endpoints.py) - nearest neighbors from
 // analyzer/entity_embeddings.py's weekly learned embeddings. Two independent vectors:
 // "cooccurrence" (topical - what gets mentioned alongside) and "sentiment" (rhetorical -
 // what gets talked about the same way by the same sources). Live-API only for now.
@@ -350,7 +350,7 @@ export const embeddingsApi = {
   },
 };
 
-// Statistical surprise / drift detection (extension/api/drift_endpoints.py) - wires
+// Statistical surprise / drift detection (server/routers/drift_endpoints.py) - wires
 // analyzer/narrative_metrics.py::pettitt_test into real changepoint queries. Distinguishes
 // a GLOBAL shift (everyone moved together, an expected real-world event) from a
 // SOURCE-specific residual shift (this source moved alone, unexplained by the global

@@ -11,7 +11,7 @@ not be asserted here:
      entity x (source, week) mean-moral matrix) - an ideological/rhetorical signal.
 
 Both vectors are stored per entity (database/run_migration_016.py::entity_embeddings) so
-a caller (extension/api/embeddings_endpoints.py) can ask "related by topic" or "related by
+a caller (server/routers/embeddings_endpoints.py) can ask "related by topic" or "related by
 how they're talked about" separately - conflating them into one vector would blur both
 signals into something neither captures cleanly.
 

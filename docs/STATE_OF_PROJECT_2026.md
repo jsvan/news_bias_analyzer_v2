@@ -41,17 +41,21 @@ what's deliberately deferred — so decisions don't get re-litigated.
 
 Do these on a machine that can run the full stack (DB + servers), not blind:
 
-1. **Server consolidation.** Two FastAPI apps with overlapping routes (`/entities`,
-   `/sources`, stats) plus `server/server_manager.py`, a subprocess babysitter that
-   polls every second. Target: one FastAPI app, two routers, one `uvicorn` command,
-   delete the manager. Requires resolving route collisions and updating the frontend
-   and extension clients — needs runtime testing.
+1. **Server consolidation.** ~~Two FastAPI apps with overlapping routes plus
+   `server/server_manager.py`.~~ **Done (2026-07-18):** one app
+   (`server/extension_api.py`) mounting `server/routers/*`, one `uvicorn` command in
+   `run.sh`; `dashboard_api.py`, `server_manager.py`, and the wrapper re-declarations
+   are gone. The dashboard-only entity/source detail routes were ported to
+   `server/routers/dashboard_endpoints.py`.
 2. **DB layer over-layering.** `database/db.py` → `services.py` → `repositories.py` is
    a chain (not duplicates); `repositories.py` has exactly one consumer (`services.py`),
    which has one real consumer (`batch_analyzer.py`). Could be flattened to ~1 file.
    Low value, medium risk — only worth it when touching the analyzer anyway.
-3. **Python-in-JS-trees.** `extension/api/` and `frontend/api/` contain Python routers
-   imported by the servers. Move to `server/routers/` during the server consolidation.
+3. **Python-in-JS-trees.** ~~`extension/api/` and `frontend/api/` contain Python
+   routers imported by the servers.~~ **Done (2026-07-18):** moved to
+   `server/routers/`; both JS trees are now JS-only. `frontend/api/` and
+   `extension/api/article_endpoints.py` turned out to be unimportable dead code and
+   were deleted rather than moved.
 4. **Intelligence layer is half-built.** `intelligence/intelligence_manager.py` has ~43
    TODO-stubbed methods; `graph_analysis/` is empty scaffolding (docs/roadmap only).
    Decide: finish or fold findings into Postgres and delete the separate SQLite DB

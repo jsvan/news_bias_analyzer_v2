@@ -8,8 +8,8 @@ from co-occurrence counts or sentiment profiles across the corpus," not an asser
 taxonomy - see analyzer/entity_embeddings.py's module docstring for why co-occurrence and
 sentiment-profile are kept as two separate vectors rather than blended into one.
 
-Router is left unwired (not registered in extension/api/main.py) - someone else is wiring
-routers into main.py concurrently.
+Registered by the single app in server/extension_api.py (routes declare their full
+/narrative/... paths, so no prefix).
 """
 
 import logging
@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 
-from database.db import get_session
+from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity
 
 logger = logging.getLogger(__name__)

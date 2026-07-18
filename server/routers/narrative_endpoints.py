@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from pydantic import BaseModel
 
-from database.db import get_session
+from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
     contested_ranking, archetype, trajectory, svd_source_map, salience_asymmetry, shrunk_means,

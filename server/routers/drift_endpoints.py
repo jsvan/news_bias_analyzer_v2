@@ -11,8 +11,8 @@ GET /narrative/drift-feed         - reads the precomputed entity_drift_events ta
     (database/run_migration_017.py, written by analyzer/drift_detection.py's weekly
     job) - cheap because it's just a query, not full-corpus recomputation.
 
-Router is unregistered here (matches other narrative_* router modules) - wiring it
-into extension/api/main.py is a separate step.
+Registered by the single app in server/extension_api.py (routes declare their full
+/narrative/... paths, so no prefix).
 """
 
 import logging
@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 
-from database.db import get_session
+from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity, NewsSource
 from analyzer.narrative_metrics import pettitt_test, residual_series
 

@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import database utilities
-from database.db import get_session
+from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 # Import clustering module
 from clustering.similarity_api import SimilarityAPI

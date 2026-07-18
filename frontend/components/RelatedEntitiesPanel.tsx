@@ -25,7 +25,7 @@ const VECTOR_HELP: Record<VectorKind, string> = {
 
 // "Related entities" - analyzer/entity_embeddings.py's learned relatedness (PPMI +
 // TruncatedSVD co-occurrence, and a separate sentiment-profile SVD), served via
-// extension/api/embeddings_endpoints.py. Deliberately no hand-curated hierarchy: this
+// server/routers/embeddings_endpoints.py. Deliberately no hand-curated hierarchy: this
 // answers "The West -> USA -> White House -> Trump"-style containment questions from
 // what the corpus itself contains, not an asserted taxonomy.
 const RelatedEntitiesPanel: React.FC<{ entityId: number }> = ({ entityId }) => {

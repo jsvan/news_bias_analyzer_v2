@@ -71,8 +71,8 @@ show_help() {
   echo "                         Options: --force, --intelligence-only, --clustering-only, --status"
   echo "  dashboard              Start the web dashboard"
   echo "  extension              Build the browser extension"
-  echo "  server [TYPE]          Start the API servers (TYPE: extension, dashboard, or both [default])"
-  echo "                         Automatically cleans up any existing server processes"
+  echo "  server                 Start the API server (single FastAPI app on port 8000)"
+  echo "                         Frees the port from any previous server process first"
   echo "  setup                  Set up the environment and database"
   echo "  docker [COMMAND]       Manage Docker database container (up, down, status, init, backup, restore, shell)"
   echo "  status [TYPE]          Show database statistics"
@@ -228,20 +228,23 @@ manage_docker_db() {
   "$DB_DOCKER_SCRIPT" "$DOCKER_COMMAND" "$@"
 }
 
-# Start server(s)
+# Start the server (one consolidated FastAPI app on port 8000)
 start_servers() {
   setup_python_env
   cd "$PROJECT_ROOT"
-  
-  # Set server type (default to "both" if not specified)
-  SERVER_TYPE=${1:-"both"}
-  
-  echo -e "${GREEN}Starting News Bias Analyzer server(s)...${NC}"
+
+  echo -e "${GREEN}Starting News Bias Analyzer server on port 8000...${NC}"
   echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
-  echo -e "${BLUE}Any existing server processes will be automatically cleaned up${NC}"
-  
-  # Start the servers (automatic cleanup is now built in)
-  python -m server.server_manager --type "$SERVER_TYPE"
+
+  # Free the port if a previous server is still holding it
+  EXISTING_PIDS=$(lsof -ti tcp:8000 2>/dev/null)
+  if [ -n "$EXISTING_PIDS" ]; then
+    echo -e "${BLUE}Stopping existing server process(es) on port 8000: $EXISTING_PIDS${NC}"
+    kill $EXISTING_PIDS 2>/dev/null
+    sleep 1
+  fi
+
+  exec uvicorn server.extension_api:app --host 0.0.0.0 --port 8000
 }
 
 # Process local batch files with custom naming patterns

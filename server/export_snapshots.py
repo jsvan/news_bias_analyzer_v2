@@ -114,7 +114,7 @@ def live_fetchers(session):
         get_entities, get_sources, get_entity_distribution,
         get_historical_sentiment, get_source_historical_sentiment,
     )
-    from extension.api.statistical_endpoints import get_country_top_entities
+    from server.routers.statistical_endpoints import get_country_top_entities
 
     def run(coro):
         return jsonable_encoder(asyncio.run(coro))

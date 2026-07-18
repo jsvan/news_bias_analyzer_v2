@@ -12,7 +12,7 @@ interface ContestedEntity {
 }
 
 // "The front line": entities with the sharpest cross-country sentiment disagreement
-// (extension/api/narrative_endpoints.py::get_contested_ranking, backed by
+// (server/routers/narrative_endpoints.py::get_contested_ranking, backed by
 // analyzer/narrative_metrics.py::contested_ranking - Jensen-Shannon divergence between
 // countries' sentiment histograms for the same entity). Live-API only for now.
 const ContestedEntitiesPanel: React.FC = () => {

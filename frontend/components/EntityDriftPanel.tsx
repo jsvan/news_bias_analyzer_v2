@@ -49,7 +49,7 @@ const DriftRow: React.FC<{ label: string; point: DriftPoint; first: boolean }> =
   );
 };
 
-// "Statistical surprise" - extension/api/drift_endpoints.py, backed by
+// "Statistical surprise" - server/routers/drift_endpoints.py, backed by
 // analyzer/narrative_metrics.py::pettitt_test. Distinguishes a GLOBAL shift (everyone
 // moved together - an expected real-world event) from a SOURCE-specific residual shift
 // (this one source moved on its own, unexplained by the global trend - the actually

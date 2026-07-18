@@ -16,7 +16,7 @@ import random
 import math
 
 # Import database utilities
-from database.db import get_session
+from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import shrunk_means
 

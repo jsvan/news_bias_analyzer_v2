@@ -15,7 +15,7 @@ entity's row disappears automatically if entities.id is ever hard-deleted.
 cooccurrence_vec / sentiment_vec are plain DOUBLE PRECISION[] rather than a fixed-width
 vector type (e.g. pgvector) - this repo has no vector extension installed, and
 Python/numpy on the read and write side is enough for the dataset sizes involved
-(cosine similarity computed at request time in extension/api/embeddings_endpoints.py).
+(cosine similarity computed at request time in server/routers/embeddings_endpoints.py).
 
 Run with: ./run.sh custom 'database/run_migration_016.py'
 """

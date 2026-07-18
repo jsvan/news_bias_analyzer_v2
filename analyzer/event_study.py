@@ -149,7 +149,7 @@ def top_covered_entities(session: Session, start: datetime.date, end: datetime.d
 def fetch_global_series(session: Session, entity_id: int, weeks: List[datetime.date],
                          dimension: str, min_sources: int = 3) -> np.ndarray:
     """Weekly mean {dimension} for one entity, averaged across ALL sources/countries
-    (unweighted by country - matches extension/api/narrative_endpoints.py's
+    (unweighted by country - matches server/routers/narrative_endpoints.py's
     get_entity_archetype convention of AVG(...) GROUP BY week_start). Weeks with fewer
     than min_sources distinct sources are set to NaN rather than trusted as real
     signal - pettitt_test treats NaN as "no data that week" (a gap), not zero, which is

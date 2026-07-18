@@ -4,7 +4,7 @@ import { Box, Typography, Card, CardHeader, CardContent, Chip, Link as MuiLink }
 import { tokens, monoNumber, fontMono } from '../theme';
 
 // "How this works" - a documentation page, not a marketing page. Every claim here is
-// checked against the current code (analyzer/narrative_metrics.py, the extension/api/*
+// checked against the current code (analyzer/narrative_metrics.py, the server/routers/*
 // endpoints, and frontend/services/api.ts) at time of writing, not aspirational -
 // see each section's Status line. Examples are real responses captured from a running
 // instance, not fabricated numbers, so a skeptical reader can spot-check them.

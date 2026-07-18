@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Run migration 017: add entity_drift_events, the precomputed table backing the
-drift-detection feed (analyzer/drift_detection.py + extension/api/drift_endpoints.py's
+drift-detection feed (analyzer/drift_detection.py + server/routers/drift_endpoints.py's
 GET /narrative/drift-feed).
 
 Distinguishes two kinds of statistically-significant sentiment changepoint
