@@ -166,25 +166,36 @@ class StatisticalDBManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
+            # Repeated analysis runs store near-identical rows; keep only the most
+            # recent detection per (finding_type, entity_id, source_id, title).
             query = """
-                SELECT * FROM statistical_findings 
-                WHERE is_active = TRUE
+                SELECT * FROM (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY finding_type, entity_id, source_id, title
+                        ORDER BY detection_date DESC
+                    ) AS _rn
+                    FROM statistical_findings
+                    WHERE is_active = TRUE
             """
             params = []
-            
+
             if dashboard_category:
                 query += " AND dashboard_category = ?"
                 params.append(dashboard_category)
-            
-            query += " ORDER BY priority_score DESC, detection_date DESC LIMIT ?"
+
+            query += """
+                ) WHERE _rn = 1
+                ORDER BY priority_score DESC, detection_date DESC LIMIT ?
+            """
             params.append(limit)
-            
+
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            
+
             findings = []
             for row in rows:
                 finding = dict(row)
+                finding.pop('_rn', None)
                 # Parse JSON fields
                 if finding['supporting_data']:
                     finding['supporting_data'] = json.loads(finding['supporting_data'])
