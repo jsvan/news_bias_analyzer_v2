@@ -1,0 +1,16 @@
+series,entity_name,field_start,field_end,value_pct,source_url
+china_unfavorable,China,2017-03-01,2017-05-31,47,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2018-03-01,2018-05-31,48,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2019-03-01,2019-05-31,60,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2020-03-01,2020-05-31,66,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2021-03-01,2021-05-31,77,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2022-03-01,2022-05-31,82,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2023-03-01,2023-05-31,83,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2024-03-01,2024-05-31,81,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2025-03-01,2025-05-31,77,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+china_unfavorable,China,2026-03-23,2026-03-29,71,https://www.pewresearch.org/short-reads/2026/04/14/americans-views-of-china-have-grown-somewhat-more-positive-in-recent-years/
+russia_unfavorable,Russia,2017-02-16,2017-05-08,63,https://www.pewresearch.org/global/2017/08/16/publics-worldwide-unfavorable-toward-putin-russia/
+russia_unfavorable,Russia,2022-03-21,2022-03-27,92,https://www.pewresearch.org/global/2022/04/06/seven-in-ten-americans-now-see-russia-as-an-enemy/
+russia_unfavorable,Russia,2025-03-01,2025-04-15,85,https://www.pewresearch.org/2025/04/17/how-americans-view-russia-and-putin/
+putin_no_confidence,Vladimir Putin,2024-04-01,2024-04-30,88,https://www.pewresearch.org/global/2024/05/08/views-of-russia-and-putin/
+putin_no_confidence,Vladimir Putin,2025-03-01,2025-04-15,84,https://www.pewresearch.org/2025/04/17/how-americans-view-russia-and-putin/
