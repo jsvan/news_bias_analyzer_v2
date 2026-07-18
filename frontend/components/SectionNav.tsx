@@ -7,7 +7,6 @@ const SECTIONS = [
   { to: '/sources', label: 'Sources' },
   { to: '/source-space', label: 'Source Space' },
   { to: '/countries', label: 'Countries' },
-  { to: '/world', label: 'World' },
   { to: '/compare/entities', label: 'Compare', activeMatch: '/compare' },
   { to: '/events', label: 'Events' },
   { to: '/stories', label: 'Stories' },

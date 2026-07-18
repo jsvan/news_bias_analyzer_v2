@@ -8,7 +8,6 @@ import SourcesIndexPage from './pages/SourcesIndexPage';
 import SourceSpacePage from './pages/SourceSpacePage';
 import SourceProfilePage from './pages/SourceProfilePage';
 import CountryEntityPage from './pages/CountryEntityPage';
-import WorldViewPage from './pages/WorldViewPage';
 import CompareEntitiesPage from './pages/CompareEntitiesPage';
 import CompareSourcesPage from './pages/CompareSourcesPage';
 import IntelligenceInsights from './components/IntelligenceInsights';
@@ -29,7 +28,6 @@ const App: React.FC = () => (
           <Route path="/source-space" element={<SourceSpacePage />} />
           <Route path="/sources/:name" element={<SourceProfilePage />} />
           <Route path="/countries" element={<CountryEntityPage />} />
-          <Route path="/world" element={<WorldViewPage />} />
           <Route path="/compare" element={<Navigate to="/compare/entities" replace />} />
           <Route path="/compare/entities" element={<CompareEntitiesPage />} />
           <Route path="/compare/sources" element={<CompareSourcesPage />} />
