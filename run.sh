@@ -67,7 +67,7 @@ show_help() {
   echo "  analyze diag           Run full diagnostic on the analyzer database status"
   echo "  analyze recover-batches Recover articles from OpenAI batches (use --help for options)"
   echo "  analyze reset-database  Reset database by clearing entity data and article status"
-  echo "  statistics [OPTIONS]   Run statistical analysis and clustering with throttling"
+  echo "  statistics             Rebuild statistics: matview, weekly stats, similarity, embeddings, drift"
   echo "                         Options: --force, --intelligence-only, --clustering-only, --status"
   echo "  dashboard              Start the web dashboard"
   echo "  extension              Build the browser extension"
@@ -292,10 +292,19 @@ restore_openai_data() {
 run_statistics() {
   setup_python_env
   cd "$PROJECT_ROOT"
-  echo -e "${GREEN}Running statistical analysis and clustering...${NC}"
-  
-  # Pass all arguments to the statistical orchestrator
-  python -m intelligence.statistical_orchestrator "$@"
+  echo -e "${GREEN}Rebuilding statistics (matview, weekly stats, similarity, embeddings, drift)...${NC}"
+
+  # One-shot run of the scheduler's statistical jobs, in dependency order.
+  # (The old intelligence.statistical_orchestrator was deleted July 2026.)
+  python -c "
+from scheduler.job_scheduler import (run_mv_refresh, update_sentiment_statistics,
+    run_weekly_similarity, run_entity_embeddings, run_drift_detection)
+run_mv_refresh()
+update_sentiment_statistics()
+run_weekly_similarity()
+run_entity_embeddings()
+run_drift_detection()
+"
 }
 
 # Run SQL query on the database
