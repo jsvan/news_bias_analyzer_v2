@@ -51,10 +51,14 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
   // Check if we have enough data
   const hasEnoughData = data && data.length > 2;
 
-  // Format date for display
+  // Format date for display. All-time series can cross a year boundary — without
+  // the year, sparse ticks like "Mar 13 · Aug 29 · Apr 1" read as shuffled.
+  const spansYears = data.length > 1 && new Date(data[0].date).getFullYear() !== new Date(data[data.length - 1].date).getFullYear();
   const formatDate = (date: string) => {
     const d = new Date(date);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return spansYears
+      ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   // Custom tooltip for the chart
@@ -172,6 +176,7 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
             <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
             <XAxis
               dataKey="date"
+              minTickGap={32}
               tickFormatter={formatDate}
               padding={{ left: 20, right: 20 }}
               tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}

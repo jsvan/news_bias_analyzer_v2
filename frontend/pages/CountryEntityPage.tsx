@@ -20,6 +20,7 @@ import {
 
 import { statsApi } from '../services/api';
 import CountryEntitiesTrendChart from '../components/CountryEntitiesTrendChart';
+import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
 import { CountryTopEntitiesResponse, CountryEntityData, NewspaperTopEntitiesResponse } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
 
@@ -28,7 +29,7 @@ const CountryEntityPage: React.FC = () => {
   // Initial country can be deep-linked via ?country=X (e.g. from the World page).
   const [searchParams] = useSearchParams();
   const [selectedCountry, setSelectedCountry] = useState<string>(searchParams.get('country') || 'USA');
-  const [selectedTimeRange, setSelectedTimeRange] = useState<number>(30);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<number>(ALL_TIME);
 
   // State for data
   const [countryData, setCountryData] = useState<CountryTopEntitiesResponse | null>(null);
@@ -78,10 +79,6 @@ const CountryEntityPage: React.FC = () => {
 
   const handleCountryChange = (event: any) => {
     setSelectedCountry(event.target.value as string);
-  };
-
-  const handleTimeRangeChange = (event: any) => {
-    setSelectedTimeRange(event.target.value as number);
   };
 
   const handleNewspaperSelect = async (newspaperName: string) => {
@@ -172,21 +169,7 @@ const CountryEntityPage: React.FC = () => {
           </Grid>
           
           <Grid item xs={12} sm={6}>
-            <FormControl fullWidth size="small">
-              <InputLabel id="time-range-label">Time Range</InputLabel>
-              <Select
-                labelId="time-range-label"
-                value={selectedTimeRange}
-                onChange={handleTimeRangeChange}
-                label="Time Range"
-              >
-                <MenuItem value={7}>Last 7 days</MenuItem>
-                <MenuItem value={14}>Last 2 weeks</MenuItem>
-                <MenuItem value={30}>Last 30 days</MenuItem>
-                <MenuItem value={60}>Last 2 months</MenuItem>
-                <MenuItem value={90}>Last 3 months</MenuItem>
-              </Select>
-            </FormControl>
+            <TimeRangeSelect value={selectedTimeRange} onChange={setSelectedTimeRange} options={[7, 14, 30, 60, 90]} />
           </Grid>
         </Grid>
       </Paper>
@@ -224,10 +207,10 @@ const CountryEntityPage: React.FC = () => {
             <Grid item xs={12} sm={4}>
               <Box sx={{ textAlign: 'center' }}>
                 <Typography variant="h3" sx={{ ...monoNumber, color: tokens.ink }}>
-                  {countryData.time_period_days}
+                  {countryData.time_period_days === 0 ? 'All' : countryData.time_period_days}
                 </Typography>
                 <Typography sx={{ color: tokens.inkMuted }}>
-                  Days Analyzed
+                  {countryData.time_period_days === 0 ? 'Time Analyzed' : 'Days Analyzed'}
                 </Typography>
               </Box>
             </Grid>
@@ -270,10 +253,10 @@ const CountryEntityPage: React.FC = () => {
         <Card sx={{ mb: 4 }}>
           <CardHeader 
             title={`${selectedNewspaper} - Most Discussed Topics`}
-            subheader={`Top entities covered by ${selectedNewspaper} over the last ${selectedTimeRange} days`}
+            subheader={`Top entities covered by ${selectedNewspaper} over ${describeTimeRange(selectedTimeRange)}`}
           />
           <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-            <Box sx={{ columns: { xs: 1, sm: 2, md: 3 }, columnGap: 0 }}>
+            <Box sx={{ columns: { xs: 1, md: 2 }, columnGap: 0 }}>
               {newspaperData.entities.map((entity, index) => (
                 <Box
                   key={entity.entity_name}
@@ -355,7 +338,7 @@ const CountryEntityPage: React.FC = () => {
             subheader="Average sentiment scores and mention counts"
           />
           <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-            <Box sx={{ columns: { xs: 1, sm: 2, md: 3 }, columnGap: 0 }}>
+            <Box sx={{ columns: { xs: 1, md: 2 }, columnGap: 0 }}>
               {countryData.entities.map((entity, index) => (
                 <Box
                   key={entity.entity_name}
@@ -396,9 +379,9 @@ const CountryEntityPage: React.FC = () => {
                   </Typography>
                   <Typography
                     variant="caption"
-                    sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 96, textAlign: 'right', flexShrink: 0 }}
+                    sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 120, textAlign: 'right', flexShrink: 0 }}
                   >
-                    {entity.mention_count} · {Object.keys(entity.newspapers).length}np
+                    {entity.mention_count} in {Object.keys(entity.newspapers).length} {Object.keys(entity.newspapers).length === 1 ? 'paper' : 'papers'}
                   </Typography>
                 </Box>
               ))}

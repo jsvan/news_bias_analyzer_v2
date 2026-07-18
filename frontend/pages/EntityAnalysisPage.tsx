@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import { useData } from '../context/DataContext';
+import { statsApi } from '../services/api';
 import SentimentChart from '../components/SentimentChart';
 import ContestedEntitiesPanel from '../components/ContestedEntitiesPanel';
 import DriftFeedPanel from '../components/DriftFeedPanel';
@@ -28,18 +29,27 @@ import { tokens, archetypeColor, archetypeLabel, monoNumber, ArchetypeLabel } fr
 
 const ARCHETYPES: ArchetypeLabel[] = ['Hero', 'Victim', 'Villain', 'Threat'];
 
-// No trending/highlighted-entities endpoint exists yet (confirmed in services/api.ts —
-// entityApi has no such method); this page is honest about that rather than faking data.
-const highlightedEntities: EntitySentimentSummary[] = [];
-
 const EntityAnalysisPage: React.FC = () => {
   const { entities } = useData();
   const navigate = useNavigate();
   const [selectedArchetypes, setSelectedArchetypes] = useState<ArchetypeLabel[]>([]);
+  const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
+
+  useEffect(() => {
+    statsApi
+      .getTrendingEntities(40)
+      .then(setHighlightedEntities)
+      .catch(() => setHighlightedEntities([]));
+  }, []);
 
   const filteredHighlighted = selectedArchetypes.length
     ? highlightedEntities.filter((e) => selectedArchetypes.includes(archetypeLabel(e.power_score, e.moral_score)))
     : highlightedEntities;
+
+  // Strongest archetype signal = distance from the neutral origin on the power/moral plane
+  const notableEntities = [...filteredHighlighted]
+    .sort((a, b) => Math.hypot(b.power_score, b.moral_score) - Math.hypot(a.power_score, a.moral_score))
+    .slice(0, 8);
 
   const toggleArchetype = (a: ArchetypeLabel) => {
     setSelectedArchetypes((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
@@ -100,77 +110,14 @@ const EntityAnalysisPage: React.FC = () => {
               }
             />
             <CardContent>
-              <SentimentChart data={filteredHighlighted} entityTypes={{}} height={500} showLabels={true} />
+              <SentimentChart data={filteredHighlighted} height={500} showLabels={true} />
             </CardContent>
           </Card>
-        </Grid>
-
-        <Grid item xs={12} md={5}>
-          <Card>
-            <CardHeader title="Notable Entities" subheader="Entities with unusual sentiment patterns" />
-            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-              {filteredHighlighted.length === 0 && (
-                <Box sx={{ px: 2, py: 3 }}>
-                  <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
-                    No standout divergence detected yet — this view surfaces entities whose
-                    coverage strays furthest from the global baseline once enough sources
-                    have been analyzed.
-                  </Typography>
-                </Box>
-              )}
-              {filteredHighlighted.slice(0, 8).map((entity, i) => {
-                const match = entities.find((e) => e.name === entity.entity);
-                return (
-                  <Box
-                    key={entity.entity}
-                    onClick={() => match && navigate(`/entities/${match.id}`)}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1.5,
-                      px: 2,
-                      py: 1.25,
-                      cursor: match ? 'pointer' : 'default',
-                      borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}`,
-                      '&:hover': match ? { bgcolor: tokens.surfaceSunken } : undefined,
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        flexShrink: 0,
-                        bgcolor: archetypeColor(entity.power_score, entity.moral_score),
-                      }}
-                    />
-                    <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
-                      {entity.entity}
-                    </Typography>
-                    <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted }}>
-                      P {entity.power_score.toFixed(1)} · M {entity.moral_score.toFixed(1)}
-                    </Typography>
-                    <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 44, textAlign: 'right' }}>
-                      {entity.global_percentile}%ile
-                    </Typography>
-                  </Box>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Box sx={{ mt: 3 }}>
-            <ContestedEntitiesPanel />
-          </Box>
-
-          <Box sx={{ mt: 3 }}>
-            <DriftFeedPanel />
-          </Box>
 
           <Card sx={{ mt: 3 }}>
             <CardHeader title="Browse all entities" subheader={`${entities.length} tracked, sorted by mention count`} />
-            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 }, maxHeight: 360, overflowY: 'auto' }}>
-              {entities.slice(0, 40).map((entity, i) => (
+            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 }, maxHeight: 480, overflowY: 'auto' }}>
+              {entities.slice(0, 60).map((entity, i) => (
                 <Box
                   key={entity.id}
                   onClick={() => navigate(`/entities/${entity.id}`)}
@@ -198,6 +145,65 @@ const EntityAnalysisPage: React.FC = () => {
               ))}
             </CardContent>
           </Card>
+        </Grid>
+
+        <Grid item xs={12} md={5}>
+          <Card>
+            <CardHeader title="Strongest portrayals" subheader="Furthest from neutral on both axes, all sources combined" />
+            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+              {notableEntities.length === 0 && (
+                <Box sx={{ px: 2, py: 3 }}>
+                  <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
+                    No scored entities yet. This list ranks entities by how far their average
+                    portrayal sits from neutral once mentions are analyzed.
+                  </Typography>
+                </Box>
+              )}
+              {notableEntities.map((entity, i) => (
+                <Box
+                  key={entity.entity}
+                  onClick={() => entity.id && navigate(`/entities/${entity.id}`)}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    px: 2,
+                    py: 1.25,
+                    cursor: entity.id ? 'pointer' : 'default',
+                    borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}`,
+                    '&:hover': entity.id ? { bgcolor: tokens.surfaceSunken } : undefined,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      bgcolor: archetypeColor(entity.power_score, entity.moral_score),
+                    }}
+                  />
+                  <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
+                    {entity.entity}
+                  </Typography>
+                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted }}>
+                    P {entity.power_score.toFixed(1)} · M {entity.moral_score.toFixed(1)}
+                  </Typography>
+                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 52, textAlign: 'right' }}>
+                    {(entity.mention_count || 0).toLocaleString()}
+                  </Typography>
+                </Box>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Box sx={{ mt: 3 }}>
+            <ContestedEntitiesPanel />
+          </Box>
+
+          <Box sx={{ mt: 3 }}>
+            <DriftFeedPanel />
+          </Box>
         </Grid>
       </Grid>
     </Box>

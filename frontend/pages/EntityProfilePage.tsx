@@ -8,10 +8,6 @@ import {
   CardHeader,
   CardContent,
   Paper,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Autocomplete,
   TextField,
   Chip,
@@ -24,6 +20,7 @@ import SentimentDistributionChart from '../components/SentimentDistributionChart
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
+import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
 import { SentimentDistributions, TrendPoint } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
 
@@ -32,7 +29,7 @@ const EntityProfilePage: React.FC = () => {
   const { entities, availableCountries, getEntityById } = useData();
   const entity = getEntityById(Number(id));
 
-  const [selectedTimeRange, setSelectedTimeRange] = useState<number>(30);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<number>(ALL_TIME);
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [distribution, setDistribution] = useState<SentimentDistributions | null>(null);
@@ -43,10 +40,10 @@ const EntityProfilePage: React.FC = () => {
     setLoading(true);
     try {
       const [distributionRes, historicalRes] = await Promise.all([
-        entityApi.getEntityDistribution(entityId).catch(() => null),
+        entityApi.getEntityDistribution(entityId, undefined, undefined, days).catch(() => null),
         statsApi.getHistoricalSentiment(entityId, { days }).catch(() => null),
       ]);
-      setDistribution(distributionRes);
+      setDistribution(distributionRes?.distributions ?? null);
       setTrends(historicalRes?.daily_data || []);
 
       const params: any = { days };
@@ -111,21 +108,7 @@ const EntityProfilePage: React.FC = () => {
       <Paper sx={{ p: 2, mb: 4, bgcolor: tokens.surfaceSunken, border: `1px solid ${tokens.border}` }}>
         <Grid container spacing={3} alignItems="center">
           <Grid item xs={12} sm={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel id="time-range-label">Time Range</InputLabel>
-              <Select
-                labelId="time-range-label"
-                value={selectedTimeRange}
-                label="Time Range"
-                onChange={(e) => handleTimeRangeChange(e.target.value as number)}
-              >
-                <MenuItem value={7}>Last 7 days</MenuItem>
-                <MenuItem value={30}>Last 30 days</MenuItem>
-                <MenuItem value={90}>Last 3 months</MenuItem>
-                <MenuItem value={180}>Last 6 months</MenuItem>
-                <MenuItem value={365}>Last year</MenuItem>
-              </Select>
-            </FormControl>
+            <TimeRangeSelect value={selectedTimeRange} onChange={handleTimeRangeChange} options={[7, 30, 90, 180, 365]} />
           </Grid>
           <Grid item xs={12} sm={8}>
             <Autocomplete
@@ -180,7 +163,7 @@ const EntityProfilePage: React.FC = () => {
             <Card>
               <CardHeader
                 title={`How Different Sources Portray ${entity.name}`}
-                subheader={`Compare ${Object.keys(sourcesTrends).length} news sources over ${selectedTimeRange} days`}
+                subheader={`Compare ${Object.keys(sourcesTrends).length} news sources over ${describeTimeRange(selectedTimeRange)}`}
               />
               <CardContent>
                 {Object.keys(sourcesTrends).length > 0 ? (

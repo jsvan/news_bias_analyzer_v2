@@ -31,7 +31,7 @@ const ContestedEntitiesPanel: React.FC = () => {
     <Card>
       <CardHeader
         title="The front line"
-        subheader="Entities where countries disagree most on sentiment, last 30 days"
+        subheader="Entities where countries disagree most on sentiment, last 30 days of coverage"
         action={
           <Tooltip title="Divergence = the sharpest Jensen-Shannon divergence between any two countries' sentiment-score histograms for this entity. Computed mechanically, no editorial judgment.">
             <IconButton>

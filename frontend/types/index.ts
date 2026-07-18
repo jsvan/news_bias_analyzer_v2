@@ -113,10 +113,12 @@ export interface SourceProfile {
 }
 
 export interface EntitySentimentSummary {
+  id?: number;
   entity: string;
+  type?: string;
   power_score: number;
   moral_score: number;
-  global_percentile: number;
+  mention_count?: number;
 }
 
 // Trend Types

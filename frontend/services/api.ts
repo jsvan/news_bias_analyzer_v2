@@ -108,17 +108,18 @@ export const entityApi = {
   },
   
   // Get entity sentiment distribution
-  getEntityDistribution: async (id: number, country?: string, sourceId?: number) => {
+  getEntityDistribution: async (id: number, country?: string, sourceId?: number, days?: number) => {
     if (isStaticMode()) return staticData.getEntityDistribution(id);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real distribution data.');
     }
-    
+
     let url = `/stats/entity_distribution/${id}`;
     const params: any = {};
-    
+
     if (country) params.country = country;
     if (sourceId) params.source_id = sourceId;
+    if (days) params.days = days; // ALL_TIME sentinel (0) omitted = all-time
     
     const response = await api.get(url, { params });
     return response.data;
@@ -206,14 +207,29 @@ export const statsApi = {
     return response.data;
   },
   
+  // Most-mentioned entities with average power/moral scores. days omitted = all time.
+  getTrendingEntities: async (limit: number = 25, days?: number) => {
+    if (isApiUnavailable()) {
+      throw new Error('API unavailable: Please run the backend server to access entity sentiment data.');
+    }
+
+    const params: any = { limit };
+    if (days) params.days = days;
+    const response = await api.get('/stats/trending_entities', { params });
+    return response.data;
+  },
+
   // Get historical sentiment data
-  getHistoricalSentiment: async (entityId: number, params = {}) => {
+  getHistoricalSentiment: async (entityId: number, params: any = {}) => {
     if (isStaticMode()) return staticData.getHistoricalSentiment(entityId, params);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real historical sentiment data.');
     }
-    
-    const response = await api.get(`/stats/historical_sentiment?entity_id=${entityId}`, { params });
+
+    // ALL_TIME sentinel (0) means no day filter — omit it or the backend 422s on ge=1
+    const query: any = { ...params };
+    if (!query.days) delete query.days;
+    const response = await api.get(`/stats/historical_sentiment?entity_id=${entityId}`, { params: query });
     return response.data;
   },
   

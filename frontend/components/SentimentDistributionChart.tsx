@@ -48,7 +48,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
   showSource = true
 }) => {
   const [dimension, setDimension] = useState<'power' | 'moral'>('power');
-  
+  // Layer visibility is real state: the chips are working toggles, initialized from props.
+  const [visible, setVisible] = useState({ global: showGlobal, national: showNational, source: showSource });
+  const toggleLayer = (layer: 'global' | 'national' | 'source') =>
+    setVisible((v) => ({ ...v, [layer]: !v[layer] }));
+
   // Get the selected distribution data
   const getDistributionData = (): DistributionDataPoint[] => {
     // Check which distributions are available
@@ -69,11 +73,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
     return globalPdf.x.map((value, index) => {
       const point: DistributionDataPoint = { x: value };
       
-      if (hasGlobal && showGlobal) {
+      if (hasGlobal && visible.global) {
         point.global = globalPdf.y[index];
       }
       
-      if (hasNational && showNational) {
+      if (hasNational && visible.national) {
         // Find the closest x value in national data
         const nationalIndex = nationalPdf.x.findIndex(x => x >= value);
         if (nationalIndex >= 0) {
@@ -81,7 +85,7 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
         }
       }
       
-      if (hasSource && showSource) {
+      if (hasSource && visible.source) {
         // Find the closest x value in source data
         const sourceIndex = sourcePdf.x.findIndex(x => x >= value);
         if (sourceIndex >= 0) {
@@ -127,32 +131,13 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
   // Check if we have enough data for meaningful visualization
   const hasEnoughData = distributionData.length >= 20; // Minimum data points for statistical relevance
   
-  // Get legend items with counts
-  const getLegendItems = () => {
-    const items = [];
-    
-    if (distributions.global && showGlobal) {
-      const count = dimension === 'power' 
-        ? distributions.global.power.count 
-        : distributions.global.moral.count;
-      items.push(`Global (n=${count})`);
-    }
-    
-    if (distributions.national && showNational) {
-      const count = dimension === 'power' 
-        ? distributions.national.power.count 
-        : distributions.national.moral.count;
-      items.push(`${distributions.national.country} (n=${count})`);
-    }
-    
-    if (distributions.source && showSource) {
-      const count = dimension === 'power' 
-        ? distributions.source.power.count 
-        : distributions.source.moral.count;
-      items.push(`${distributions.source.source_name} (n=${count})`);
-    }
-    
-    return items;
+  // Per-layer legend names with real sample sizes (n from the selected dimension)
+  const layerName = (layer: 'global' | 'national' | 'source'): string => {
+    const dist = distributions[layer];
+    if (!dist) return layer;
+    const count = dimension === 'power' ? dist.power.count : dist.moral.count;
+    const label = layer === 'global' ? 'Global' : layer === 'national' ? distributions.national!.country : distributions.source!.source_name;
+    return `${label} (n=${count})`;
   };
 
   return (
@@ -180,11 +165,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
                 label="Global"
                 sx={{
                   mx: 0.5,
-                  bgcolor: showGlobal ? GLOBAL_COLOR : 'transparent',
-                  color: showGlobal ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${showGlobal ? GLOBAL_COLOR : tokens.border}`,
+                  bgcolor: visible.global ? GLOBAL_COLOR : 'transparent',
+                  color: visible.global ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${visible.global ? GLOBAL_COLOR : tokens.border}`,
                 }}
-                onClick={() => showGlobal}
+                onClick={() => toggleLayer('global')}
               />
             )}
             {distributions.national && (
@@ -192,11 +177,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
                 label={distributions.national.country}
                 sx={{
                   mx: 0.5,
-                  bgcolor: showNational ? NATIONAL_COLOR : 'transparent',
-                  color: showNational ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${showNational ? NATIONAL_COLOR : tokens.border}`,
+                  bgcolor: visible.national ? NATIONAL_COLOR : 'transparent',
+                  color: visible.national ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${visible.national ? NATIONAL_COLOR : tokens.border}`,
                 }}
-                onClick={() => showNational}
+                onClick={() => toggleLayer('national')}
               />
             )}
             {distributions.source && (
@@ -204,11 +189,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
                 label={distributions.source.source_name}
                 sx={{
                   mx: 0.5,
-                  bgcolor: showSource ? SOURCE_COLOR : 'transparent',
-                  color: showSource ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${showSource ? SOURCE_COLOR : tokens.border}`,
+                  bgcolor: visible.source ? SOURCE_COLOR : 'transparent',
+                  color: visible.source ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${visible.source ? SOURCE_COLOR : tokens.border}`,
                 }}
-                onClick={() => showSource}
+                onClick={() => toggleLayer('source')}
               />
             )}
           </Box>
@@ -261,8 +246,10 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
           <XAxis
             dataKey="x"
-            domain={[-2, 2]}
-            tickCount={11}
+            type="number"
+            domain={['dataMin', 'dataMax']}
+            tickCount={9}
+            tickFormatter={(v: number) => v.toFixed(1)}
             tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
           >
             <Label
@@ -277,15 +264,15 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           </YAxis>
           <Tooltip
             formatter={(value: number) => [value.toFixed(4), 'Probability Density']}
-            labelFormatter={(label) => `Score: ${label}`}
+            labelFormatter={(label) => `Score: ${Number(label).toFixed(2)}`}
             contentStyle={{ border: `1px solid ${tokens.border}`, borderRadius: 8, backgroundColor: tokens.surface }}
             labelStyle={{ color: tokens.ink }}
             itemStyle={{ color: tokens.ink, ...monoNumber }}
           />
-          <Legend formatter={(value) => getLegendItems().shift() || value} wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
+          <Legend wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
 
           {/* Reference lines for means */}
-          {showGlobal && means.global !== undefined && (
+          {visible.global && means.global !== undefined && (
             <ReferenceLine
               x={means.global}
               stroke={GLOBAL_COLOR}
@@ -294,7 +281,7 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
             />
           )}
 
-          {showNational && means.national !== undefined && (
+          {visible.national && means.national !== undefined && (
             <ReferenceLine
               x={means.national}
               stroke={NATIONAL_COLOR}
@@ -303,7 +290,7 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
             />
           )}
 
-          {showSource && means.source !== undefined && (
+          {visible.source && means.source !== undefined && (
             <ReferenceLine
               x={means.source}
               stroke={SOURCE_COLOR}
@@ -313,30 +300,33 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           )}
 
           {/* Distribution areas */}
-          {showGlobal && (
+          {visible.global && distributions.global && (
             <Area
               type="monotone"
               dataKey="global"
+              name={layerName('global')}
               fill={GLOBAL_COLOR}
               stroke={GLOBAL_COLOR}
               fillOpacity={0.3}
             />
           )}
 
-          {showNational && (
+          {visible.national && distributions.national && (
             <Area
               type="monotone"
               dataKey="national"
+              name={layerName('national')}
               fill={NATIONAL_COLOR}
               stroke={NATIONAL_COLOR}
               fillOpacity={0.3}
             />
           )}
 
-          {showSource && (
+          {visible.source && distributions.source && (
             <Area
               type="monotone"
               dataKey="source"
+              name={layerName('source')}
               fill={SOURCE_COLOR}
               stroke={SOURCE_COLOR}
               fillOpacity={0.3}

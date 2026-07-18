@@ -18,7 +18,9 @@ import { tokens, archetypeColor, monoNumber } from '../theme';
 
 const STORAGE_KEY = 'newsbias:my-sources';
 const MAX_SOURCES = 3;
-const DAYS = 30;
+// All-time window: the corpus is a bounded snapshot, so a wall-clock lookback
+// (e.g. last 30 days) can be empty long before the data is. 0 = ALL_TIME sentinel.
+const DAYS = 0;
 const GLYPH_SIZE = 56;
 
 interface EntityComparison {
@@ -306,7 +308,7 @@ const MyBubblePage: React.FC = () => {
         My Bubble
       </Typography>
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3 }}>
-        The filled dot is your source's reading, colored by quadrant. The gray dot is the {DAYS}-day
+        The filled dot is your source's reading, colored by quadrant. The gray dot is the all-time
         global average for that same entity. Line length is the distance between them &mdash; not a
         verdict on either.
       </Typography>

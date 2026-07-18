@@ -5,31 +5,27 @@ import {
   Scatter,
   XAxis,
   YAxis,
-  ZAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   LabelList,
   Label
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
-import { tokens, archetypeColor, monoNumber } from '../theme';
+import { tokens, archetypeColor } from '../theme';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
 }
 
 interface SentimentChartProps {
-  title?: string;
   data: EntitySentimentSummary[];
   entityTypes?: Record<string, string[]>; // Type to list of entities mapping
   height?: number;
   showLabels?: boolean;
 }
 
-const SentimentChart: React.FC<SentimentChartProps> = ({ 
-  title = 'Sentiment Analysis',
+const SentimentChart: React.FC<SentimentChartProps> = ({
   data,
   entityTypes,
   height = 400,
@@ -54,11 +50,21 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     })
     .map(item => ({
       ...item,
-      size: 20 + (item.global_percentile || 0) / 5 // Size based on percentile
+      // Radius from log mention count: 40k-mention entities read bigger without drowning 100-mention ones
+      size: 5 + Math.log10(Math.max(item.mention_count || 1, 1)) * 2.2,
     }));
 
   // Check if we have enough data for a meaningful scatter plot
   const hasEnoughData = filteredData.length >= 5; // Minimum number of entities needed for comparison
+
+  // Only the most-mentioned points get static labels; the rest are tooltip-only.
+  // 40 overlapping name labels is noise, not information.
+  const labeledEntities = new Set(
+    [...filteredData]
+      .sort((a, b) => (b.mention_count || 0) - (a.mention_count || 0))
+      .slice(0, 10)
+      .map((d) => d.entity)
+  );
 
   const handleTypeChange = (event: SelectChangeEvent<string[]>) => {
     const value = event.target.value;
@@ -83,18 +89,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
 
   return (
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box>
-          <Typography variant="h6" gutterBottom>
-            {title}
-          </Typography>
-          {!hasEnoughData && (
-            <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
-              Insufficient data for meaningful sentiment comparison
-            </Typography>
-          )}
-        </Box>
-        
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {entityTypes && (
           <FormControl sx={{ minWidth: 200 }}>
             <InputLabel id="entity-type-select-label">Entity Types</InputLabel>
@@ -171,11 +166,8 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
           >
             <Label value="Moral Dimension" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </YAxis>
-          <ZAxis type="number" dataKey="size" range={[20, 100]} />
           <Tooltip
-            formatter={(value: number, name: string) => {
-              return [value.toFixed(2), name === 'size' ? 'Global Percentile' : name];
-            }}
+            formatter={(value: number, name: string) => [value.toFixed(2), name]}
             labelFormatter={(label) => {
               const item = data.find(d => d.entity === label);
               return `${item?.entity}`;
@@ -190,8 +182,8 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               key={`quadrant-${index}`}
               name=""
               data={[{ power_score: label.x, moral_score: label.y, size: 1, entity: '' }]}
-              shape={() => (
-                <text x={0} y={0} dy={5} textAnchor="middle" fill={label.color} style={{ fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.04em', opacity: 0.28 }}>
+              shape={(props: any) => (
+                <text x={props.cx} y={props.cy} dy={5} textAnchor="middle" fill={label.color} style={{ fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.04em', opacity: 0.28 }}>
                   {label.text}
                 </text>
               )}
@@ -207,12 +199,12 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             fill={tokens.accent}
             isAnimationActive={true}
             shape={(props: any) => {
-              const { cx, cy, entity } = props;
+              const { cx, cy, entity, payload } = props;
               return (
                 <circle
                   cx={cx}
                   cy={cy}
-                  r={9}
+                  r={payload?.size ?? 9}
                   fill={getEntityColor(entity)}
                   fillOpacity={0.85}
                   stroke={tokens.surface}
@@ -227,10 +219,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                 position="top"
                 offset={10}
                 style={{ fontSize: '10px', fill: tokens.ink }}
+                formatter={(name: string) => (labeledEntities.has(name) ? name : '')}
               />
             )}
           </Scatter>
-          <Legend wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
         </ScatterChart>
       </ResponsiveContainer>
       )}

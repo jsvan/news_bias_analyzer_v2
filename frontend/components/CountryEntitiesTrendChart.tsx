@@ -111,9 +111,11 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
   const hasData = entityNames.length > 0 && combinedData.length > 0;
 
   // Format date for display
+  // Include the year when the series crosses a year boundary — sparse all-time
+  // ticks without it read as out of order.
   const formatDate = (date: string) => {
     const d = new Date(date);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
   };
 
   // State for tracking which line is being hovered
@@ -325,6 +327,7 @@ const CountryEntitiesTrendChart: React.FC<CountryEntitiesTrendChartProps> = ({
             <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
             <XAxis
               dataKey="date"
+              minTickGap={32}
               tickFormatter={formatDate}
               padding={{ left: 20, right: 20 }}
               tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}

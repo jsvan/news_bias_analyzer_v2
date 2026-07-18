@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Box, Typography } from '@mui/material';
 import { useData } from '../context/DataContext';
-import { tokens, categoricalColor, monoNumber } from '../theme';
+import { tokens, monoNumber } from '../theme';
 
 // No mapping library is installed and none should be added (see DESIGN.md) — a CSS grid of
 // tiles stands in for a geographic map. Sentiment scores in the current snapshot are all
@@ -48,7 +48,6 @@ const WorldViewPage: React.FC = () => {
                 borderRadius: 1.25,
                 bgcolor: tokens.surface,
                 border: `1px solid ${tokens.border}`,
-                borderTop: `3px solid ${categoricalColor(country, availableCountries)}`,
                 transition: 'background-color 120ms ease',
                 '&:hover': { bgcolor: tokens.surfaceSunken },
               }}
@@ -68,9 +67,9 @@ const WorldViewPage: React.FC = () => {
       )}
 
       <Typography variant="caption" sx={{ display: 'block', mt: 3, color: tokens.inkMuted }}>
-        Tiles are sized by real source count, not sentiment divergence — the analysis pipeline
-        hasn't populated per-country sentiment scores yet. Once it does, this view will color
-        each tile by how far that country's coverage strays from the global baseline.
+        Ordered by source count — the one real per-country signal in this snapshot. Coloring by
+        divergence from the global baseline needs per-country sentiment scores the pipeline
+        doesn't produce yet.
       </Typography>
     </Box>
   );

@@ -65,7 +65,7 @@ const CompareEntitiesPage: React.FC = () => {
     Promise.all(
       selectedIds.map((id) =>
         statsApi
-          .getHistoricalSentiment(id, { days: 30 })
+          .getHistoricalSentiment(id, {}) // all-time; corpus is a bounded snapshot
           .then((res) => [id, res?.daily_data || []] as const)
           .catch(() => [id, []] as const)
       )
