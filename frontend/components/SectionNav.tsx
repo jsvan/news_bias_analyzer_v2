@@ -8,7 +8,6 @@ const SECTIONS = [
   { to: '/source-space', label: 'Source Space' },
   { to: '/countries', label: 'Countries' },
   { to: '/compare/entities', label: 'Compare', activeMatch: '/compare' },
-  { to: '/events', label: 'Events' },
   { to: '/stories', label: 'Stories' },
   { to: '/my-bubble', label: 'My Bubble' },
   { to: '/methodology', label: 'How this works' },

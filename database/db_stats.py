@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from database.db import DatabaseManager
 from database.models import NewsArticle, NewsSource, Entity, EntityMention, Quote, Topic, PublicFigure
-from statistical_database.db_manager import StatisticalDBManager
+from database.system_metrics import get_system_metric
 
 # Configure logging
 logging.basicConfig(
@@ -162,10 +162,9 @@ def get_database_stats() -> Dict[str, Any]:
         # Total entity mentions
         entity_stats['mentions_count'] = session.query(func.count(EntityMention.id)).scalar() or 0
         
-        # Get total deleted entities from statistical database
+        # Get total deleted entities (Postgres system_metrics counter)
         try:
-            stats_db = StatisticalDBManager()
-            entity_stats['total_deleted'] = stats_db.get_system_metric('total_entities_deleted')
+            entity_stats['total_deleted'] = get_system_metric(session, 'total_entities_deleted')
         except Exception as e:
             logger.warning(f"Could not get deleted entities metric: {e}")
             entity_stats['total_deleted'] = 0

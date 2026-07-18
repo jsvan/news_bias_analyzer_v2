@@ -16,10 +16,6 @@ class DatabaseConfig:
     PRIMARY_DATABASE_URL: str = os.environ.get('DATABASE_URL', 
         'postgresql://newsbias:newsbias@localhost:5432/news_bias')
     
-    STATISTICAL_DATABASE_PATH: str = os.path.join(
-        os.path.dirname(__file__), '..', 'statistical_database', 'intelligence.db'
-    )
-    
     # Connection pool settings
     POOL_SIZE: int = 10
     MAX_OVERFLOW: int = 20

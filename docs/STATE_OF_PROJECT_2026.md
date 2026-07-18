@@ -56,10 +56,14 @@ Do these on a machine that can run the full stack (DB + servers), not blind:
    `server/routers/`; both JS trees are now JS-only. `frontend/api/` and
    `extension/api/article_endpoints.py` turned out to be unimportable dead code and
    were deleted rather than moved.
-4. **Intelligence layer is half-built.** `intelligence/intelligence_manager.py` has ~43
-   TODO-stubbed methods; `graph_analysis/` is empty scaffolding (docs/roadmap only).
-   Decide: finish or fold findings into Postgres and delete the separate SQLite DB
-   (`statistical_database/`).
+4. **Intelligence layer is half-built.** **Resolved (2026-07-18): deleted.**
+   `intelligence/` (~43 TODO-stubbed methods, zero external consumers) and the
+   separate SQLite DB (`statistical_database/`) are gone; its four analyzers were
+   long superseded by `narrative_metrics`/`drift_detection`/`entity_embeddings`.
+   The one live remnant - the all-time pruned-entities counter - moved to a
+   Postgres `system_metrics` table (`database/system_metrics.py`), value carried
+   over. The dashboard's Events tab (which read year-old SQLite findings) was
+   removed with it; the drift feed is the living replacement.
 5. **Stale cost limiter.** `estimate_cost()` in `analyzer/openai_integration.py` uses
    2023 prices, so the $50/day limit math is wrong. Fix when changing models.
 6. **Structured outputs.** Move batch + sync analyzers from `json_object` to strict

@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from statistical_database.db_manager import StatisticalDBManager
+from database.system_metrics import increment_system_metric
 from database.config import EntityPruningConfig
 
 logger = logging.getLogger(__name__)
@@ -233,10 +233,9 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
         
         logger.info(f"Successfully pruned {total_deleted} low-activity entities")
         
-        # Update the running total in statistical database
+        # Update the running total (Postgres system_metrics counter)
         try:
-            stats_db = StatisticalDBManager()
-            new_total = stats_db.increment_system_metric('total_entities_deleted', total_deleted)
+            new_total = increment_system_metric(session, 'total_entities_deleted', total_deleted)
             logger.info(f"Total entities deleted all-time: {new_total}")
         except Exception as e:
             logger.warning(f"Could not update entity deletion metric: {e}")

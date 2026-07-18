@@ -302,27 +302,6 @@ export const statsApi = {
   }
 };
 
-// Intelligence findings API methods — statistical anomaly/divergence detection.
-// No static-snapshot equivalent exists (it requires live backend computation over
-// the full corpus, not something derivable from the entity/country snapshots), so
-// static/demo mode surfaces an honest message instead of a broken data call.
-export const intelligenceApi = {
-  getFindings: async (params: any = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
-      throw new Error('Intelligence findings require a live backend and are not available in this demo.');
-    }
-    const response = await api.get('/intelligence/findings', { params });
-    return response.data;
-  },
-  getTrends: async (params: any = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
-      throw new Error('Intelligence trends require a live backend and are not available in this demo.');
-    }
-    const response = await api.get('/intelligence/trends', { params });
-    return response.data;
-  },
-};
-
 // Narrative statistics (server/routers/narrative_endpoints.py) - wires
 // analyzer/narrative_metrics.py's kernels into real cross-source queries. Live-API only
 // for now; not yet part of the static-snapshot export (server/export_snapshots.py).

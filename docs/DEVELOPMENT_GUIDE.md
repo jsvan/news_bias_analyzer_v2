@@ -72,9 +72,7 @@ news_bias_analyzer/
 │   ├── deps.py               # Shared DB session dependency
 │   └── routers/              # One module per endpoint group
 │
-├── intelligence/             # Statistical anomaly detection (partial)
 ├── clustering/               # Source similarity computation
-├── statistical_database/     # Separate SQLite DB for intelligence results
 ├── scheduler/                # Cron-style job scheduler
 │
 ├── frontend/                 # React + Vite dashboard

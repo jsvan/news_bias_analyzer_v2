@@ -10,7 +10,6 @@ import SourceProfilePage from './pages/SourceProfilePage';
 import CountryEntityPage from './pages/CountryEntityPage';
 import CompareEntitiesPage from './pages/CompareEntitiesPage';
 import CompareSourcesPage from './pages/CompareSourcesPage';
-import IntelligenceInsights from './components/IntelligenceInsights';
 import StoriesPage from './pages/StoriesPage';
 import MyBubblePage from './pages/MyBubblePage';
 import SearchPage from './pages/SearchPage';
@@ -31,7 +30,6 @@ const App: React.FC = () => (
           <Route path="/compare" element={<Navigate to="/compare/entities" replace />} />
           <Route path="/compare/entities" element={<CompareEntitiesPage />} />
           <Route path="/compare/sources" element={<CompareSourcesPage />} />
-          <Route path="/events" element={<IntelligenceInsights />} />
           <Route path="/stories" element={<StoriesPage />} />
           <Route path="/my-bubble" element={<MyBubblePage />} />
           <Route path="/search" element={<SearchPage />} />

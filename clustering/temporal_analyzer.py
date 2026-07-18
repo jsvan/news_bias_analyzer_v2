@@ -16,18 +16,12 @@ from .base import BaseAnalyzer
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from statistical_database.db_manager import StatisticalDBManager
 
 logger = logging.getLogger(__name__)
 
 
 class TemporalAnalyzer(BaseAnalyzer):
     """Handles temporal analysis of sentiment patterns."""
-    
-    def __init__(self, session: Session):
-        super().__init__(session)
-        # Initialize statistical database for storing results
-        self.statistical_db = StatisticalDBManager()
     
     def analyze(self):
         """Run temporal analysis - called by statistical orchestrator."""
@@ -251,9 +245,7 @@ class TemporalAnalyzer(BaseAnalyzer):
             
         self.session.commit()
         logger.info(f"Stored volatility scores for {len(records)} entities")
-        
-        # Also store entity volatility in statistical database for intelligence analysis
-        self._store_volatility_in_statistical_db(records)
+
     
     def detect_editorial_shifts(self, 
                               source_id: int, 
@@ -335,26 +327,3 @@ class TemporalAnalyzer(BaseAnalyzer):
         
         return shifts[:20]  # Return top 20 shifts
     
-    def _store_volatility_in_statistical_db(self, volatility_records: List[Dict]):
-        """Store entity volatility records in statistical database for intelligence analysis."""
-        try:
-            for record in volatility_records:
-                # Store baseline statistics for this entity's volatility
-                self.statistical_db.store_baseline_statistics(
-                    metric_type='entity_volatility',
-                    entity_id=record['entity_id'],
-                    mean_value=record['volatility_score'],
-                    std_dev=record['source_divergence'],  # Use divergence as std measure
-                    min_value=0.0,  # Volatility is always >= 0
-                    max_value=record['volatility_score'],
-                    data_start_date=record['time_window_start'],
-                    data_end_date=record['time_window_end'],
-                    sample_count=record['mention_count'],
-                    window_weeks=1  # Weekly volatility measurement
-                )
-            
-            logger.info(f"Stored {len(volatility_records)} volatility records in statistical database")
-            
-        except Exception as e:
-            logger.error(f"Error storing volatility data in statistical database: {e}")
-            # Don't fail the main process if statistical storage fails
