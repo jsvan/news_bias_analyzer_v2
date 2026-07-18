@@ -334,6 +334,27 @@ export const narrativeApi = {
     const response = await api.get('/narrative/contested', { params });
     return response.data;
   },
+  getArchetype: async (entityId: number, params: { weeks?: number } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('The archetype trajectory requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get(`/narrative/archetype/${entityId}`, { params });
+    return response.data;
+  },
+  getSourceMap: async (params: { weeks?: number; dimension?: 'power' | 'moral' } = {}) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('The source map requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/source-map', { params });
+    return response.data;
+  },
+  getSalienceAsymmetry: async (params: { country_a: string; country_b: string; days?: number; limit?: number }) => {
+    if (isStaticMode() || isApiUnavailable()) {
+      throw new Error('Salience asymmetry requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/salience', { params });
+    return response.data;
+  },
 };
 
 // Entity relatedness (server/routers/embeddings_endpoints.py) - nearest neighbors from

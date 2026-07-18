@@ -19,6 +19,7 @@ import EntityTrendChart from '../components/EntityTrendChart';
 import SentimentDistributionChart from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
+import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
 import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
 import { SentimentDistributions, TrendPoint } from '../types';
@@ -190,6 +191,10 @@ const EntityProfilePage: React.FC = () => {
                 )}
               </CardContent>
             </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <ArchetypeQuadrantPanel entityId={entity.id} />
           </Grid>
 
           <Grid item xs={12} md={6}>

@@ -20,6 +20,7 @@ import {
 
 import { statsApi } from '../services/api';
 import CountryEntitiesTrendChart from '../components/CountryEntitiesTrendChart';
+import SalienceAsymmetryPanel from '../components/SalienceAsymmetryPanel';
 import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
 import { CountryTopEntitiesResponse, CountryEntityData, NewspaperTopEntitiesResponse } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
@@ -329,6 +330,13 @@ const CountryEntityPage: React.FC = () => {
           Try increasing the time range or selecting a different country.
         </Alert>
       ) : null}
+
+      {/* Selection bias: what this sphere is loud/silent about vs another */}
+      {!selectedNewspaper && (
+        <Box sx={{ mt: 4 }}>
+          <SalienceAsymmetryPanel countryA={selectedCountry} countries={availableCountries} />
+        </Box>
+      )}
 
       {/* Entity Summary Table */}
       {!selectedNewspaper && countryData && countryData.entities.length > 0 && (

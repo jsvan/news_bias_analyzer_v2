@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { tokens, categoricalColor, monoNumber } from '../theme';
 import { similarityApi } from '../services/api';
+import SourceMapPanel from '../components/SourceMapPanel';
 
 // "Source space" - which sources see the world alike, from the data alone.
 // Backed by the weekly Pearson matrix over common entities
@@ -289,10 +290,16 @@ const SourceSpacePage: React.FC = () => {
         </Grid>
       )}
 
+      <Box sx={{ mt: 3 }}>
+        <SourceMapPanel />
+      </Box>
+
       <Typography variant="caption" sx={{ display: 'block', mt: 3, color: tokens.inkMuted }}>
-        Method: Pearson correlation of per-entity mean moral scores over entities both sources
-        covered (minimum 10 shared); average-linkage clustering on 1 − r. Pairs with too little
-        shared coverage are unknown, not zero, and are never drawn as disagreement.
+        Two geometries, one thesis. Constellations and neighbors above use pairwise correlation
+        on shared entities (unknown pairs stay unknown); the map uses an SVD of the full
+        source × entity score matrix. Method: Pearson correlation of per-entity mean moral
+        scores over entities both sources covered (minimum 10 shared); average-linkage
+        clustering on 1 − r.
       </Typography>
     </Box>
   );

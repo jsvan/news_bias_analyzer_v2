@@ -280,7 +280,7 @@ Germany            source: Frankfurter Allgemeine  week 2025-04-07
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="archetype" title="Archetype & trajectory" status="computed">
+      <Section id="archetype" title="Archetype & trajectory" status="live">
         <Bullets
           items={[
             'Where an entity sits on the power × moral plane, and how it\'s moved — this project\'s replacement for a left-right label.',
@@ -307,12 +307,12 @@ trajectory (12 weekly waypoints), e.g.:
         </Example>
         <Meta>
           <Kernel>archetype</Kernel> + <Kernel>trajectory</Kernel> · <Kernel>narrative_endpoints.py::get_entity_archetype</Kernel> →{' '}
-          <Kernel>GET /narrative/archetype/&#123;entity_id&#125;</Kernel> · tested, no frontend caller (checked against <Kernel>services/api.ts</Kernel>)
+          <Kernel>GET /narrative/archetype/&#123;entity_id&#125;</Kernel> · rendered on entity profiles (<Kernel>ArchetypeQuadrantPanel</Kernel>)
         </Meta>
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="source-map" title="Source map (SVD)" status="computed">
+      <Section id="source-map" title="Source map (SVD)" status="live">
         <Bullets
           items={[
             'Empirical axes instead of an asserted left-right spectrum — sources close together score similarly across the same entities.',
@@ -339,12 +339,12 @@ TASS (Russia)                x= 2.16  y= 2.34`}
         />
         <Meta>
           <Kernel>svd_source_map</Kernel> + <Kernel>shrunk_means</Kernel> · <Kernel>narrative_endpoints.py::get_source_map</Kernel> →{' '}
-          <Kernel>GET /narrative/source-map</Kernel> · tested, not rendered — a scatter-plot view is separate work
+          <Kernel>GET /narrative/source-map</Kernel> · rendered on the Source Space page (<Kernel>SourceMapPanel</Kernel>)
         </Meta>
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="salience" title="Salience asymmetry" status="computed">
+      <Section id="salience" title="Salience asymmetry" status="live">
         <Bullets
           items={[
             'Coverage volume, not tone: which entities a sphere covers a lot vs. barely at all — a selection-bias signal, distinct from sentiment.',
@@ -362,7 +362,7 @@ country_a=USA&country_b=UK:
         </Example>
         <Meta>
           <Kernel>salience_asymmetry</Kernel> · <Kernel>narrative_endpoints.py::get_salience_asymmetry</Kernel> → <Kernel>GET /narrative/salience</Kernel> ·
-          tested, no dashboard caller
+          rendered on the Countries page (<Kernel>SalienceAsymmetryPanel</Kernel>)
         </Meta>
       </Section>
 
