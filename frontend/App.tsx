@@ -14,6 +14,7 @@ import IntelligenceInsights from './components/IntelligenceInsights';
 import StoriesPage from './pages/StoriesPage';
 import MyBubblePage from './pages/MyBubblePage';
 import SearchPage from './pages/SearchPage';
+import MethodologyPage from './pages/MethodologyPage';
 
 const App: React.FC = () => (
   <DataProvider>
@@ -34,6 +35,7 @@ const App: React.FC = () => (
           <Route path="/stories" element={<StoriesPage />} />
           <Route path="/my-bubble" element={<MyBubblePage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="*" element={<Navigate to="/entities" replace />} />
         </Route>
       </Routes>
