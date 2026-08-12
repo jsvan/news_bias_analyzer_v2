@@ -241,20 +241,52 @@ def ensure_default_source(db_manager, source_id=1):
     finally:
         session.close()
 
-def update_or_create_article(db_manager, article_id, article_data, source_id=1):
+def resolve_source_id(db_manager, source_name, default_id=1):
+    """Find or create a NewsSource by name; fall back to default_id."""
+    if not source_name:
+        return default_id
+    session = db_manager.get_session()
+    try:
+        source = session.query(NewsSource).filter_by(name=source_name).first()
+        if source:
+            return source.id
+        source = NewsSource(
+            name=source_name,
+            base_url=f"https://{source_name.lower().replace(' ', '')}.example.com",
+            country="Unknown",
+            language="en",
+        )
+        session.add(source)
+        session.commit()
+        logger.info(f"Created new source '{source_name}' (ID: {source.id})")
+        return source.id
+    except Exception as e:
+        logger.error(f"Error resolving source '{source_name}': {e}")
+        session.rollback()
+        return default_id
+    finally:
+        session.close()
+
+def update_or_create_article(db_manager, article_id, article_data, source_id=1, create_missing=False):
     """
     Update existing article or create a new one, handling incomplete articles.
     Only updates articles that are not already marked as 'completed' to avoid
     unnecessary processing.
-    
-    IMPORTANT: This function will ONLY update existing articles, never create new ones.
-    
+
+    IMPORTANT: By default this function will ONLY update existing articles.
+    With create_missing=True it also rebuilds missing rows from batch input data
+    (disaster recovery after database loss). Rebuilt rows get the placeholder URL
+    'restored_article_<id>' — the same convention remove_restored_articles.py
+    targets — while keeping the original id (md5 of the real URL), so hash-based
+    lookups still match.
+
     Args:
         db_manager: Database manager instance
         article_id: Article ID
         article_data: Dictionary with article data (title, content, etc.)
         source_id: Source ID for the article
-        
+        create_missing: If True, create article rows that don't exist
+
     Returns:
         Updated article object, or None if failed or article doesn't exist
     """
@@ -351,6 +383,22 @@ def update_or_create_article(db_manager, article_id, article_data, source_id=1):
             else:
                 logger.info(f"Article {article_id} is already completed, skipping update")
                 return article
+        elif create_missing:
+            article = NewsArticle(
+                id=article_id,  # md5 of the real URL, preserved via custom_id
+                url=f"restored_article_{article_id}",  # real URL not present in batch data
+                title=title,
+                text=None,  # match analyzer behavior: text is cleared after analysis
+                source_id=resolve_source_id(db_manager, source_name, source_id),
+                publish_date=publish_date,
+                scraped_at=scrape_time,
+                processed_at=datetime.datetime.now(),
+                analysis_status="completed",
+            )
+            session.add(article)
+            session.commit()
+            logger.info(f"Created restored article {article_id}")
+            return article
         else:
             # CHANGE: We no longer create new articles, just log that it wasn't found
             logger.info(f"Article {article_id} not found in database, skipping")
@@ -412,7 +460,8 @@ def save_entities(db_manager, article_id, entities):
     finally:
         session.close()
 
-def process_batch_file(input_file, output_file, db_manager, stats, default_source_id=1):
+def process_batch_file(input_file, output_file, db_manager, stats, default_source_id=1,
+                       create_missing=False, max_articles=None):
     """
     Process a single batch input/output file pair for recovery.
     Only updates EXISTING articles that don't have a completed status.
@@ -486,12 +535,17 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         article_id = parse_article_id(custom_id)
         article_status = existing_articles.get(article_id, {'exists': False, 'has_analysis': False})
         
-        # Skip if article doesn't exist in database
+        # Skip if article doesn't exist in database (unless we're rebuilding)
         if not article_status['exists']:
-            logger.info(f"Article {article_id} does not exist in database, skipping")
-            stats['skipped'] += 1
-            not_found += 1
-            continue
+            if not create_missing:
+                logger.info(f"Article {article_id} does not exist in database, skipping")
+                stats['skipped'] += 1
+                not_found += 1
+                continue
+            if max_articles is not None and stats['created'] >= max_articles:
+                logger.info(f"Article {article_id} missing but --max-articles cap reached, skipping")
+                stats['skipped'] += 1
+                continue
         
         # Skip if article is already completed
         if (article_status['has_analysis'] and 
@@ -525,6 +579,9 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
                 created_at = data['output']['response']['created_at']
             elif 'response' in data['output'] and 'body' in data['output']['response'] and 'created_at' in data['output']['response']['body']:
                 created_at = data['output']['response']['body']['created_at']
+            elif 'response' in data['output'] and 'body' in data['output']['response'] and 'created' in data['output']['response']['body']:
+                # chat completion bodies use 'created', not 'created_at'
+                created_at = data['output']['response']['body']['created']
                 
             if created_at:
                 article_data['original_openai_data'] = {'created_at': created_at}
@@ -535,20 +592,23 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
         title_display = article_data.get('title', '')[:50] + ('...' if len(article_data.get('title', '')) > 50 else '')
         logger.info(f"Processing article ID: {article_id}, Title: {title_display}")
         
-        # Update existing article (will never create new articles)
+        # Update existing article (creates missing rows only with create_missing)
         article = update_or_create_article(
-            db_manager, 
-            article_id, 
-            article_data, 
-            default_source_id
+            db_manager,
+            article_id,
+            article_data,
+            default_source_id,
+            create_missing=create_missing
         )
-        
+
         if not article:
             logger.error(f"Failed to update article {article_id}")
             stats['errors'] += 1
             continue
-        
+
         total_processed += 1
+        if not article_status['exists']:
+            stats['created'] += 1
         
         # Was this a recovery? (existing article with incomplete status)
         if not article_status['processed_at'] or article_status['analysis_status'] != 'completed':
@@ -807,11 +867,20 @@ def recover_openai_batches(args):
     logger.info(f"  Dry run: {args.dry_run}")
     
     # Print an important notice about the recovery behavior
-    logger.info("\n===== IMPORTANT NOTICE =====")
-    logger.info("This tool will ONLY update EXISTING articles in the database.")
-    logger.info("It will NEVER create new articles or use placeholder URLs.")
-    logger.info("Articles not found in the database will be skipped.")
-    logger.info("=============================\n")
+    if getattr(args, 'create_missing', False):
+        logger.info("\n===== RESTORE MODE (--create-missing) =====")
+        logger.info("Missing articles will be REBUILT from batch input data.")
+        logger.info("Rebuilt rows use placeholder URLs 'restored_article_<id>'.")
+        logger.info("Undo with: ./run.sh custom analyzer/tools/remove_restored_articles.py")
+        if getattr(args, 'max_articles', None):
+            logger.info(f"Capped at {args.max_articles} created articles.")
+        logger.info("===========================================\n")
+    else:
+        logger.info("\n===== IMPORTANT NOTICE =====")
+        logger.info("This tool will ONLY update EXISTING articles in the database.")
+        logger.info("It will NEVER create new articles or use placeholder URLs.")
+        logger.info("Articles not found in the database will be skipped.")
+        logger.info("=============================\n")
     
     # Initialize database manager
     db_manager = DatabaseManager()
@@ -883,24 +952,34 @@ def recover_openai_batches(args):
             'recovered': 0,
             'total_processed': 0,
             'already_complete': 0,
-            'not_found': 0
+            'not_found': 0,
+            'created': 0
         }
-        
+
+        create_missing = getattr(args, 'create_missing', False)
+        max_articles = getattr(args, 'max_articles', None)
+
         if not batches:
             logger.warning("No batch files to process")
         else:
             for batch in batches:
+                if create_missing and max_articles is not None and stats['created'] >= max_articles:
+                    logger.info(f"--max-articles cap ({max_articles}) reached, stopping")
+                    break
                 process_batch_file(
                     batch['input_file'],
                     batch['output_file'],
                     db_manager,
                     stats,
-                    args.source_id
+                    args.source_id,
+                    create_missing=create_missing,
+                    max_articles=max_articles
                 )
         
         # Print summary
         logger.info("\n--- Recovery Summary ---")
         logger.info(f"Total batches processed: {len(batches)}")
+        logger.info(f"Articles created (restored from batch data): {stats['created']}")
         logger.info(f"Articles recovered (incomplete → complete): {stats['recovered']}")
         logger.info(f"Total articles processed: {stats['total_processed']}")
         logger.info(f"Articles already complete: {stats['already_complete']}")
@@ -939,6 +1018,11 @@ def main():
                         help='Only process batches after this date (format: YYYY-MM-DD)')
     parser.add_argument('--today', action='store_true',
                         help='Only process batches from today (auto-adjusts for timezone differences)')
+    parser.add_argument('--create-missing', action='store_true',
+                        help='Rebuild articles that no longer exist in the database from batch input data '
+                             '(disaster recovery). Rebuilt rows get placeholder URLs restored_article_<id>.')
+    parser.add_argument('--max-articles', type=int, default=None,
+                        help='With --create-missing: stop after creating this many articles (for sample runs)')
     
     args = parser.parse_args()
     
