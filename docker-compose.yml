@@ -3,7 +3,9 @@ services:
   # Everything else (scraper, analyzer, API servers) runs as plain Python
   # processes via ./run.sh. Managed by database/db-docker.sh (./run.sh docker up).
   postgres:
-    image: timescale/timescaledb:latest-pg13
+    # Pinned to the exact version currently in the data volume (PG 13.15 / TS 2.15.3).
+    # Never use a floating tag here: a moved 'latest' can strand or corrupt the data dir.
+    image: timescale/timescaledb:2.15.3-pg13
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

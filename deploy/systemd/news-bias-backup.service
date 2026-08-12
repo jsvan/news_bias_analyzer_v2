@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly pg_dump backup of news_bias database
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/news_bias/app/deploy/backup.sh

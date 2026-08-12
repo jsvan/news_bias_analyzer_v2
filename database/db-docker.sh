@@ -135,7 +135,15 @@ case "$ACTION" in
     # Prepare options for create_tables.py
     OPTIONS="--use-timescaledb"  # Always use TimescaleDB by default
     if [[ "$*" == *"--drop-existing"* ]]; then
+      echo ""
+      echo "*** --drop-existing will DESTROY all tables in '$DB_NAME'. ***"
+      read -p "Type the database name ('$DB_NAME') to confirm: " CONFIRM
+      if [ "$CONFIRM" != "$DB_NAME" ]; then
+        echo "Confirmation did not match. Aborting."
+        exit 1
+      fi
       OPTIONS="$OPTIONS --drop-existing"
+      export ALLOW_DESTRUCTIVE_DROP=yes  # satisfies create_tables.py's guard after typed confirm
     fi
     
     # Run the create_tables.py script
@@ -243,7 +251,22 @@ case "$ACTION" in
     fi
     
     echo "Restoring database from backup: $BACKUP_FILE"
-    
+
+    # Safety: restore drops the live database. Snapshot it first, always.
+    SAFETY_FILE="$CD_ROOT/backups/pre_restore_${DB_NAME}_$(date +%Y%m%d_%H%M%S).sql"
+    mkdir -p "$CD_ROOT/backups"
+    echo "Taking safety backup of current database -> $SAFETY_FILE"
+    docker-compose -f "$CD_ROOT/docker-compose.yml" exec -T postgres \
+      pg_dump -U $DB_USER $DB_NAME > "$SAFETY_FILE"
+
+    echo ""
+    echo "*** This will DROP and replace database '$DB_NAME'. ***"
+    read -p "Type the database name ('$DB_NAME') to confirm: " CONFIRM
+    if [ "$CONFIRM" != "$DB_NAME" ]; then
+      echo "Confirmation did not match. Aborting restore (safety backup kept at $SAFETY_FILE)."
+      exit 1
+    fi
+
     # Drop and recreate the database
     docker-compose -f "$CD_ROOT/docker-compose.yml" exec postgres \
       psql -U $DB_USER -c "DROP DATABASE IF EXISTS ${DB_NAME}_temp;"

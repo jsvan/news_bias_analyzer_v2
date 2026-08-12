@@ -1,0 +1,60 @@
+services:
+  postgres:
+    # Pinned to the exact version of the current data (PG 13.15 / TimescaleDB 2.15.3).
+    # PG13 is past EOL — see MIGRATION.md "Upgrading Postgres" for the planned bump.
+    # Never use a floating tag: a moved 'latest' can strand or corrupt the data dir.
+    image: timescale/timescaledb:2.15.3-pg13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: news_bias
+    volumes:
+      # Bind mount, NOT a named volume. The July 2026 corpus loss happened because
+      # the data lived inside Docker's own storage (a Docker Desktop VM reset
+      # destroyed it). A bind mount keeps the data at a real filesystem path that
+      # `docker compose down -v`, image resets, and Docker reinstalls cannot touch.
+      - ${PGDATA_DIR:-/srv/news_bias/pgdata}:/var/lib/postgresql/data
+    ports:
+      # Localhost only — the app reaches it over the compose network. Do not
+      # expose 5432 publicly.
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # The whole pipeline: runs the scraper every 30 min, keeps the batch-analyzer
+  # daemon alive, runs stats jobs on their schedules.
+  scheduler:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: news-bias-app
+    command: python -m scheduler.job_scheduler
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/news_bias
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in deploy/.env}
+    volumes:
+      # Logs and OpenAI batch files live on the host, not in the container.
+      - ${LOGS_DIR:-/srv/news_bias/logs}:/app/logs
+      - ${BATCHES_DIR:-/srv/news_bias/batches}:/app/batches
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Extension/dashboard API.
+  api:
+    image: news-bias-app
+    command: uvicorn server.extension_api:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/news_bias
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

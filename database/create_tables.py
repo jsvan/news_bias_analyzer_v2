@@ -165,6 +165,23 @@ def create_tables(database_url, drop_existing=False, use_timescaledb=False, skip
         
         # Drop all tables if requested
         if drop_existing:
+            # Guard: refuse to drop a database that holds real data. The July 2026
+            # corpus loss taught us there is no undo for this. Override requires an
+            # explicit env var, not just a CLI flag someone can tab-complete into.
+            if tables_exist and os.getenv("ALLOW_DESTRUCTIVE_DROP") != "yes":
+                try:
+                    with db_manager.engine.connect() as conn:
+                        article_count = conn.execute(
+                            text("SELECT count(*) FROM news_articles")).scalar()
+                except Exception:
+                    article_count = None
+                if article_count is None or article_count > 0:
+                    logger.error(
+                        "Refusing --drop-existing: database has %s articles. "
+                        "Take a backup first (./run.sh docker backup), then re-run "
+                        "with ALLOW_DESTRUCTIVE_DROP=yes to proceed.",
+                        article_count if article_count is not None else "an unknown number of")
+                    return False
             logger.warning("Dropping all existing tables...")
             Base.metadata.drop_all(db_manager.engine)
             logger.info("All tables dropped")

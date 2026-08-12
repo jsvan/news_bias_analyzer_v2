@@ -1,0 +1,17 @@
+# Keep the build context small and secrets/data out of the image.
+venv
+.venv
+.git
+logs
+batches
+backups
+node_modules
+frontend/node_modules
+frontend/dist
+__pycache__
+**/__pycache__
+.env
+deploy/.env
+*.dump
+*.log
+intelligence_analysis.db

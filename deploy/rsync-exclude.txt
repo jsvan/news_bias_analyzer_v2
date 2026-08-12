@@ -1,0 +1,17 @@
+venv
+.venv
+.git
+node_modules
+__pycache__
+*.pyc
+logs
+backups
+batches
+deploy/.env
+.env
+intelligence_analysis.db
+server.log
+temp
+temp_scripts
+frontend/node_modules
+frontend/dist
