@@ -1,0 +1,18 @@
+# Web dashboard image: builds the React/Vite frontend, then serves it with
+# nginx, which also proxies /api/ to the api container (same-origin — the
+# browser never needs CORS or a second host:port for data).
+# Build context is the repo root.
+FROM node:20-alpine AS build
+
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+# Same-origin API: the page requests /api/..., nginx strips the prefix and
+# forwards to the api container. See nginx.web.conf.
+ENV VITE_API_BASE_URL=/api
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY deploy/nginx.web.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /build/dist /usr/share/nginx/html

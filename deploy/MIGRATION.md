@@ -23,8 +23,12 @@ dumps are plain-Postgres portable, no TimescaleDB restore ceremony.
 - `/srv/news_bias/{logs,batches}` — app logs and OpenAI batch files
 - `/backup/news_bias` — mirror of every dump on the external drive
 
-Three containers via `deploy/docker-compose.yml`: `postgres`, `scheduler`
-(scraper every 30 min + batch-analyzer daemon + stats jobs), `api` (port 8000).
+Four containers via `deploy/docker-compose.yml` (project name `news_bias`):
+`postgres`, `scheduler` (scraper every 30 min + batch-analyzer daemon + stats
+jobs), `api` (port 8000), and `web` — nginx serving the built dashboard on
+port 8080 and proxying `/api/` to the api container. api/web ports bind to
+127.0.0.1 and the Tailscale IP only (this host has public IPv6 and no
+firewall); the family photo server's nginx on host port 80 is untouched.
 `restart: unless-stopped` + the docker systemd service bring everything back on
 reboot; no per-app systemd units. The only systemd pieces are the nightly
 backup service + timer.
@@ -37,7 +41,9 @@ backup service + timer.
    scp deploy/server_setup.sh deploy/systemd/news-bias-backup.* adminer@100.100.142.12:/tmp/
    ssh -t adminer@100.100.142.12 'sudo bash /tmp/server_setup.sh'
    ```
-2. **Code**: `rsync -az --delete --exclude-from=deploy/rsync-exclude.txt ./ adminer@100.100.142.12:/srv/news_bias/app/`
+2. **Code**: `git clone --branch master https://github.com/jsvan/news_bias_analyzer_v2.git /srv/news_bias/app`
+   — the repo is the source of truth. (The rsync variant with
+   `deploy/rsync-exclude.txt` remains an option for testing uncommitted work.)
 3. **Secrets**: create `/srv/news_bias/app/deploy/.env` from `.env.example` —
    `POSTGRES_PASSWORD` (openssl rand -base64 24) and `OPENAI_API_KEY` (from the
    Mac's `.env`).
@@ -54,6 +60,9 @@ backup service + timer.
       (scraper runs every 30 min)
 - [ ] `docker compose logs scheduler --tail 50` — no tracebacks
 - [ ] extension API answers: `curl http://100.100.142.12:8000/docs`
+- [ ] dashboard serves and reaches the data: `curl http://100.100.142.12:8080/`
+      returns the app HTML, and `curl http://100.100.142.12:8080/api/entities`
+      returns JSON (proves the nginx→api proxy path)
 - [ ] **run a backup by hand and restore it into a throwaway DB** — a backup
       you have never restored is a hope, not a backup:
       ```bash
@@ -72,8 +81,9 @@ backup service + timer.
 
 - Stop the Mac pipeline (scheduler/analyzer processes; `./run.sh docker down`
   — WITHOUT `-v`). Keep the Mac's final dump in `backups/` forever.
-- Point the Chrome extension / dashboard at `http://100.100.142.12:8000`
-  (or `home:8000` on Tailscale).
+- Point the Chrome extension at `http://100.100.142.12:8000` (or `home:8000`
+  on Tailscale). The dashboard lives at `http://100.100.142.12:8080` — no
+  GitHub Pages snapshot step needed for family use.
 - Run the OpenAI batch recovery (199k requests) ON the server, where the data
   lands under nightly verified backups.
 

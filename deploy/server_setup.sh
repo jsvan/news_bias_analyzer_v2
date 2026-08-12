@@ -1,12 +1,19 @@
 #!/bin/bash
 # One-time server setup for the News Bias Analyzer. Run as root (sudo).
-# Idempotent — safe to re-run. Touches ONLY: docker install, /srv/news_bias,
-# /backup/news_bias, and the news-bias-backup systemd units.
+# Idempotent — safe to re-run. Touches ONLY: docker install (incl. moving the
+# stale 2019 /var/lib/docker aside and writing /etc/docker/daemon.json),
+# /srv/news_bias, /backup/news_bias, and the news-bias-backup systemd units.
 
 set -euo pipefail
 
 echo "== 1/4 Docker =="
 if ! command -v docker >/dev/null; then
+  # A 2019 docker-ce install left images/containers/swarm state in
+  # /var/lib/docker; a new engine would adopt and try to resume it. Park it
+  # instead of deleting — reclaim space later with: rm -rf /var/lib/docker.old-2019
+  if [ -d /var/lib/docker ] && [ ! -d /var/lib/docker.old-2019 ]; then
+    mv /var/lib/docker /var/lib/docker.old-2019
+  fi
   apt-get update
   apt-get install -y ca-certificates curl gnupg
   install -m 0755 -d /etc/apt/keyrings
@@ -21,6 +28,16 @@ else
   # Ensure compose v2 plugin is present even if docker predates this script
   docker compose version >/dev/null 2>&1 || apt-get install -y docker-compose-plugin
 fi
+# Cap container log growth — this box runs unattended for years at a time.
+if [ ! -f /etc/docker/daemon.json ]; then
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
+fi
 systemctl enable --now docker
 usermod -aG docker adminer
 echo "adminer added to docker group (takes effect on next login)"
@@ -31,7 +48,11 @@ mkdir -p /backup/news_bias
 # Marker proving the external drive is really mounted — backup.sh refuses to
 # write a "backup" onto the root disk without it.
 touch /backup/news_bias/.backup-drive-marker
-chown -R adminer:adminer /srv/news_bias /backup/news_bias
+# Deliberately not recursive on pgdata: once Postgres initializes it, the
+# files belong to the postgres container user and must stay that way.
+chown adminer:adminer /srv/news_bias /srv/news_bias/backups /srv/news_bias/logs /srv/news_bias/batches
+[ -z "$(ls -A /srv/news_bias/pgdata 2>/dev/null)" ] && chown adminer:adminer /srv/news_bias/pgdata
+chown -R adminer:adminer /backup/news_bias
 echo "created /srv/news_bias/* and /backup/news_bias (owner adminer)"
 
 echo "== 3/4 Backup timer =="

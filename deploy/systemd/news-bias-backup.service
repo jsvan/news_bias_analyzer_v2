@@ -5,4 +5,8 @@ After=docker.service
 
 [Service]
 Type=oneshot
+# adminer owns /srv/news_bias and is in the docker group — no need for root,
+# and the dump files come out adminer-owned.
+User=adminer
+Group=adminer
 ExecStart=/srv/news_bias/app/deploy/backup.sh
