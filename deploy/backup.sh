@@ -31,9 +31,11 @@ echo "[backup] dumping $DB_NAME -> $OUT"
 docker compose -f "$SCRIPT_DIR/docker-compose.yml" exec -T postgres \
   pg_dump -U "$DB_USER" -Fc "$DB_NAME" > "$OUT"
 
-# Verify: a dump we can't list is not a backup.
+# Verify: a dump we can't list is not a backup. Implicit stdin, NOT a named
+# /dev/stdin — pg_restore treats a named file as seekable, and the docker-exec
+# pipe isn't ("did not find magic string" failure).
 docker compose -f "$SCRIPT_DIR/docker-compose.yml" exec -T postgres \
-  pg_restore --list /dev/stdin < "$OUT" > /dev/null
+  pg_restore --list < "$OUT" > /dev/null
 SIZE=$(du -h "$OUT" | cut -f1)
 echo "[backup] verified readable ($SIZE)"
 
