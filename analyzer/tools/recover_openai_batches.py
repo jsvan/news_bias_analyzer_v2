@@ -14,6 +14,7 @@ import sys
 import logging
 import argparse
 import json
+import time
 import datetime
 from pathlib import Path
 import tempfile
@@ -635,6 +636,28 @@ def process_batch_file(input_file, output_file, db_manager, stats, default_sourc
     
     return stats
 
+def download_file_with_retry(file_id, dest_path, max_retries=6):
+    """Download an OpenAI file, backing off on 429s (files API: 300 req/min).
+
+    Returns True on success. A 404 (file purged by OpenAI retention) or other
+    hard error returns False immediately — only rate limits are retried.
+    """
+    for attempt in range(max_retries):
+        try:
+            stream = openai.files.content(file_id)
+            with open(dest_path, "wb") as f:
+                f.write(stream.read())
+            return True
+        except openai.RateLimitError:
+            wait = min(60, 5 * (2 ** attempt))
+            logger.warning(f"Rate limited downloading {file_id}; sleeping {wait}s")
+            time.sleep(wait)
+        except Exception as e:
+            logger.error(f"Error downloading file {file_id}: {e}")
+            return False
+    logger.error(f"Rate limit retries exhausted for {file_id}")
+    return False
+
 def download_openai_batches(output_dir, year=2025, limit=None, date=None, after_date=None, args=None):
     """
     Download OpenAI batch files for the specified year and date filters.
@@ -811,29 +834,24 @@ def download_openai_batches(output_dir, year=2025, limit=None, date=None, after_
             })
             continue
         
+        # Pace requests: 2 file downloads per batch against a 300 req/min cap.
+        time.sleep(0.5)
+
         # Download input file
         if input_file_id:
-            try:
-                input_stream = openai.files.content(input_file_id)
-                with open(input_path, "wb") as f:
-                    f.write(input_stream.read())
+            if download_file_with_retry(input_file_id, input_path):
                 logger.info(f"Downloaded input file to {input_path}")
-            except Exception as e:
-                logger.error(f"Error downloading input file: {e}")
+            else:
                 continue
         else:
             logger.warning("No input file found.")
             continue
-        
+
         # Download output file
         if output_file_id:
-            try:
-                output_stream = openai.files.content(output_file_id)
-                with open(output_path_file, "wb") as f:
-                    f.write(output_stream.read())
+            if download_file_with_retry(output_file_id, output_path_file):
                 logger.info(f"Downloaded output file to {output_path_file}")
-            except Exception as e:
-                logger.error(f"Error downloading output file: {e}")
+            else:
                 continue
         else:
             logger.warning("No output file found.")
