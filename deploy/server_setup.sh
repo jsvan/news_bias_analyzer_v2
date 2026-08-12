@@ -7,6 +7,16 @@
 set -euo pipefail
 
 echo "== 1/4 Docker =="
+# The docker group vanished with the purged 2019 install; docker.socket
+# (SocketGroup=docker) cannot start without it — this broke the first run of
+# this script mid-install. Create it before anything touches the service.
+getent group docker >/dev/null || groupadd --system docker
+# Heal any half-configured packages from that interrupted run (no-op otherwise).
+dpkg --configure -a
+# The 2019 install also left this same repo in sources.list; comment it out so
+# apt stops warning about the duplicate (docker.list is the maintained entry).
+sed -i 's|^deb \[arch=amd64\] https://download.docker.com/linux/ubuntu bionic stable$|# superseded by sources.list.d/docker.list: &|' /etc/apt/sources.list
+
 if ! command -v docker >/dev/null; then
   # A 2019 docker-ce install left images/containers/swarm state in
   # /var/lib/docker; a new engine would adopt and try to resume it. Park it
@@ -29,6 +39,7 @@ else
   docker compose version >/dev/null 2>&1 || apt-get install -y docker-compose-plugin
 fi
 # Cap container log growth — this box runs unattended for years at a time.
+FRESH_DAEMON_JSON=0
 if [ ! -f /etc/docker/daemon.json ]; then
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
@@ -37,8 +48,12 @@ if [ ! -f /etc/docker/daemon.json ]; then
   "log-opts": { "max-size": "10m", "max-file": "3" }
 }
 EOF
+  FRESH_DAEMON_JSON=1
 fi
 systemctl enable --now docker
+# If dpkg's postinst already started docker before we wrote daemon.json,
+# a restart is needed for it to take effect (only on the run that wrote it).
+[ "$FRESH_DAEMON_JSON" = "1" ] && systemctl restart docker
 usermod -aG docker adminer
 echo "adminer added to docker group (takes effect on next login)"
 
