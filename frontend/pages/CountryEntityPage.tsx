@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
   CircularProgress,
   Grid,
-  Card, 
-  CardContent,
-  CardHeader,
   FormControl,
   InputLabel,
   MenuItem,
@@ -15,98 +12,57 @@ import {
   Paper,
   Alert,
   Chip,
-  Divider
 } from '@mui/material';
 
 import { statsApi } from '../services/api';
-import CountryEntitiesTrendChart from '../components/CountryEntitiesTrendChart';
+import { useData } from '../context/DataContext';
+import NewspaperSpreadPanel from '../components/NewspaperSpreadPanel';
 import SalienceAsymmetryPanel from '../components/SalienceAsymmetryPanel';
-import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
-import { CountryTopEntitiesResponse, CountryEntityData, NewspaperTopEntitiesResponse } from '../types';
-import { tokens, archetypeColor, monoNumber } from '../theme';
+import TimeRangeSelect, { ALL_TIME } from '../components/TimeRangeSelect';
+import { CountryTopEntitiesResponse } from '../types';
+import { tokens } from '../theme';
+
+// Countries with tracked sources come from DataContext; this static list only
+// covers the first render before sources load.
+const FALLBACK_COUNTRIES = [
+  'USA', 'UK', 'Canada', 'Australia', 'Germany',
+  'France', 'Japan', 'Russia', 'China', 'India',
+];
 
 const CountryEntityPage: React.FC = () => {
-  // Route page: owns its own country/time-range state (previously lifted to Dashboard).
+  const navigate = useNavigate();
+  const { availableCountries } = useData();
   // Initial country can be deep-linked via ?country=X (e.g. from the World page).
   const [searchParams] = useSearchParams();
   const [selectedCountry, setSelectedCountry] = useState<string>(searchParams.get('country') || 'USA');
   const [selectedTimeRange, setSelectedTimeRange] = useState<number>(ALL_TIME);
 
-  // State for data
   const [countryData, setCountryData] = useState<CountryTopEntitiesResponse | null>(null);
-  const [selectedNewspaper, setSelectedNewspaper] = useState<string | null>(null);
-  const [newspaperData, setNewspaperData] = useState<NewspaperTopEntitiesResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Available countries (based on existing dashboard)
-  const availableCountries = [
-    'USA', 'UK', 'Canada', 'Australia', 'Germany', 
-    'France', 'Japan', 'Russia', 'China', 'India'
-  ];
+  const countryOptions = availableCountries.length > 0 ? availableCountries : FALLBACK_COUNTRIES;
 
-  // Fetch data when country or time range changes
   useEffect(() => {
-    if (selectedCountry) {
-      fetchCountryData();
-    }
-  }, [selectedCountry, selectedTimeRange]);
-
-  // Clear newspaper selection when country changes
-  useEffect(() => {
-    setSelectedNewspaper(null);
-    setNewspaperData(null);
-  }, [selectedCountry]);
-
-  const fetchCountryData = async () => {
     if (!selectedCountry) return;
-    
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    
-    try {
-      const data = await statsApi.getCountryTopEntities(selectedCountry, {
-        days: selectedTimeRange,
-        limit: 10
+    statsApi
+      .getCountryTopEntities(selectedCountry, { days: selectedTimeRange, limit: 10 })
+      .then((data) => {
+        if (!cancelled) setCountryData(data);
+      })
+      .catch((err: any) => {
+        if (!cancelled) setError(err.response?.data?.detail || 'Failed to load country data');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-      setCountryData(data);
-    } catch (err: any) {
-      console.error('Error fetching country data:', err);
-      setError(err.response?.data?.detail || 'Failed to load country data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCountryChange = (event: any) => {
-    setSelectedCountry(event.target.value as string);
-  };
-
-  const handleNewspaperSelect = async (newspaperName: string) => {
-    console.log('Selecting newspaper:', newspaperName);
-    
-    if (selectedNewspaper === newspaperName) {
-      // Deselect if clicking the same newspaper
-      setSelectedNewspaper(null);
-      setNewspaperData(null);
-      return;
-    }
-
-    setSelectedNewspaper(newspaperName);
-    setError(null);
-    
-    try {
-      const data = await statsApi.getNewspaperTopEntities(newspaperName, {
-        days: selectedTimeRange,
-        limit: 10
-      });
-      setNewspaperData(data);
-    } catch (err: any) {
-      console.error('Error fetching newspaper data:', err);
-      setError(err.response?.data?.detail || 'Failed to load newspaper data');
-      setNewspaperData(null);
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountry, selectedTimeRange]);
 
   if (loading) {
     return (
@@ -124,30 +80,16 @@ const CountryEntityPage: React.FC = () => {
     );
   }
 
-  if (!selectedCountry) {
-    return (
-      <Box sx={{ textAlign: 'center', py: 8 }}>
-        <Typography variant="h5" color="text.secondary" gutterBottom>
-          Select a Country to Analyze
-        </Typography>
-        <Typography color="text.secondary">
-          Choose a country to see the most discussed entities and how different newspapers portray them.
-        </Typography>
-      </Box>
-    );
-  }
-
   return (
     <Box>
-      <Alert severity="info" sx={{ mb: 3 }}>
-        {selectedNewspaper ? (
-          <>Analyzing <strong>{selectedNewspaper}</strong>'s most discussed topics. Click another newspaper to compare or click the selected one to return to country overview.</>
-        ) : (
-          <>Explore how different newspapers within {selectedCountry} portray the same entities. 
-          Click on any newspaper below to see their most discussed topics, or view the overall country sentiment patterns.</>
-        )}
-      </Alert>
-      
+      <Typography component="h2" sx={{ fontFamily: '"Newsreader", Georgia, serif', fontStyle: 'italic', fontSize: '2rem', mb: 1 }}>
+        {selectedCountry}'s information sphere
+      </Typography>
+      <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3, maxWidth: 720 }}>
+        Two comparisons, one country: where its own papers disagree with each other, and what it
+        is loud or silent about relative to another sphere.
+      </Typography>
+
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 4, bgcolor: tokens.surfaceSunken, border: `1px solid ${tokens.border}` }}>
         <Grid container spacing={3} alignItems="center">
@@ -157,10 +99,10 @@ const CountryEntityPage: React.FC = () => {
               <Select
                 labelId="country-label"
                 value={selectedCountry}
-                onChange={handleCountryChange}
+                onChange={(e) => setSelectedCountry(e.target.value as string)}
                 label="Country"
               >
-                {availableCountries.map((country) => (
+                {countryOptions.map((country) => (
                   <MenuItem key={country} value={country}>
                     {country}
                   </MenuItem>
@@ -168,163 +110,17 @@ const CountryEntityPage: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          
+
           <Grid item xs={12} sm={6}>
             <TimeRangeSelect value={selectedTimeRange} onChange={setSelectedTimeRange} options={[7, 14, 30, 60, 90]} />
           </Grid>
         </Grid>
       </Paper>
 
-      {/* Country Overview */}
-      {countryData && (
-        <Paper sx={{ p: 3, mb: 4, bgcolor: tokens.surface, border: `1px solid ${tokens.border}` }}>
-          <Typography variant="h5" gutterBottom>
-            {countryData.country} Media Landscape
-          </Typography>
-
-          <Grid container spacing={3}>
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h3" sx={{ ...monoNumber, color: tokens.accent }}>
-                  {countryData.entities.length}
-                </Typography>
-                <Typography sx={{ color: tokens.inkMuted }}>
-                  Top Entities
-                </Typography>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h3" sx={{ ...monoNumber, color: tokens.ink }}>
-                  {countryData.available_newspapers.length}
-                </Typography>
-                <Typography sx={{ color: tokens.inkMuted }}>
-                  Newspapers
-                </Typography>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} sm={4}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h3" sx={{ ...monoNumber, color: tokens.ink }}>
-                  {countryData.time_period_days === 0 ? 'All' : countryData.time_period_days}
-                </Typography>
-                <Typography sx={{ color: tokens.inkMuted }}>
-                  {countryData.time_period_days === 0 ? 'Time Analyzed' : 'Days Analyzed'}
-                </Typography>
-              </Box>
-            </Grid>
-          </Grid>
-
-          <Divider sx={{ my: 3, borderColor: tokens.border }} />
-
-          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-            Available Newspapers:
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {countryData.available_newspapers.map((newspaper) => {
-              const isSelected = selectedNewspaper === newspaper;
-              return (
-                <Chip
-                  key={newspaper}
-                  label={newspaper}
-                  size="small"
-                  clickable
-                  onClick={() => handleNewspaperSelect(newspaper)}
-                  sx={{
-                    cursor: 'pointer',
-                    fontWeight: 500,
-                    bgcolor: isSelected ? tokens.accent : 'transparent',
-                    color: isSelected ? '#FFFFFF' : tokens.inkMuted,
-                    border: `1px solid ${isSelected ? tokens.accent : tokens.border}`,
-                    '&:hover': {
-                      bgcolor: isSelected ? tokens.accentHover : tokens.surfaceSunken,
-                    },
-                  }}
-                />
-              );
-            })}
-          </Box>
-        </Paper>
-      )}
-
-      {/* Selected Newspaper Analysis */}
-      {selectedNewspaper && newspaperData && (
-        <Card sx={{ mb: 4 }}>
-          <CardHeader 
-            title={`${selectedNewspaper} - Most Discussed Topics`}
-            subheader={`Top entities covered by ${selectedNewspaper} over ${describeTimeRange(selectedTimeRange)}`}
-          />
-          <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-            <Box sx={{ columns: { xs: 1, md: 2 }, columnGap: 0 }}>
-              {newspaperData.entities.map((entity, index) => (
-                <Box
-                  key={entity.entity_name}
-                  sx={{
-                    breakInside: 'avoid',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    px: 2,
-                    py: 1.25,
-                    borderTop: index === 0 ? 'none' : `1px solid ${tokens.border}`,
-                    '&:hover': { bgcolor: tokens.surfaceSunken },
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      bgcolor: archetypeColor(entity.avg_power_score, entity.avg_moral_score),
-                    }}
-                  />
-                  <Typography
-                    variant="body2"
-                    sx={{ flex: 1, minWidth: 0, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {entity.entity_name}
-                  </Typography>
-                  <Chip
-                    label={entity.entity_type}
-                    size="small"
-                    variant="outlined"
-                    sx={{ borderColor: tokens.border, color: tokens.inkMuted, flexShrink: 0 }}
-                  />
-                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, flexShrink: 0 }}>
-                    P {entity.avg_power_score.toFixed(2)} · M {entity.avg_moral_score.toFixed(2)}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 78, textAlign: 'right', flexShrink: 0 }}
-                  >
-                    {entity.mention_count} mentions
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Main Chart - All Entities on One Graph */}
-      {!selectedNewspaper && countryData && countryData.entities.length > 0 ? (
-        <Card>
-          <CardHeader 
-            title={`${selectedCountry} Media Sentiment Overview`}
-            subheader={`Sentiment trends for top ${countryData.entities.length} entities averaged across ${countryData.available_newspapers.length} newspapers`}
-          />
-          <CardContent>
-            <CountryEntitiesTrendChart 
-              country={selectedCountry}
-              entities={countryData.entities}
-              height={600}
-            />
-          </CardContent>
-        </Card>
-      ) : !selectedNewspaper && countryData ? (
+      {/* Internal divergence: papers within this country on the same entities */}
+      {countryData && countryData.entities.length > 0 ? (
+        <NewspaperSpreadPanel country={selectedCountry} entities={countryData.entities} />
+      ) : countryData ? (
         <Alert severity="warning">
           No entities found with sufficient data for {selectedCountry} in the selected time period.
           Try increasing the time range or selecting a different country.
@@ -332,70 +128,36 @@ const CountryEntityPage: React.FC = () => {
       ) : null}
 
       {/* Selection bias: what this sphere is loud/silent about vs another */}
-      {!selectedNewspaper && (
-        <Box sx={{ mt: 4 }}>
-          <SalienceAsymmetryPanel countryA={selectedCountry} countries={availableCountries} />
-        </Box>
-      )}
+      <Box sx={{ mt: 4 }}>
+        <SalienceAsymmetryPanel countryA={selectedCountry} countries={countryOptions} />
+      </Box>
 
-      {/* Entity Summary Table */}
-      {!selectedNewspaper && countryData && countryData.entities.length > 0 && (
-        <Card sx={{ mt: 4 }}>
-          <CardHeader 
-            title="Entity Summary"
-            subheader="Average sentiment scores and mention counts"
-          />
-          <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-            <Box sx={{ columns: { xs: 1, md: 2 }, columnGap: 0 }}>
-              {countryData.entities.map((entity, index) => (
-                <Box
-                  key={entity.entity_name}
-                  sx={{
-                    breakInside: 'avoid',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    px: 2,
-                    py: 1.25,
-                    borderTop: index === 0 ? 'none' : `1px solid ${tokens.border}`,
-                    '&:hover': { bgcolor: tokens.surfaceSunken },
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      bgcolor: archetypeColor(entity.avg_power_score, entity.avg_moral_score),
-                    }}
-                  />
-                  <Typography
-                    variant="body2"
-                    sx={{ flex: 1, minWidth: 0, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {entity.entity_name}
-                  </Typography>
-                  <Chip
-                    label={entity.entity_type}
-                    size="small"
-                    variant="outlined"
-                    sx={{ borderColor: tokens.border, color: tokens.inkMuted, flexShrink: 0 }}
-                  />
-                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, flexShrink: 0 }}>
-                    P {entity.avg_power_score.toFixed(2)} · M {entity.avg_moral_score.toFixed(2)}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 120, textAlign: 'right', flexShrink: 0 }}
-                  >
-                    {entity.mention_count} in {Object.keys(entity.newspapers).length} {Object.keys(entity.newspapers).length === 1 ? 'paper' : 'papers'}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          </CardContent>
-        </Card>
+      {/* The sphere's papers, as doors to their profiles rather than an in-page duplicate */}
+      {countryData && countryData.available_newspapers.length > 0 && (
+        <Box sx={{ mt: 4 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, color: tokens.inkMuted }}>
+            Tracked papers in {selectedCountry}:
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {countryData.available_newspapers.map((newspaper) => (
+              <Chip
+                key={newspaper}
+                label={newspaper}
+                size="small"
+                clickable
+                onClick={() => navigate(`/sources/${encodeURIComponent(newspaper)}`)}
+                sx={{
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  bgcolor: 'transparent',
+                  color: tokens.inkMuted,
+                  border: `1px solid ${tokens.border}`,
+                  '&:hover': { bgcolor: tokens.surfaceSunken },
+                }}
+              />
+            ))}
+          </Box>
+        </Box>
       )}
     </Box>
   );

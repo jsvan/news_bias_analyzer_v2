@@ -8,10 +8,6 @@ import {
   CardHeader,
   CardContent,
   Paper,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Autocomplete,
   TextField,
   IconButton,
@@ -20,7 +16,7 @@ import {
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import { useData } from '../context/DataContext';
-import { statsApi } from '../services/api';
+import { statsApi, narrativeApi } from '../services/api';
 import SentimentChart from '../components/SentimentChart';
 import ContestedEntitiesPanel from '../components/ContestedEntitiesPanel';
 import DriftFeedPanel from '../components/DriftFeedPanel';
@@ -30,26 +26,59 @@ import { tokens, archetypeColor, archetypeLabel, monoNumber, ArchetypeLabel } fr
 const ARCHETYPES: ArchetypeLabel[] = ['Hero', 'Victim', 'Villain', 'Threat'];
 
 const EntityAnalysisPage: React.FC = () => {
-  const { entities } = useData();
+  const { entities, availableCountries } = useData();
   const navigate = useNavigate();
   const [selectedArchetypes, setSelectedArchetypes] = useState<ArchetypeLabel[]>([]);
   const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
+
+  // The comparison layer: one country's reading of the same entities, drawn
+  // against the global baseline instead of replacing it.
+  const [overlayCountry, setOverlayCountry] = useState<string | null>(null);
+  const [overlayEntities, setOverlayEntities] = useState<EntitySentimentSummary[]>([]);
+
+  // entity name -> cross-country JSD, so contested entities are visually
+  // distinct from genuinely neutral ones (both average near the origin).
+  const [contested, setContested] = useState<Record<string, number>>({});
 
   useEffect(() => {
     statsApi
       .getTrendingEntities(40)
       .then(setHighlightedEntities)
       .catch(() => setHighlightedEntities([]));
+    narrativeApi
+      .getContestedRanking({ days: 30, dimension: 'moral', limit: 100 })
+      .then((data) => {
+        const map: Record<string, number> = {};
+        (data?.entities ?? []).forEach((e: { entity_name: string; divergence: number }) => {
+          map[e.entity_name] = e.divergence;
+        });
+        setContested(map);
+      })
+      .catch(() => setContested({}));
   }, []);
+
+  useEffect(() => {
+    if (!overlayCountry) {
+      setOverlayEntities([]);
+      return;
+    }
+    let cancelled = false;
+    statsApi
+      .getTrendingEntities(40, undefined, overlayCountry)
+      .then((data) => {
+        if (!cancelled) setOverlayEntities(data);
+      })
+      .catch(() => {
+        if (!cancelled) setOverlayEntities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [overlayCountry]);
 
   const filteredHighlighted = selectedArchetypes.length
     ? highlightedEntities.filter((e) => selectedArchetypes.includes(archetypeLabel(e.power_score, e.moral_score)))
     : highlightedEntities;
-
-  // Strongest archetype signal = distance from the neutral origin on the power/moral plane
-  const notableEntities = [...filteredHighlighted]
-    .sort((a, b) => Math.hypot(b.power_score, b.moral_score) - Math.hypot(a.power_score, a.moral_score))
-    .slice(0, 8);
 
   const toggleArchetype = (a: ArchetypeLabel) => {
     setSelectedArchetypes((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
@@ -100,9 +129,13 @@ const EntityAnalysisPage: React.FC = () => {
           <Card>
             <CardHeader
               title="Entity Sentiment Analysis"
-              subheader="Power vs. Moral positioning of key entities"
+              subheader={
+                overlayCountry
+                  ? `Gray: global baseline. Colored: how ${overlayCountry}'s sources read the same entities.`
+                  : 'Power vs. Moral positioning of key entities, all sources combined'
+              }
               action={
-                <Tooltip title="Entities are positioned based on their average sentiment scores across all analyzed news sources. The quadrants represent different narrative archetypes.">
+                <Tooltip title="Each dot is an entity's average position across analyzed coverage; the quadrants are narrative archetypes. A dashed ring marks entities whose national spheres disagree most (cross-country Jensen-Shannon divergence) — a ringed dot near the center is an average of conflicting readings, not consensus. Pick a country to overlay its reading against the global baseline.">
                   <IconButton>
                     <InfoIcon />
                   </IconButton>
@@ -110,7 +143,33 @@ const EntityAnalysisPage: React.FC = () => {
               }
             />
             <CardContent>
-              <SentimentChart data={filteredHighlighted} height={500} showLabels={true} />
+              <Autocomplete
+                size="small"
+                options={availableCountries}
+                value={overlayCountry}
+                onChange={(_, v) => setOverlayCountry(v)}
+                renderInput={(params) => (
+                  <TextField {...params} label="Compare a country against the global baseline" />
+                )}
+                sx={{ maxWidth: 360, mb: 1 }}
+              />
+              <SentimentChart
+                data={filteredHighlighted}
+                height={500}
+                showLabels={true}
+                overlay={
+                  overlayCountry && overlayEntities.length > 0
+                    ? { country: overlayCountry, data: overlayEntities }
+                    : null
+                }
+                contested={contested}
+              />
+              <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
+                Dashed ring = contested across countries (stronger ring, sharper disagreement).
+                {overlayCountry
+                  ? ' Dashed line = the gap between the global baseline and this country’s reading; a gray dot with no partner is an entity this country’s press is largely silent on.'
+                  : ' Averages hide contestation — overlay a country to see who disagrees.'}
+              </Typography>
             </CardContent>
           </Card>
 
@@ -148,58 +207,7 @@ const EntityAnalysisPage: React.FC = () => {
         </Grid>
 
         <Grid item xs={12} md={5}>
-          <Card>
-            <CardHeader title="Strongest portrayals" subheader="Furthest from neutral on both axes, all sources combined" />
-            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
-              {notableEntities.length === 0 && (
-                <Box sx={{ px: 2, py: 3 }}>
-                  <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
-                    No scored entities yet. This list ranks entities by how far their average
-                    portrayal sits from neutral once mentions are analyzed.
-                  </Typography>
-                </Box>
-              )}
-              {notableEntities.map((entity, i) => (
-                <Box
-                  key={entity.entity}
-                  onClick={() => entity.id && navigate(`/entities/${entity.id}`)}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    px: 2,
-                    py: 1.25,
-                    cursor: entity.id ? 'pointer' : 'default',
-                    borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}`,
-                    '&:hover': entity.id ? { bgcolor: tokens.surfaceSunken } : undefined,
-                  }}
-                >
-                  <Box
-                    sx={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      bgcolor: archetypeColor(entity.power_score, entity.moral_score),
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
-                    {entity.entity}
-                  </Typography>
-                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted }}>
-                    P {entity.power_score.toFixed(1)} · M {entity.moral_score.toFixed(1)}
-                  </Typography>
-                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 52, textAlign: 'right' }}>
-                    {(entity.mention_count || 0).toLocaleString()}
-                  </Typography>
-                </Box>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Box sx={{ mt: 3 }}>
-            <ContestedEntitiesPanel />
-          </Box>
+          <ContestedEntitiesPanel />
 
           <Box sx={{ mt: 3 }}>
             <DriftFeedPanel />

@@ -207,14 +207,16 @@ export const statsApi = {
     return response.data;
   },
   
-  // Most-mentioned entities with average power/moral scores. days omitted = all time.
-  getTrendingEntities: async (limit: number = 25, days?: number) => {
+  // Most-mentioned entities with average power/moral scores. days omitted = all time;
+  // country omitted = all sources worldwide (the global baseline).
+  getTrendingEntities: async (limit: number = 25, days?: number, country?: string) => {
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access entity sentiment data.');
     }
 
     const params: any = { limit };
     if (days) params.days = days;
+    if (country) params.country = country;
     const response = await api.get('/stats/trending_entities', { params });
     return response.data;
   },

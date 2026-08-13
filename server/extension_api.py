@@ -1100,12 +1100,15 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
 async def get_trending_entities(
     limit: int = Query(10, ge=1, le=100),
     days: Optional[int] = Query(None, ge=1, le=3650),
+    country: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Most-mentioned entities with average power/moral scores. Omit days for all-time.
 
     Aggregates across merged entities via Entity.canonical_id (same resolution as
     /entities), so e.g. two "Donald Trump" rows surface as one canonical point.
+    With country set, only mentions published by that country's sources count —
+    the same numbers, seen from one national sphere.
     """
     try:
         resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
@@ -1120,6 +1123,13 @@ async def get_trending_entities(
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
         )
+
+        if country:
+            agg = agg.join(
+                NewsArticle, EntityMention.article_id == NewsArticle.id
+            ).join(
+                NewsSource, NewsArticle.source_id == NewsSource.id
+            ).filter(NewsSource.country == country)
 
         if days:
             agg = agg.filter(EntityMention.created_at >= datetime.utcnow() - timedelta(days=days))

@@ -46,7 +46,6 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
   showMoral = true
 }) => {
   const [dimension, setDimension] = useState<'both' | 'power' | 'moral'>('both');
-  const [smoothing, setSmoothing] = useState<boolean>(true);
 
   // Check if we have enough data
   const hasEnoughData = data && data.length > 2;
@@ -95,15 +94,6 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
     }
   };
 
-  const handleSmoothingChange = (
-    event: React.MouseEvent<HTMLElement>,
-    newSmoothing: boolean | null
-  ) => {
-    if (newSmoothing !== null) {
-      setSmoothing(newSmoothing);
-    }
-  };
-
   return (
     <Box sx={{ width: '100%', height: height }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -115,39 +105,23 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
             <InfoIcon fontSize="small" color="action" />
           </MuiTooltip>
         </Box>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <ToggleButtonGroup
-            size="small"
-            value={dimension}
-            exclusive
-            onChange={handleDimensionChange}
-            aria-label="dimension selector"
-          >
-            <ToggleButton value="both" aria-label="both dimensions">
-              Both
-            </ToggleButton>
-            <ToggleButton value="power" aria-label="power dimension">
-              Power
-            </ToggleButton>
-            <ToggleButton value="moral" aria-label="moral dimension">
-              Moral
-            </ToggleButton>
-          </ToggleButtonGroup>
-          <ToggleButtonGroup
-            size="small"
-            value={smoothing}
-            exclusive
-            onChange={handleSmoothingChange}
-            aria-label="smoothing selector"
-          >
-            <ToggleButton value={true} aria-label="smoothed line">
-              Smooth
-            </ToggleButton>
-            <ToggleButton value={false} aria-label="exact line">
-              Exact
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
+        <ToggleButtonGroup
+          size="small"
+          value={dimension}
+          exclusive
+          onChange={handleDimensionChange}
+          aria-label="dimension selector"
+        >
+          <ToggleButton value="both" aria-label="both dimensions">
+            Both
+          </ToggleButton>
+          <ToggleButton value="power" aria-label="power dimension">
+            Power
+          </ToggleButton>
+          <ToggleButton value="moral" aria-label="moral dimension">
+            Moral
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Box>
 
       {!hasEnoughData && (
@@ -199,7 +173,7 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
 
             {(dimension === 'both' || dimension === 'power') && (
               <Line
-                type={smoothing ? "monotone" : "linear"}
+                type="monotone"
                 name="Power"
                 dataKey="power_score"
                 stroke={tokens.accent}
@@ -210,7 +184,7 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
             )}
             {(dimension === 'both' || dimension === 'moral') && (
               <Line
-                type={smoothing ? "monotone" : "linear"}
+                type="monotone"
                 name="Moral"
                 dataKey="moral_score"
                 stroke={tokens.categorical[1]}

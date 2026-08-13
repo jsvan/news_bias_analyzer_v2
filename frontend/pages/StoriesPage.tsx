@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Box, Typography, Card, CardContent, Chip, Stack } from '@mui/material';
 import { useData } from '../context/DataContext';
+import { driftApi, narrativeApi } from '../services/api';
 import { Entity } from '../types';
 import { tokens, monoNumber, fontDisplay } from '../theme';
 
@@ -14,15 +15,30 @@ interface Story {
   entities: Entity[];
 }
 
-const fmt = (n: number) => n.toLocaleString();
+interface DriftEvent {
+  entity_name: string;
+  source_name: string | null;
+  week_start: string;
+  p_value: number;
+  mean_before: number;
+  mean_after: number;
+}
 
-// Deterministic, template-based generator — no LLM call, no live "writing" animation.
-// Every sentence is assembled from real counts already loaded by DataContext. Where
-// this snapshot has no populated power/moral sentiment data (checked via
-// entityApi.getEntityDistribution — currently empty for every entity), these
-// templates stick to mention counts and coverage counts rather than claiming a
-// portrayal ("cast as a villain", etc.) that the data doesn't back up.
-function buildStories(entities: Entity[], sourceCount: number, countryCount: number): Story[] {
+interface ContestedEntry {
+  entity_name: string;
+  divergence: number;
+}
+
+const fmt = (n: number) => n.toLocaleString();
+const fmtScore = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+const fmtP = (p: number) => (p < 0.001 ? 'p<0.001' : `p=${p.toFixed(3)}`);
+
+// Deterministic, template-based generator — no LLM call, no live "writing"
+// animation. Coverage stories are assembled from mention counts already loaded
+// by DataContext; shift and contested stories restate what the drift and
+// contested pipelines computed (Pettitt changepoints, cross-country JSD), so
+// every claim is a number the reader can go check, not editorial prose.
+function buildCoverageStories(entities: Entity[], sourceCount: number): Story[] {
   const stories: Story[] = [];
   if (entities.length === 0) return stories;
 
@@ -59,30 +75,47 @@ function buildStories(entities: Entity[], sourceCount: number, countryCount: num
     entities: top5,
   });
 
-  const nextFive = entities.slice(5, 10);
-  if (nextFive.length > 0) {
-    stories.push({
-      id: 'second-tier',
-      headline: 'Just outside the spotlight',
-      body: [
-        `${nextFive.map((e) => e.name).join(', ')} round out the next tier of coverage, each mentioned between ${fmt(nextFive[nextFive.length - 1].mention_count ?? 0)} and ${fmt(nextFive[0].mention_count ?? 0)} times.`,
-        `Together this second tier is a reminder that attention drops off fast: sources keep talking about ${lead.name} long after these names fade from the front page.`,
-      ],
-      entities: nextFive,
-    });
-  }
-
-  stories.push({
-    id: 'footprint',
-    headline: 'The footprint behind this snapshot',
-    body: [
-      `This snapshot draws on ${sourceCount} sources across ${countryCount} countries, tracking ${entities.length} entities by mention count.`,
-      `That breadth is what the comparisons elsewhere on this site are measured against — every entity page shows how a single source's coverage sits relative to this wider set.`,
-    ],
-    entities: [],
-  });
-
   return stories;
+}
+
+function buildShiftStories(events: DriftEvent[], entities: Entity[]): Story[] {
+  const byName = new Map(entities.map((e) => [e.name, e]));
+  return events.slice(0, 3).map((ev, i) => {
+    const match = byName.get(ev.entity_name);
+    const mover = ev.source_name ?? 'the whole corpus';
+    const direction = ev.mean_after >= ev.mean_before ? 'up' : 'down';
+    return {
+      id: `shift-${i}`,
+      headline: ev.source_name
+        ? `${ev.source_name} changed its tone on ${ev.entity_name}`
+        : `Coverage of ${ev.entity_name} shifted everywhere at once`,
+      body: [
+        `Around the week of ${ev.week_start}, ${mover}'s average moral score for ${ev.entity_name} moved ${direction} from ${fmtScore(ev.mean_before)} to ${fmtScore(ev.mean_after)} (${fmtP(ev.p_value)}, Pettitt changepoint test).`,
+        ev.source_name
+          ? `That move is measured after subtracting the global trend — this outlet moved on its own, which is the editorial-stance signal rather than a reaction everyone shared.`
+          : `The corpus moving together usually marks a real-world event; the entity page shows which sources moved furthest.`,
+      ],
+      entities: match ? [match] : [],
+    };
+  });
+}
+
+function buildContestedStory(ranked: ContestedEntry[], entities: Entity[]): Story | null {
+  if (ranked.length === 0) return null;
+  const byName = new Map(entities.map((e) => [e.name, e]));
+  const top = ranked.slice(0, 3);
+  const listed = top
+    .map((e) => `${e.entity_name} (JSD ${e.divergence.toFixed(2)})`)
+    .join(', ');
+  return {
+    id: 'contested',
+    headline: 'Where national spheres disagree most',
+    body: [
+      `Measured by Jensen-Shannon divergence between countries' sentiment distributions, the most contested entities in recent coverage are ${listed}.`,
+      `A contested entity can still average near neutral — the disagreement, not the mean, is the story.`,
+    ],
+    entities: top.map((e) => byName.get(e.entity_name)).filter((e): e is Entity => !!e),
+  };
 }
 
 const StoryCard: React.FC<{ story: Story }> = ({ story }) => (
@@ -129,9 +162,29 @@ const StoryCard: React.FC<{ story: Story }> = ({ story }) => (
 );
 
 const StoriesPage: React.FC = () => {
-  const { entities, sources, availableCountries, loading } = useData();
+  const { entities, sources, loading } = useData();
+  const [driftEvents, setDriftEvents] = useState<DriftEvent[]>([]);
+  const [contested, setContested] = useState<ContestedEntry[]>([]);
 
-  const stories = buildStories(entities, sources.length, availableCountries.length);
+  // Live-API computations; on a static snapshot these fail quietly and the
+  // page falls back to coverage stories alone.
+  useEffect(() => {
+    driftApi
+      .getDriftFeed({ dimension: 'moral', scope: 'all', limit: 5 })
+      .then((data) => setDriftEvents(data?.events ?? []))
+      .catch(() => setDriftEvents([]));
+    narrativeApi
+      .getContestedRanking({ days: 30, dimension: 'moral', limit: 5 })
+      .then((data) => setContested(data?.entities ?? []))
+      .catch(() => setContested([]));
+  }, []);
+
+  const contestedStory = buildContestedStory(contested, entities);
+  const stories: Story[] = [
+    ...buildShiftStories(driftEvents, entities),
+    ...(contestedStory ? [contestedStory] : []),
+    ...buildCoverageStories(entities, sources.length),
+  ];
 
   return (
     <Box>
@@ -139,9 +192,9 @@ const StoriesPage: React.FC = () => {
         Stories
       </Typography>
       <Typography variant="caption" sx={{ color: tokens.inkMuted, display: 'block', mb: 3 }}>
-        Generated automatically from current tracking data: short briefs assembled directly from
-        real mention counts. Every figure links to the entity it came from so you can check it
-        yourself.
+        Generated automatically from the pipeline's own findings — statistically significant
+        tone shifts, cross-country contestation, and coverage concentration. Every figure links
+        to the entity it came from so you can check it yourself.
       </Typography>
 
       {loading && (

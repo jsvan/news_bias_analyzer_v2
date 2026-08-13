@@ -9,7 +9,8 @@ import {
   Tooltip,
   LabelList,
   Label,
-  ReferenceLine
+  ReferenceLine,
+  Customized
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
@@ -17,6 +18,7 @@ import { tokens, archetypeColor } from '../theme';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
+  layer: 'global' | 'country';
 }
 
 interface SentimentChartProps {
@@ -24,13 +26,25 @@ interface SentimentChartProps {
   entityTypes?: Record<string, string[]>; // Type to list of entities mapping
   height?: number;
   showLabels?: boolean;
+  // One country's reading of the same entities, drawn against the global
+  // baseline. When set, global points recede to gray anchors and the country's
+  // points carry the archetype color — the same baseline-vs-reading idiom as
+  // the My Bubble divergence glyphs.
+  overlay?: { country: string; data: EntitySentimentSummary[] } | null;
+  // entity name -> cross-country Jensen-Shannon divergence. Entities whose
+  // spheres disagree get a dashed ring: a mean near neutral can be genuine
+  // consensus or a fought-over average, and without this channel the two are
+  // indistinguishable.
+  contested?: Record<string, number>;
 }
 
 const SentimentChart: React.FC<SentimentChartProps> = ({
   data,
   entityTypes,
   height = 400,
-  showLabels = true
+  showLabels = true,
+  overlay = null,
+  contested = {}
 }) => {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     entityTypes ? Object.keys(entityTypes) : []
@@ -53,7 +67,27 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
       ...item,
       // Radius from log mention count: 40k-mention entities read bigger without drowning 100-mention ones
       size: 5 + Math.log10(Math.max(item.mention_count || 1, 1)) * 2.2,
+      layer: 'global' as const,
     }));
+
+  const hasOverlay = !!overlay && overlay.data.length > 0;
+
+  // Country points are only drawn for entities present in the global set —
+  // this keeps the chart a comparison. A global entity with NO country point
+  // is itself a finding (that sphere is silent on it), noted in the tooltip.
+  const globalByName = new Map(filteredData.map((d) => [d.entity, d]));
+  const overlayData: SentimentDataPoint[] = hasOverlay
+    ? overlay!.data
+        .filter((d) => globalByName.has(d.entity))
+        .map((d) => ({
+          ...d,
+          size: 5 + Math.log10(Math.max(d.mention_count || 1, 1)) * 2.2,
+          layer: 'country' as const,
+        }))
+    : [];
+  const overlayByName = new Map(overlayData.map((d) => [d.entity, d]));
+
+  const maxJsd = Math.max(0.001, ...Object.values(contested));
 
   // Check if we have enough data for a meaningful scatter plot
   const hasEnoughData = filteredData.length >= 5; // Minimum number of entities needed for comparison
@@ -72,14 +106,6 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     setSelectedTypes(typeof value === 'string' ? value.split(',') : value);
   };
 
-  // Entity color follows its archetype quadrant, not an arbitrary per-name hash —
-  // the color always means the same thing everywhere in the site.
-  const getEntityColor = (entity: string) => {
-    const point = filteredData.find(d => d.entity === entity);
-    if (!point) return tokens.inkMuted;
-    return archetypeColor(point.power_score, point.moral_score);
-  };
-
   // Define quadrant labels
   const quadrantLabels = [
     { x: 1, y: 1, text: 'HERO', color: tokens.hero },
@@ -87,6 +113,37 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     { x: 1, y: -1, text: 'VILLAIN', color: tokens.villain },
     { x: -1, y: -1, text: 'THREAT', color: tokens.threat }
   ];
+
+  // Dashed connectors between each entity's global anchor and its country
+  // reading. Drawn through Customized because recharts has no native way to
+  // link points across two Scatter series; the axis scales come from chart
+  // internals.
+  const renderPairLinks = (props: any) => {
+    const xScale = (Object.values(props.xAxisMap ?? {})[0] as any)?.scale;
+    const yScale = (Object.values(props.yAxisMap ?? {})[0] as any)?.scale;
+    if (!xScale || !yScale || overlayData.length === 0) return <g />;
+    return (
+      <g>
+        {overlayData.map((c) => {
+          const g = globalByName.get(c.entity);
+          if (!g) return null;
+          return (
+            <line
+              key={c.entity}
+              x1={xScale(g.power_score)}
+              y1={yScale(g.moral_score)}
+              x2={xScale(c.power_score)}
+              y2={yScale(c.moral_score)}
+              stroke={tokens.inkMuted}
+              strokeWidth={1.25}
+              strokeDasharray="2 2"
+              opacity={0.7}
+            />
+          );
+        })}
+      </g>
+    );
+  };
 
   return (
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
@@ -117,7 +174,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
           </FormControl>
         )}
       </Box>
-      
+
       {!hasEnoughData && (
         <Box sx={{
           display: 'flex',
@@ -177,17 +234,37 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               // never had a name to show - read it off the point payload instead.
               const p = payload?.[0]?.payload as SentimentDataPoint | undefined;
               if (!active || !p || !p.entity) return null;
+              const jsd = contested[p.entity];
+              const counterpart =
+                p.layer === 'global' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
               return (
                 <Box sx={{ bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 1, px: 1.5, py: 1 }}>
                   <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
                     {p.entity}
                   </Typography>
                   <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+                    {hasOverlay ? (p.layer === 'global' ? 'Global · ' : `${overlay!.country} · `) : ''}
                     Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
                   </Typography>
+                  {counterpart && (
+                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+                      {p.layer === 'global' ? `${overlay!.country} · ` : 'Global · '}
+                      Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
+                    </Typography>
+                  )}
+                  {hasOverlay && p.layer === 'global' && !counterpart && (
+                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+                      Not among {overlay!.country}'s most-covered entities
+                    </Typography>
+                  )}
                   {p.mention_count != null && (
                     <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
                       {p.mention_count.toLocaleString()} mentions
+                    </Typography>
+                  )}
+                  {jsd != null && (
+                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+                      Cross-country disagreement: JSD {jsd.toFixed(2)}
                     </Typography>
                   )}
                 </Box>
@@ -211,24 +288,44 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             />
           ))}
 
-          {/* Main scatter plot for entities */}
+          {hasOverlay && <Customized component={renderPairLinks} />}
+
+          {/* Global layer: archetype-colored when it is the subject, receding to
+              gray anchors when a country overlay makes it the baseline. */}
           <Scatter
             name="Entities"
             data={filteredData}
             fill={tokens.accent}
-            isAnimationActive={true}
+            isAnimationActive={!hasOverlay}
             shape={(props: any) => {
-              const { cx, cy, entity, payload } = props;
+              const { cx, cy, payload } = props;
+              const entityName = payload?.entity as string;
+              const jsd = contested[entityName];
+              const r = payload?.size ?? 9;
               return (
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={payload?.size ?? 9}
-                  fill={getEntityColor(entity)}
-                  fillOpacity={0.85}
-                  stroke={tokens.surface}
-                  strokeWidth={1.5}
-                />
+                <g>
+                  {jsd != null && (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={r + 3.5}
+                      fill="none"
+                      stroke={tokens.ink}
+                      strokeWidth={1.25}
+                      strokeDasharray="3 2"
+                      opacity={0.25 + 0.6 * (jsd / maxJsd)}
+                    />
+                  )}
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={r}
+                    fill={hasOverlay ? tokens.inkMuted : archetypeColor(payload.power_score, payload.moral_score)}
+                    fillOpacity={hasOverlay ? 0.55 : 0.85}
+                    stroke={tokens.surface}
+                    strokeWidth={1.5}
+                  />
+                </g>
               );
             }}
           >
@@ -242,6 +339,29 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               />
             )}
           </Scatter>
+
+          {/* Country layer: the selected sphere's reading, archetype-colored. */}
+          {hasOverlay && (
+            <Scatter
+              name={overlay!.country}
+              data={overlayData}
+              isAnimationActive={false}
+              shape={(props: any) => {
+                const { cx, cy, payload } = props;
+                return (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={payload?.size ?? 9}
+                    fill={archetypeColor(payload.power_score, payload.moral_score)}
+                    fillOpacity={0.9}
+                    stroke={tokens.surface}
+                    strokeWidth={1.5}
+                  />
+                );
+              }}
+            />
+          )}
         </ScatterChart>
       </ResponsiveContainer>
       )}

@@ -1,25 +1,23 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  ResponsiveContainer, 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend,
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ReferenceLine,
   Label
 } from 'recharts';
-import { 
-  Box, 
-  Typography, 
-  ToggleButtonGroup, 
-  ToggleButton, 
+import {
+  Box,
+  Typography,
+  ToggleButtonGroup,
+  ToggleButton,
   Paper,
   Tooltip as MuiTooltip,
-  Chip,
-  Grid
+  Chip
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import { tokens, categoricalColor, monoNumber } from '../theme';
@@ -48,8 +46,9 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   dimension = 'moral'
 }) => {
   const [selectedDimension, setSelectedDimension] = useState<'both' | 'power' | 'moral'>(dimension);
-  const [smoothing, setSmoothing] = useState<boolean>(true);
-  const [chartMode, setChartMode] = useState<'sentiment' | 'netsum'>('sentiment');
+  // Sources hidden via their legend chip. The legend is the control, not a
+  // separate static block restating it.
+  const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set());
 
   // Get all source names first
   const allSourceNames = Object.keys(sourcesTrends);
@@ -57,73 +56,63 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   // Combine all source data into a single dataset for the chart
   const combineSourceData = () => {
     const allDates = new Set<string>();
-    
+
     // Collect all unique dates across all sources
     Object.values(sourcesTrends).forEach(trends => {
       trends.forEach(point => allDates.add(point.date));
     });
-    
+
     const sortedDates = Array.from(allDates).sort();
-    
+
     // Create combined dataset
     return sortedDates.map(date => {
       const dataPoint: any = { date };
-      
+
       Object.entries(sourcesTrends).forEach(([sourceName, trends]) => {
         const point = trends.find(t => t.date === date);
         if (point) {
-          if (chartMode === 'sentiment') {
-            // Current behavior - keep exactly as is, but validate against NaN
-            dataPoint[`${sourceName}_power`] = (typeof point.power_score === 'number' && !isNaN(point.power_score)) ? point.power_score : null;
-            dataPoint[`${sourceName}_moral`] = (typeof point.moral_score === 'number' && !isNaN(point.moral_score)) ? point.moral_score : null;
-          } else {
-            // Net sum calculation - ONLY if both values are valid numbers
-            if (typeof point.power_score === 'number' && !isNaN(point.power_score) && 
-                typeof point.mention_count === 'number' && !isNaN(point.mention_count)) {
-              const netSum = point.power_score * point.mention_count;
-              dataPoint[`${sourceName}_power`] = isNaN(netSum) ? null : netSum;
-            } else {
-              dataPoint[`${sourceName}_power`] = null; // Same as sentiment mode
-            }
-            
-            if (typeof point.moral_score === 'number' && !isNaN(point.moral_score) && 
-                typeof point.mention_count === 'number' && !isNaN(point.mention_count)) {
-              const netSum = point.moral_score * point.mention_count;
-              dataPoint[`${sourceName}_moral`] = isNaN(netSum) ? null : netSum;
-            } else {
-              dataPoint[`${sourceName}_moral`] = null; // Same as sentiment mode
-            }
-          }
+          dataPoint[`${sourceName}_power`] = (typeof point.power_score === 'number' && !isNaN(point.power_score)) ? point.power_score : null;
+          dataPoint[`${sourceName}_moral`] = (typeof point.moral_score === 'number' && !isNaN(point.moral_score)) ? point.moral_score : null;
           dataPoint[`${sourceName}_mentions`] = point.mention_count;
         }
       });
-      
+
       return dataPoint;
     });
   };
 
-  const combinedData = useMemo(() => combineSourceData(), [sourcesTrends, chartMode]);
-  
+  const combinedData = useMemo(() => combineSourceData(), [sourcesTrends]);
+
   // Use all source names - don't filter them out
   const sourceNames = allSourceNames;
-  
+  const visibleSourceNames = sourceNames.filter((name) => !hiddenSources.has(name));
+
+  const toggleSource = (name: string) => {
+    setHiddenSources((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
   // Check if we have valid data for rendering
   const hasValidData = useMemo(() => {
     if (sourceNames.length === 0 || combinedData.length === 0) return false;
-    
+
     // Check if there's at least one non-null value in the data
-    const hasValidValues = combinedData.some(dataPoint => 
+    const hasValidValues = combinedData.some(dataPoint =>
       sourceNames.some(sourceName => {
         const powerValue = dataPoint[`${sourceName}_power`];
         const moralValue = dataPoint[`${sourceName}_moral`];
-        return (typeof powerValue === 'number' && !isNaN(powerValue)) || 
+        return (typeof powerValue === 'number' && !isNaN(powerValue)) ||
                (typeof moralValue === 'number' && !isNaN(moralValue));
       })
     );
-    
+
     return hasValidValues;
   }, [sourceNames, combinedData]);
-  
+
   const hasData = hasValidData;
 
 
@@ -143,12 +132,12 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length && hoveredLine) {
       // Find the entry that matches the hovered line
-      const hoveredEntry = payload.find((p: any) => 
+      const hoveredEntry = payload.find((p: any) =>
         p.dataKey && p.dataKey.startsWith(hoveredLine) && p.value !== undefined && p.value !== null
       );
-      
+
       if (!hoveredEntry) return null;
-      
+
       const sourceName = hoveredEntry.dataKey.replace(/_power|_moral/, '');
       const dimension = hoveredEntry.dataKey.includes('_power') ? 'Power' : 'Moral';
       const country = getCountryFromSource(sourceName);
@@ -206,9 +195,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
             >
               {dimension}: {
                 typeof hoveredEntry.value === 'number' && !isNaN(hoveredEntry.value)
-                  ? (chartMode === 'sentiment'
-                      ? hoveredEntry.value.toFixed(2)
-                      : `${hoveredEntry.value.toFixed(1)} (net sum)`)
+                  ? hoveredEntry.value.toFixed(2)
                   : 'No data'
               }
             </Typography>
@@ -247,24 +234,6 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     }
   };
 
-  const handleSmoothingChange = (
-    event: React.MouseEvent<HTMLElement>,
-    newSmoothing: boolean | null
-  ) => {
-    if (newSmoothing !== null) {
-      setSmoothing(newSmoothing);
-    }
-  };
-
-  const handleChartModeChange = (
-    event: React.MouseEvent<HTMLElement>,
-    newMode: 'sentiment' | 'netsum' | null
-  ) => {
-    if (newMode !== null) {
-      setChartMode(newMode);
-    }
-  };
-
 
   // Get country from source name (handles both "Source (Country)" and "Country" formats)
   const getCountryFromSource = (sourceName: string) => {
@@ -293,15 +262,15 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   // partisan "sides" mapping, which the design system bans).
   const countryOrder = Object.keys(sourcesByCountry);
 
-  // Assign colors to sources based on country: same categorical hue per country,
-  // a lighter alpha shade per source within that country (same visual grouping
-  // the old per-country 4-shade palette gave, without a fixed name->color map).
-  const shadeAlphas = ['', 'CC', '99', '66'];
+  // Same categorical hue per country, stepping opacity per source within it.
+  // Computed (not a fixed 4-entry list) so the 5th source in a country doesn't
+  // silently recycle the 1st source's exact color.
   const getSourceColor = (sourceName: string) => {
     const country = getCountryFromSource(sourceName);
     const baseColor = categoricalColor(country, countryOrder);
     const sourceIndexInCountry = sourcesByCountry[country].indexOf(sourceName);
-    return `${baseColor}${shadeAlphas[sourceIndexInCountry % shadeAlphas.length]}`;
+    const alpha = Math.max(0x55, 0xff - sourceIndexInCountry * 0x2a);
+    return `${baseColor}${alpha.toString(16).padStart(2, '0')}`;
   };
 
 
@@ -310,85 +279,60 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="subtitle1" sx={{ mr: 1 }}>
-            {entityName} - Cross-Source {chartMode === 'sentiment' ? 'Sentiment' : 'Net Sentiment Sum'}
+            {entityName} - Cross-Source Sentiment
           </Typography>
-          <MuiTooltip title="Compare how different news sources portray the same entity over time. Each line represents a different newspaper's sentiment."
+          <MuiTooltip title="Compare how different news sources portray the same entity over time. Each line represents a different newspaper's sentiment. Power lines are dashed, Moral lines solid; click a source chip below to hide or show it."
           >
             <InfoIcon fontSize="small" color="action" />
           </MuiTooltip>
         </Box>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <ToggleButtonGroup
-            size="small"
-            value={chartMode}
-            exclusive
-            onChange={handleChartModeChange}
-            aria-label="chart mode selector"
-          >
-            <ToggleButton value="sentiment" aria-label="sentiment mode">
-              Sentiment
-            </ToggleButton>
-            <ToggleButton value="netsum" aria-label="net sum mode">
-              <MuiTooltip title="Shows sentiment score × mention count to reveal impact magnitude">
-                <span>Net Sum</span>
-              </MuiTooltip>
-            </ToggleButton>
-          </ToggleButtonGroup>
-          <ToggleButtonGroup
-            size="small"
-            value={selectedDimension}
-            exclusive
-            onChange={handleDimensionChange}
-            aria-label="dimension selector"
-          >
-            <ToggleButton value="both" aria-label="both dimensions">
-              Both
-            </ToggleButton>
-            <ToggleButton value="power" aria-label="power dimension">
-              Power
-            </ToggleButton>
-            <ToggleButton value="moral" aria-label="moral dimension">
-              Moral
-            </ToggleButton>
-          </ToggleButtonGroup>
-          <ToggleButtonGroup
-            size="small"
-            value={smoothing}
-            exclusive
-            onChange={handleSmoothingChange}
-            aria-label="smoothing selector"
-          >
-            <ToggleButton value={true} aria-label="smoothed line">
-              Smooth
-            </ToggleButton>
-            <ToggleButton value={false} aria-label="exact line">
-              Exact
-            </ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
+        <ToggleButtonGroup
+          size="small"
+          value={selectedDimension}
+          exclusive
+          onChange={handleDimensionChange}
+          aria-label="dimension selector"
+        >
+          <ToggleButton value="both" aria-label="both dimensions">
+            Both
+          </ToggleButton>
+          <ToggleButton value="power" aria-label="power dimension">
+            Power
+          </ToggleButton>
+          <ToggleButton value="moral" aria-label="moral dimension">
+            Moral
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Box>
 
-      {/* Country groupings */}
+      {/* The legend IS the control: one chip per source, colored like its line,
+          click to hide/show. Grouped visually by shared country hue. */}
       {hasData && (
-        <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-          {Object.entries(sourcesByCountry).map(([country, sources]) => {
-            const mainColor = categoricalColor(country, countryOrder);
-
+        <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 0.75, alignItems: 'center' }}>
+          {sourceNames.map((sourceName) => {
+            const color = getSourceColor(sourceName);
+            const hidden = hiddenSources.has(sourceName);
             return (
               <Chip
-                key={country}
-                label={`${country} (${sources.length})`}
+                key={sourceName}
+                label={sourceName}
                 size="small"
+                onClick={() => toggleSource(sourceName)}
+                variant={hidden ? 'outlined' : 'filled'}
                 sx={{
-                  backgroundColor: `${mainColor}20`,
-                  color: mainColor,
-                  borderColor: mainColor,
-                  fontWeight: 'bold'
+                  backgroundColor: hidden ? 'transparent' : `${color}`,
+                  color: hidden ? tokens.inkMuted : '#fff',
+                  borderColor: color,
+                  textDecoration: hidden ? 'line-through' : 'none',
+                  fontWeight: 500,
+                  cursor: 'pointer',
                 }}
-                variant="outlined"
               />
             );
           })}
+          <Typography variant="caption" sx={{ color: tokens.inkMuted, ml: 0.5 }}>
+            solid = Moral · dashed = Power · click to hide
+          </Typography>
         </Box>
       )}
 
@@ -412,7 +356,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
       {hasData && (
         <ResponsiveContainer width="100%" height="85%">
           <LineChart
-            key={`${selectedDimension}-${chartMode}`}
+            key={selectedDimension}
             data={combinedData}
             margin={{ top: 20, right: 30, bottom: 20, left: 20 }}
           >
@@ -426,13 +370,13 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
               tick={{ fill: tokens.inkMuted, fontSize: 11 }}
             />
             <YAxis
-              domain={chartMode === 'sentiment' ? [-2, 2] : [-50, 50]}
-              tickCount={chartMode === 'sentiment' ? 9 : 11}
+              domain={[-2, 2]}
+              tickCount={9}
               stroke={tokens.border}
               tick={{ fill: tokens.inkMuted, fontSize: 11 }}
             >
               <Label
-                value={chartMode === 'sentiment' ? "Sentiment Score" : "Net Sentiment Sum"}
+                value="Sentiment Score"
                 angle={-90}
                 position="insideLeft"
                 style={{ textAnchor: 'middle', fill: tokens.inkMuted }}
@@ -447,26 +391,25 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
               animationEasing="linear"
             />
             <ReferenceLine y={0} stroke={tokens.inkMuted} strokeDasharray="3 3" />
-            
-            {/* Render lines for each source */}
-            {sourceNames.map((sourceName, index) => {
+
+            {/* Render lines for each visible source */}
+            {visibleSourceNames.map((sourceName) => {
               const color = getSourceColor(sourceName);
-              const country = getCountryFromSource(sourceName);
-              
+
               return (
                 <React.Fragment key={sourceName}>
                   {(selectedDimension === 'both' || selectedDimension === 'power') && (
                     <Line
-                      type={smoothing ? "monotone" : "linear"}
+                      type="monotone"
                       name={`${sourceName} (Power)`}
                       dataKey={`${sourceName}_power`}
                       stroke={color}
                       strokeWidth={2.5}
                       strokeDasharray="5 5"
                       dot={{ strokeWidth: 2, r: 4, fill: color }}
-                      activeDot={{ 
-                        r: 6, 
-                        strokeWidth: 2, 
+                      activeDot={{
+                        r: 6,
+                        strokeWidth: 2,
                         fill: color,
                         onMouseEnter: () => setHoveredLine(sourceName),
                         onMouseLeave: () => setHoveredLine(null)
@@ -478,16 +421,16 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                   )}
                   {(selectedDimension === 'both' || selectedDimension === 'moral') && (
                     <Line
-                      type={smoothing ? "monotone" : "linear"}
+                      type="monotone"
                       name={`${sourceName} (Moral)`}
                       dataKey={`${sourceName}_moral`}
                       stroke={color}
                       strokeWidth={2.5}
                       strokeDasharray="0"
                       dot={{ strokeWidth: 2, r: 4, fill: color }}
-                      activeDot={{ 
-                        r: 6, 
-                        strokeWidth: 2, 
+                      activeDot={{
+                        r: 6,
+                        strokeWidth: 2,
                         fill: color,
                         onMouseEnter: () => setHoveredLine(sourceName),
                         onMouseLeave: () => setHoveredLine(null)
@@ -502,82 +445,6 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
             })}
           </LineChart>
         </ResponsiveContainer>
-      )}
-      
-      {/* Permanent Legend Below Chart */}
-      {hasData && (
-        <Box sx={{ mt: 2, p: 2, bgcolor: tokens.surface, borderRadius: 1, border: `1px solid ${tokens.border}` }}>
-          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold', color: tokens.ink }}>
-            Legend
-          </Typography>
-          <Grid container spacing={1}>
-            {sourceNames.map((sourceName) => {
-              const color = getSourceColor(sourceName);
-              const country = getCountryFromSource(sourceName);
-              // Chip background needs the plain country color — `color` above may
-              // already carry an alpha suffix, and stacking a second one on top
-              // of it would produce an invalid hex string.
-              const countryBaseColor = categoricalColor(country, countryOrder);
-
-              return (
-                <Grid item xs={12} sm={6} md={4} lg={3} key={sourceName}>
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                    {/* Power line if shown */}
-                    {(selectedDimension === 'both' || selectedDimension === 'power') && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box 
-                          sx={{ 
-                            width: 24, 
-                            height: 3, 
-                            background: `linear-gradient(to right, ${color} 60%, transparent 60%)`,
-                            backgroundSize: '8px 3px',
-                            backgroundRepeat: 'repeat-x',
-                            borderRadius: 1
-                          }} 
-                        />
-                        <Typography variant="caption" sx={{ fontSize: '0.75rem', color: tokens.ink }}>
-                          {sourceName} (Power)
-                        </Typography>
-                      </Box>
-                    )}
-                    
-                    {/* Moral line if shown */}
-                    {(selectedDimension === 'both' || selectedDimension === 'moral') && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box 
-                          sx={{ 
-                            width: 24, 
-                            height: 3, 
-                            bgcolor: color,
-                            borderRadius: 1
-                          }} 
-                        />
-                        <Typography variant="caption" sx={{ fontSize: '0.75rem', color: tokens.ink }}>
-                          {sourceName} (Moral)
-                        </Typography>
-                      </Box>
-                    )}
-                    
-                    {/* Country indicator */}
-                    <Box sx={{ ml: 3, mt: 0.5 }}>
-                      <Chip
-                        label={country}
-                        size="small"
-                        sx={{
-                          backgroundColor: `${countryBaseColor}15`,
-                          color: countryBaseColor,
-                          fontSize: '0.65rem',
-                          height: 16,
-                          fontWeight: 'bold'
-                        }}
-                      />
-                    </Box>
-                  </Box>
-                </Grid>
-              );
-            })}
-          </Grid>
-        </Box>
       )}
     </Box>
   );
