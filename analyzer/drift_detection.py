@@ -36,7 +36,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analyzer.narrative_metrics import pettitt_test, residual_series
 
-logging.basicConfig(level=logging.INFO)
+# No basicConfig here: this module is imported as a library, and configuring
+# the root logger at import time silently overrides the entrypoint's config.
 logger = logging.getLogger(__name__)
 
 DIMENSIONS = ["power", "moral"]

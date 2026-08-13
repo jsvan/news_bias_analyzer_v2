@@ -25,11 +25,9 @@ except ImportError:
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# No basicConfig here: this module is imported as a library, and configuring
+# the root logger at import time silently overrides the entrypoint's config -
+# it's why batch_analysis.log and scheduler.log sat empty for a day.
 logger = logging.getLogger(__name__)
 
 # Import the prompt from the prompts module instead of duplicating it here

@@ -14,14 +14,15 @@ from pydantic import BaseModel
 import logging
 import random
 import math
+import re
 
 # Import database utilities
 from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import shrunk_means
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# No basicConfig: this module is imported by the API server; configuring the
+# root logger at import time overrides the entrypoint's logging setup.
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -135,9 +136,12 @@ async def get_sentiment_distribution(
         entity_ids = []
         
         for pattern in entity_patterns:
-            # Find entities that match this pattern
+            # Whole-word regex match (\m/\M are Postgres word boundaries), NOT
+            # LIKE '%pattern%': the substring form made "us" match Russia,
+            # Australia, Airbus, Elon Musk... polluting the United States
+            # distribution with thousands of unrelated mentions.
             matching_entities = session.query(Entity.id).filter(
-                func.lower(Entity.name).like(f"%{pattern}%")
+                func.lower(Entity.name).op('~')(r'\m' + re.escape(pattern) + r'\M')
             ).all()
             entity_ids.extend([e.id for e in matching_entities])
         
@@ -723,9 +727,12 @@ async def get_available_countries_for_entity(
         entity_ids = []
         
         for pattern in entity_patterns:
-            # Find entities that match this pattern
+            # Whole-word regex match (\m/\M are Postgres word boundaries), NOT
+            # LIKE '%pattern%': the substring form made "us" match Russia,
+            # Australia, Airbus, Elon Musk... polluting the United States
+            # distribution with thousands of unrelated mentions.
             matching_entities = session.query(Entity.id).filter(
-                func.lower(Entity.name).like(f"%{pattern}%")
+                func.lower(Entity.name).op('~')(r'\m' + re.escape(pattern) + r'\M')
             ).all()
             entity_ids.extend([e.id for e in matching_entities])
         

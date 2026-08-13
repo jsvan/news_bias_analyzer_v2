@@ -23,11 +23,8 @@ import importlib.util
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# No basicConfig here: this module is imported as a library, and configuring
+# the root logger at import time silently overrides the entrypoint's config.
 logger = logging.getLogger(__name__)
 
 # Load environment variables

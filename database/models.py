@@ -133,6 +133,7 @@ class NewsArticle(Base):
     analysis_status = Column(String(20), default="unanalyzed")  # unanalyzed, in_progress, completed, failed
     batch_id = Column(String(50), nullable=True)  # OpenAI batch ID if in a batch
     last_analysis_attempt = Column(DateTime, nullable=True)  # When last attempted to analyze
+    analysis_attempts = Column(Integer, nullable=False, default=0, server_default="0")  # Submission count; analyzer stops retrying after 3
     
     # Hotelling T² score for measuring article extremeness
     hotelling_t2_score = Column(Float, nullable=True)  # Statistical extremeness metric
@@ -151,6 +152,31 @@ class NewsArticle(Base):
     
     def __repr__(self):
         return f"<NewsArticle(id='{self.id}', title='{self.title[:30]}...', status='{self.analysis_status}')>"
+
+
+class OpenAIBatch(Base):
+    """Tracks OpenAI Batch API jobs submitted by the analyzer daemon.
+
+    OpenAI's own batch list is authoritative; this table records which batches
+    are ours and which outputs we've already ingested (`collected`). It lives in
+    Postgres because the previous tracking file sat inside the container image
+    and was destroyed on every rebuild, orphaning in-flight batches.
+    """
+    __tablename__ = 'openai_batches'
+
+    batch_id = Column(String(64), primary_key=True)
+    input_file_id = Column(String(64), nullable=True)
+    output_file_id = Column(String(64), nullable=True)
+    status = Column(String(20), nullable=False, default="validating")
+    article_count = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=True)  # pre-submission estimate, feeds the daily spend cap
+    submitted_at = Column(DateTime, default=datetime.now)  # naive local time, like last_analysis_attempt
+    completed_at = Column(DateTime, nullable=True)
+    collected = Column(Boolean, nullable=False, default=False)  # True once outputs are ingested or failure is resolved
+    error = Column(Text, nullable=True)
+
+    def __repr__(self):
+        return f"<OpenAIBatch(batch_id='{self.batch_id}', status='{self.status}', collected={self.collected})>"
 
 
 class Entity(Base):

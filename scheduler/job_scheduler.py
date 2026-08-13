@@ -25,6 +25,7 @@ ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
 
 from database.models import get_db_connection, NewsArticle
+from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
 from clustering.source_similarity import SourceSimilarityComputer
 from clustering.cluster_manager import ClusterManager
@@ -40,13 +41,17 @@ from analyzer.drift_detection import run_drift_detection_job
 LOG_DIR = ROOT_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
+# force=True: the imports above configure the root logger first (module-level
+# basicConfig in drift_detection et al.), which made this call a no-op and left
+# scheduler.log empty since deploy day. Force our handlers in regardless.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(LOG_DIR / "scheduler.log"),
         logging.StreamHandler()
-    ]
+    ],
+    force=True,
 )
 logger = logging.getLogger("scheduler")
 
@@ -114,13 +119,20 @@ def check_analyzer_status():
 def ensure_analyzer_running():
     """Ensure the batch analyzer daemon is running."""
     if not check_analyzer_status():
-        logger.info("Starting batch analyzer daemon")
-        subprocess.Popen(
-            ["python", "-m", "analyzer.batch_analyzer", "--daemon"],
-            cwd=ROOT_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        logger.info("Starting batch analyzer daemon (output -> logs/batch_analysis.log)")
+        # The daemon logs to stderr; capture everything (including uncaught
+        # tracebacks) in a host-mounted file. DEVNULL here once hid a 4-hour
+        # billing-failure loop completely.
+        daemon_log = open(LOG_DIR / "batch_analysis.log", "a")
+        try:
+            subprocess.Popen(
+                ["python", "-m", "analyzer.batch_analyzer", "--daemon"],
+                cwd=ROOT_DIR,
+                stdout=daemon_log,
+                stderr=subprocess.STDOUT
+            )
+        finally:
+            daemon_log.close()  # the child holds its own copy of the fd
     else:
         logger.debug("Batch analyzer daemon is already running")
 
@@ -144,7 +156,9 @@ def ensure_analyzer_if_work():
         pending = session.query(NewsArticle).filter(
             NewsArticle.analysis_status.in_(["unanalyzed", "in_progress"]),
             NewsArticle.text != None,
-            NewsArticle.text != ""
+            NewsArticle.text != "",
+            # Retired articles (3 failed submissions) are not pending work
+            func.coalesce(NewsArticle.analysis_attempts, 0) < 3
         ).count()
         session.close()
     except Exception as e:
@@ -333,12 +347,13 @@ def database_maintenance():
     logger.info("Starting database maintenance")
     
     try:
-        # Vacuum analyze for performance
+        # Vacuum analyze for performance. VACUUM can't run inside a transaction
+        # block, and SQLAlchemy 2.x requires text() for raw SQL - the old
+        # `conn.execute("VACUUM ANALYZE")` form failed silently every day.
         engine = get_db_connection()
-        with engine.connect() as conn:
-            conn.execute("VACUUM ANALYZE")
-            conn.commit()
-        
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text("VACUUM ANALYZE"))
+
         logger.info("Database maintenance completed")
         
     except Exception as e:

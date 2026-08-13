@@ -9,11 +9,8 @@ import json
 import logging
 from typing import List, Dict, Any
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# No basicConfig here: this module is imported as a library, and configuring
+# the root logger at import time silently overrides the entrypoint's config.
 logger = logging.getLogger(__name__)
 
 def get_news_sources() -> List[Dict[str, Any]]:
