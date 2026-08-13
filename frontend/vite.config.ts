@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => {
             vendor: ['react', 'react-dom'],
             ui: ['@mui/material', '@mui/icons-material'],
             charts: ['recharts'],
+            echarts: ['echarts'],
           },
         },
       },
