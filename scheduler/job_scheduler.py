@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
 
-from database.models import get_db_connection
+from database.models import get_db_connection, NewsArticle
 from sqlalchemy.orm import sessionmaker
 from clustering.source_similarity import SourceSimilarityComputer
 from clustering.cluster_manager import ClusterManager
@@ -79,11 +79,15 @@ def run_scraper():
         else:
             logger.error(f"Scraper failed with code {result.returncode}")
             logger.error(f"Error output: {result.stderr}")
-            
+
     except subprocess.TimeoutExpired:
         logger.error("Scraper timed out after 1 hour")
     except Exception as e:
         logger.error(f"Error running scraper: {e}")
+
+    # Kick off the analyzer daemon for the day's batch; it submits async OpenAI
+    # batches, ingests results, runs statistics once, and exits when done.
+    ensure_analyzer_running()
 
 
 def check_analyzer_status():
@@ -119,6 +123,37 @@ def ensure_analyzer_running():
         )
     else:
         logger.debug("Batch analyzer daemon is already running")
+
+
+def ensure_analyzer_if_work():
+    """Self-heal: restart the analyzer daemon only if unfinished analysis work exists.
+
+    The daemon exits on its own once the day's articles are processed (running
+    statistics exactly once). Restarting it unconditionally would re-run those
+    statistics every idle cycle, so only intervene when a crash left work behind.
+    Threshold matches the analyzer's minimum batch size (50) - a smaller tail
+    waits for the next day's scrape rather than churning the daemon hourly.
+    """
+    if check_analyzer_status():
+        return
+
+    try:
+        engine = get_db_connection()
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        pending = session.query(NewsArticle).filter(
+            NewsArticle.analysis_status.in_(["unanalyzed", "in_progress"]),
+            NewsArticle.text != None,
+            NewsArticle.text != ""
+        ).count()
+        session.close()
+    except Exception as e:
+        logger.error(f"Error checking pending analysis work: {e}", exc_info=True)
+        return
+
+    if pending >= 50:
+        logger.info(f"{pending} articles awaiting analysis with no daemon running; restarting it")
+        ensure_analyzer_running()
 
 
 def run_weekly_similarity():
@@ -312,10 +347,13 @@ def database_maintenance():
 
 def setup_schedule():
     """Set up the job schedule."""
-    # Continuous jobs (every N minutes/hours)
-    schedule.every(30).minutes.do(run_scraper)
-    schedule.every(5).minutes.do(ensure_analyzer_running)
-    
+    # Daily scrape (05:00, after the 04:30 backup). run_scraper kicks the
+    # analyzer daemon afterwards; it processes the day's articles via async
+    # OpenAI batches and exits on its own when done.
+    schedule.every().day.at("05:00").do(run_scraper)
+    # Hourly crash recovery only - no-op while the daemon runs or when idle
+    schedule.every().hour.do(ensure_analyzer_if_work)
+
     # Hourly jobs
     schedule.every().hour.do(update_sentiment_statistics)
     
@@ -340,8 +378,8 @@ def setup_schedule():
     schedule.every().sunday.at("02:45").do(run_drift_detection)
 
     logger.info("Schedule configured:")
-    logger.info("- Scraper: every 30 minutes")
-    logger.info("- Analyzer check: every 5 minutes")
+    logger.info("- Scraper: daily at 05:00 (analyzer daemon kicked after each scrape)")
+    logger.info("- Analyzer crash recovery: hourly (only if >=50 articles pending)")
     logger.info("- Sentiment statistics: every hour")
     logger.info("- Entity merge: Sundays at 01:00")
     logger.info("- Entity pruning: Sundays at 01:15")

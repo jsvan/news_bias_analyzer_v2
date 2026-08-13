@@ -42,6 +42,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/news_bias
       OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in deploy/.env}
+      # Cheapest current OpenAI model ($0.05/$0.40 per M, half that via Batch API).
+      # Keep stable across the corpus - model changes shift sentiment scoring.
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
       # Code default is 5 (a dev safeguard); production wants the Mac's 500.
       SCRAPER_LIMIT_PER_FEED: ${SCRAPER_LIMIT_PER_FEED:-500}
     volumes:

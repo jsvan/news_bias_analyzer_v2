@@ -461,6 +461,7 @@ class OpenAIProcessor:
         "gpt-5-nano": (0.05, 0.40),
         "gpt-4.1-nano": (0.10, 0.40),
         "gpt-5.4-nano": (0.20, 1.25),
+        "gpt-5.6-luna": (0.20, 1.20),  # post-2026-07-30 price cut
         "gpt-4": (10.0, 30.0),   # legacy catch-all, deliberately pessimistic
         "gpt-5": (1.25, 10.0),   # non-nano gpt-5 family catch-all
     }
