@@ -22,12 +22,12 @@ import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
 import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
-import { SentimentDistributions, TrendPoint } from '../types';
+import { NewsSource, SentimentDistributions, TrendPoint } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
 
 const EntityProfilePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { entities, availableCountries, getEntityById } = useData();
+  const { entities, sources, availableCountries, getEntityById } = useData();
   const entity = getEntityById(Number(id));
 
   const [selectedTimeRange, setSelectedTimeRange] = useState<number>(ALL_TIME);
@@ -37,14 +37,32 @@ const EntityProfilePage: React.FC = () => {
   const [sourcesTrends, setSourcesTrends] = useState<Record<string, TrendPoint[]>>({});
   const [loading, setLoading] = useState(true);
 
+  // The Distribution card's own comparison pickers: overlay one country and/or
+  // one source against the always-global baseline.
+  const [distCountry, setDistCountry] = useState<string | null>(null);
+  const [distSource, setDistSource] = useState<NewsSource | null>(null);
+
+  useEffect(() => {
+    if (!entity) return;
+    let cancelled = false;
+    entityApi
+      .getEntityDistribution(entity.id, distCountry ?? undefined, distSource?.id, selectedTimeRange)
+      .then((res) => {
+        if (!cancelled) setDistribution(res?.distributions ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDistribution(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity?.id, selectedTimeRange, distCountry, distSource]);
+
   const loadForEntity = useCallback(async (entityId: number, days: number, countries: string[]) => {
     setLoading(true);
     try {
-      const [distributionRes, historicalRes] = await Promise.all([
-        entityApi.getEntityDistribution(entityId, undefined, undefined, days).catch(() => null),
-        statsApi.getHistoricalSentiment(entityId, { days }).catch(() => null),
-      ]);
-      setDistribution(distributionRes?.distributions ?? null);
+      const historicalRes = await statsApi.getHistoricalSentiment(entityId, { days }).catch(() => null);
       setTrends(historicalRes?.daily_data || []);
 
       const params: any = { days };
@@ -147,6 +165,28 @@ const EntityProfilePage: React.FC = () => {
             <Card>
               <CardHeader title="Distribution" subheader="Global, national, and source-level spread" />
               <CardContent>
+                <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
+                  <Grid item xs={12} sm={6}>
+                    <Autocomplete
+                      size="small"
+                      options={availableCountries}
+                      value={distCountry}
+                      onChange={(_, v) => setDistCountry(v)}
+                      renderInput={(params) => <TextField {...params} label="Compare a country" />}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Autocomplete
+                      size="small"
+                      options={sources}
+                      value={distSource}
+                      getOptionLabel={(s) => s.name}
+                      isOptionEqualToValue={(a, b) => a.id === b.id}
+                      onChange={(_, v) => setDistSource(v)}
+                      renderInput={(params) => <TextField {...params} label="Compare a source" />}
+                    />
+                  </Grid>
+                </Grid>
                 {distribution ? (
                   <SentimentDistributionChart distributions={distribution} entityName={entity.name} height={330} />
                 ) : (

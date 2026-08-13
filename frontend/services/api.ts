@@ -20,7 +20,7 @@ if (isGitHubPages() && !isStaticMode()) {
   checkApiAvailability(config.apiBaseUrl).then((available) => {
     apiAvailable = available;
     if (!available) {
-      console.warn('⚠️ API not available - running in offline mode with mock data');
+      console.warn('⚠️ API not available - requests will fail with explicit errors (no mock data exists)');
     }
   });
 }
@@ -29,8 +29,8 @@ if (isGitHubPages() && !isStaticMode()) {
 api.interceptors.request.use(
   (config) => {
     if (isGitHubPages() && !apiAvailable) {
-      // For GitHub Pages without API, we'll handle this in individual methods
-      console.debug('🔌 API unavailable, will use mock data');
+      // For GitHub Pages without API, individual methods throw explicit errors
+      console.debug('🔌 API unavailable');
     }
     return config;
   },
@@ -313,7 +313,7 @@ export const narrativeApi = {
     const response = await api.get('/narrative/contested', { params });
     return response.data;
   },
-  getArchetype: async (entityId: number, params: { weeks?: number } = {}) => {
+  getArchetype: async (entityId: number, params: { weeks?: number; country?: string } = {}) => {
     if (isStaticMode() || isApiUnavailable()) {
       throw new Error('The archetype trajectory requires a live backend and is not available in this demo.');
     }

@@ -8,7 +8,8 @@ import {
   CartesianGrid,
   Tooltip,
   LabelList,
-  Label
+  Label,
+  ReferenceLine
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
@@ -146,6 +147,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             margin={{ top: 20, right: 30, bottom: 30, left: 30 }}
           >
           <CartesianGrid strokeDasharray="3 3" stroke={tokens.border} />
+          {/* The quadrants only mean something relative to neutral - draw the cross. */}
+          <ReferenceLine x={0} stroke={tokens.inkMuted} />
+          <ReferenceLine y={0} stroke={tokens.inkMuted} />
           <XAxis
             type="number"
             dataKey="power_score"
@@ -167,13 +171,28 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             <Label value="Moral Dimension" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </YAxis>
           <Tooltip
-            formatter={(value: number, name: string) => [value.toFixed(2), name]}
-            labelFormatter={(label) => {
-              const item = data.find(d => d.entity === label);
-              return `${item?.entity}`;
-            }}
             cursor={{ strokeDasharray: '3 3' }}
-            contentStyle={{ border: `1px solid ${tokens.border}`, borderRadius: 8 }}
+            content={({ active, payload }) => {
+              // Scatter tooltips get no category label, so the old labelFormatter
+              // never had a name to show - read it off the point payload instead.
+              const p = payload?.[0]?.payload as SentimentDataPoint | undefined;
+              if (!active || !p || !p.entity) return null;
+              return (
+                <Box sx={{ bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 1, px: 1.5, py: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
+                    {p.entity}
+                  </Typography>
+                  <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+                    Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
+                  </Typography>
+                  {p.mention_count != null && (
+                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+                      {p.mention_count.toLocaleString()} mentions
+                    </Typography>
+                  )}
+                </Box>
+              );
+            }}
           />
 
           {/* Render background quadrant labels */}

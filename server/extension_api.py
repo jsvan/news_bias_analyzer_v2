@@ -1191,15 +1191,12 @@ async def get_entity_distribution(
             EntityMention.moral_score.isnot(None)
         )
         
-        # Apply filters
-        if country:
-            query = query.filter(NewsSource.country == country)
-        if source_id:
-            query = query.filter(NewsSource.id == source_id)
-        
-        # Execute query
+        # No filters here: global is always ALL mentions, and national/source are
+        # computed below as true subsets. (Previously a country/source filter was
+        # applied to this base query, which silently turned "global" into the
+        # subset, and "national" was returned as a reference to the same object.)
         mentions = query.all()
-        
+
         if not mentions:
             return {
                 "entity": {
@@ -1210,33 +1207,48 @@ async def get_entity_distribution(
                 "distributions": {},
                 "message": "No sentiment data found for this entity"
             }
-        
-        # Calculate statistics
-        power_scores = [m.power_score for m in mentions]
-        moral_scores = [m.moral_score for m in mentions]
-        
+
         import numpy as np
-        
-        power_mean = np.mean(power_scores)
-        power_std = np.std(power_scores)
-        moral_mean = np.mean(moral_scores)
-        moral_std = np.std(moral_scores)
-        
-        # Generate PDF data points for visualization (simple histogram approach)
-        try:
-            from scipy import stats
-            power_range = np.linspace(min(power_scores) - power_std, max(power_scores) + power_std, 100)
-            moral_range = np.linspace(min(moral_scores) - moral_std, max(moral_scores) + moral_std, 100)
-            power_pdf = stats.norm.pdf(power_range, power_mean, power_std)
-            moral_pdf = stats.norm.pdf(moral_range, moral_mean, moral_std)
-        except ImportError:
-            # Fallback to simple histogram if scipy not available
-            power_range = np.linspace(min(power_scores), max(power_scores), 50)
-            moral_range = np.linspace(min(moral_scores), max(moral_scores), 50)
-            power_pdf = np.histogram(power_scores, bins=50, density=True)[0]
-            moral_pdf = np.histogram(moral_scores, bins=50, density=True)[0]
-        
-        # Format response
+
+        # Empirical density on a fixed grid so every layer shares an x-axis and
+        # curves are directly comparable. Scores live on [-2, 2].
+        GRID = np.linspace(-2.0, 2.0, 121)
+
+        def empirical_pdf(scores):
+            """KDE of the real scores - the actual shape (skew, lumps, multimodality),
+            not an idealized normal drawn from mean/std. Histogram fallback when the
+            sample is too small or degenerate for a bandwidth estimate."""
+            arr = np.asarray(scores, dtype=float)
+            try:
+                from scipy.stats import gaussian_kde
+                if len(arr) >= 5 and np.std(arr) > 1e-9:
+                    return gaussian_kde(arr)(GRID)
+            except ImportError:
+                pass
+            except Exception:
+                pass  # singular matrix etc. - fall through to histogram
+            hist, edges = np.histogram(arr, bins=20, range=(-2.0, 2.0), density=True)
+            centers = (edges[:-1] + edges[1:]) / 2
+            return np.interp(GRID, centers, hist, left=0.0, right=0.0)
+
+        def layer_stats(subset):
+            power = [m.power_score for m in subset]
+            moral = [m.moral_score for m in subset]
+            return {
+                "power": {
+                    "mean": float(np.mean(power)),
+                    "std": float(np.std(power)),
+                    "count": len(subset),
+                    "pdf": {"x": [float(v) for v in GRID], "y": [float(v) for v in empirical_pdf(power)]},
+                },
+                "moral": {
+                    "mean": float(np.mean(moral)),
+                    "std": float(np.std(moral)),
+                    "count": len(subset),
+                    "pdf": {"x": [float(v) for v in GRID], "y": [float(v) for v in empirical_pdf(moral)]},
+                },
+            }
+
         result = {
             "entity": {
                 "id": entity.id,
@@ -1244,31 +1256,22 @@ async def get_entity_distribution(
                 "type": entity.entity_type
             },
             "distributions": {
-                "global": {
-                    "power": {
-                        "mean": float(power_mean),
-                        "std": float(power_std),
-                        "count": len(mentions),
-                        "pdf": {"x": [float(v) for v in power_range], "y": [float(v) for v in power_pdf]}
-                    },
-                    "moral": {
-                        "mean": float(moral_mean),
-                        "std": float(moral_std),
-                        "count": len(mentions),
-                        "pdf": {"x": [float(v) for v in moral_range], "y": [float(v) for v in moral_pdf]}
-                    }
-                }
+                "global": layer_stats(mentions)
             }
         }
-        
-        # Add country-specific distribution if country filter was applied
+
         if country:
-            result["distributions"]["national"] = {
-                "country": country,
-                "power": result["distributions"]["global"]["power"],
-                "moral": result["distributions"]["global"]["moral"]
-            }
-        
+            national = [m for m in mentions if m.country == country]
+            if national:
+                result["distributions"]["national"] = {"country": country, **layer_stats(national)}
+
+        if source_id:
+            source = db.query(NewsSource).filter(NewsSource.id == source_id).first()
+            if source:
+                subset = [m for m in mentions if m.source_name == source.name]
+                if subset:
+                    result["distributions"]["source"] = {"source_name": source.name, **layer_stats(subset)}
+
         return result
         
     except HTTPException:

@@ -438,10 +438,11 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
                 style={{ textAnchor: 'middle', fill: tokens.inkMuted }}
               />
             </YAxis>
+            {/* No allowEscapeViewBox: recharts then clamps the tooltip inside the
+                plot, so points near the right/bottom edge can't push it off-page. */}
             <Tooltip
               content={<CustomTooltip />}
               cursor={{ stroke: tokens.inkMuted, strokeWidth: 1, strokeDasharray: '3 3' }}
-              allowEscapeViewBox={{ x: true, y: true }}
               animationDuration={0}
               animationEasing="linear"
             />

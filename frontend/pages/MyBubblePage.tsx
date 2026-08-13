@@ -10,6 +10,8 @@ import {
   TextField,
   Chip,
   CircularProgress,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import { useData } from '../context/DataContext';
 import { statsApi } from '../services/api';
@@ -61,6 +63,58 @@ const DivergenceGlyph: React.FC<{ sourcePower: number; sourceMoral: number; glob
       <circle cx={g.x} cy={g.y} r={3.5} fill={tokens.inkMuted} />
       <circle cx={s.x} cy={s.y} r={4} fill={archetypeColor(sourcePower, sourceMoral)} stroke={tokens.surface} strokeWidth={1} />
     </svg>
+  );
+};
+
+const WORLD_BASELINE = 'World (all tracked sources)';
+
+interface DivergenceRow {
+  name: string;
+  type: string;
+  bubblePower: number;
+  bubbleMoral: number;
+  basePower: number;
+  baseMoral: number;
+}
+
+// One dumbbell row: baseline dot (gray) and bubble dot (archetype-colored) on a
+// shared -2..+2 track, with the neutral 0 line always drawn.
+const DumbbellRow: React.FC<{ row: DivergenceRow; dimension: 'moral' | 'power' }> = ({ row, dimension }) => {
+  const bubble = dimension === 'moral' ? row.bubbleMoral : row.bubblePower;
+  const base = dimension === 'moral' ? row.baseMoral : row.basePower;
+  const pct = (v: number) => `${((Math.max(-2, Math.min(2, v)) + 2) / 4) * 100}%`;
+  const delta = bubble - base;
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 2, py: 0.75, '&:hover': { bgcolor: tokens.surfaceSunken } }}>
+      <Box sx={{ width: 170, minWidth: 120 }}>
+        <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+          {row.name}
+        </Typography>
+        <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
+          {row.type}
+        </Typography>
+      </Box>
+      <Box sx={{ flex: 1, minWidth: 160 }}>
+        <svg width="100%" height={22}>
+          <line x1="0%" y1={11} x2="100%" y2={11} stroke={tokens.border} strokeWidth={1} />
+          <line x1="50%" y1={2} x2="50%" y2={20} stroke={tokens.ink} strokeWidth={1} opacity={0.45} />
+          <line x1={pct(base)} y1={11} x2={pct(bubble)} y2={11} stroke={tokens.inkMuted} strokeWidth={1.5} strokeDasharray="3 2" />
+          <circle cx={pct(base)} cy={11} r={4.5} fill={tokens.inkMuted} />
+          <circle
+            cx={pct(bubble)}
+            cy={11}
+            r={5.5}
+            fill={archetypeColor(row.bubblePower, row.bubbleMoral)}
+            stroke={tokens.surface}
+            strokeWidth={1.5}
+          />
+        </svg>
+      </Box>
+      <Typography sx={{ ...monoNumber, minWidth: 56, textAlign: 'right', fontWeight: 600, color: tokens.ink }}>
+        {delta >= 0 ? '+' : ''}
+        {delta.toFixed(2)}
+      </Typography>
+    </Box>
   );
 };
 
@@ -151,7 +205,7 @@ const SourceComparisonCard: React.FC<{ source: NewsSource; rows: EntityCompariso
 );
 
 const MyBubblePage: React.FC = () => {
-  const { sources, entities } = useData();
+  const { sources, entities, availableCountries } = useData();
 
   const [selectedNames, setSelectedNames] = useState<string[]>(() => {
     try {
@@ -253,6 +307,76 @@ const MyBubblePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNames.join('|'), entities.length]);
 
+  // ---- Divergence visualization: bubble vs a selectable baseline ----
+  const [baseline, setBaseline] = useState<string>(WORLD_BASELINE);
+  const [dimension, setDimension] = useState<'moral' | 'power'>('moral');
+  const [countryMap, setCountryMap] = useState<Map<string, { power: number; moral: number }> | null>(null);
+
+  useEffect(() => {
+    if (baseline === WORLD_BASELINE) {
+      setCountryMap(null);
+      return;
+    }
+    let cancelled = false;
+    statsApi
+      // The endpoint caps limit at 20; the bubble itself is only top-10 per source.
+      .getCountryTopEntities(baseline, { days: DAYS, limit: 20 })
+      .then((res: any) => {
+        if (cancelled) return;
+        const m = new Map<string, { power: number; moral: number }>();
+        (res?.entities || []).forEach((e: CountryEntityData) =>
+          m.set(e.entity_name.toLowerCase(), { power: e.avg_power_score, moral: e.avg_moral_score })
+        );
+        setCountryMap(m);
+      })
+      .catch(() => {
+        if (!cancelled) setCountryMap(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseline]);
+
+  const { divergenceRows, skippedForBaseline } = useMemo(() => {
+    // Bubble position per entity = average across the selected sources covering it.
+    const acc = new Map<string, { type: string; p: number[]; m: number[]; gp: number; gm: number }>();
+    Object.values(comparisons).forEach((rows) =>
+      rows.forEach((r) => {
+        const cur = acc.get(r.name) ?? { type: r.type, p: [], m: [], gp: r.globalPower, gm: r.globalMoral };
+        cur.p.push(r.sourcePower);
+        cur.m.push(r.sourceMoral);
+        acc.set(r.name, cur);
+      })
+    );
+    const rows: DivergenceRow[] = [];
+    let skipped = 0;
+    acc.forEach((v, name) => {
+      let basePower = v.gp;
+      let baseMoral = v.gm;
+      if (countryMap) {
+        const c = countryMap.get(name.toLowerCase());
+        if (!c) {
+          skipped += 1; // baseline country has no scored coverage of this entity
+          return;
+        }
+        basePower = c.power;
+        baseMoral = c.moral;
+      }
+      rows.push({
+        name,
+        type: v.type,
+        bubblePower: v.p.reduce((a, b) => a + b, 0) / v.p.length,
+        bubbleMoral: v.m.reduce((a, b) => a + b, 0) / v.m.length,
+        basePower,
+        baseMoral,
+      });
+    });
+    const key = (r: DivergenceRow) =>
+      dimension === 'moral' ? Math.abs(r.bubbleMoral - r.baseMoral) : Math.abs(r.bubblePower - r.basePower);
+    rows.sort((a, b) => key(b) - key(a));
+    return { divergenceRows: rows.slice(0, 12), skippedForBaseline: skipped };
+  }, [comparisons, countryMap, dimension]);
+
   const picker = (
     <Autocomplete
       multiple
@@ -321,6 +445,73 @@ const MyBubblePage: React.FC = () => {
         </Box>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <Card>
+            <CardHeader
+              title="Where your bubble diverges most"
+              subheader="Entities ranked by the gap between your sources' average portrayal and the baseline. The colored dot is your bubble; the gray dot is the baseline."
+              action={
+                <ToggleButtonGroup
+                  size="small"
+                  value={dimension}
+                  exclusive
+                  onChange={(_, v) => v && setDimension(v)}
+                  sx={{ mt: 1, mr: 1 }}
+                >
+                  <ToggleButton value="moral">Moral</ToggleButton>
+                  <ToggleButton value="power">Power</ToggleButton>
+                </ToggleButtonGroup>
+              }
+            />
+            <CardContent sx={{ pt: 0 }}>
+              <Autocomplete
+                size="small"
+                options={[WORLD_BASELINE, ...availableCountries]}
+                value={baseline}
+                disableClearable
+                onChange={(_, v) => setBaseline(v)}
+                renderInput={(params) => <TextField {...params} label="Baseline" />}
+                sx={{ maxWidth: 340, mb: 1 }}
+              />
+              {divergenceRows.length === 0 ? (
+                <Typography variant="body2" sx={{ color: tokens.inkMuted, py: 2 }}>
+                  {countryMap
+                    ? `No overlap between your sources' top entities and ${baseline}'s scored coverage.`
+                    : 'No divergence signal yet — check back once more coverage has been analyzed.'}
+                </Typography>
+              ) : (
+                <>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      px: 2,
+                      color: tokens.inkMuted,
+                      fontFamily: '"IBM Plex Mono", monospace',
+                      fontSize: 10,
+                    }}
+                  >
+                    <span style={{ width: 170, minWidth: 120 }} />
+                    <Box sx={{ flex: 1, display: 'flex', justifyContent: 'space-between', minWidth: 160 }}>
+                      <span>-2</span>
+                      <span>0 = neutral</span>
+                      <span>+2</span>
+                    </Box>
+                    <span style={{ minWidth: 56, textAlign: 'right' }}>Δ</span>
+                  </Box>
+                  {divergenceRows.map((row) => (
+                    <DumbbellRow key={row.name} row={row} dimension={dimension} />
+                  ))}
+                  {skippedForBaseline > 0 && (
+                    <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.inkMuted }}>
+                      {skippedForBaseline} of your bubble's entities have no scored coverage from {baseline} and are
+                      not shown.
+                    </Typography>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
           {selectedSources.map((source) => (
             <SourceComparisonCard key={source.id} source={source} rows={comparisons[source.name] || []} />
           ))}

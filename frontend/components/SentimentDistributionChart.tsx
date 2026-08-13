@@ -271,6 +271,14 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           />
           <Legend wrapperStyle={{ fontSize: 12, color: tokens.inkMuted }} />
 
+          {/* Neutral is the anchor of the whole scale - always visible. */}
+          <ReferenceLine
+            x={0}
+            stroke={tokens.ink}
+            strokeWidth={1.25}
+            label={{ value: 'neutral', position: 'insideTopLeft', fill: tokens.inkMuted, fontSize: 11 }}
+          />
+
           {/* Reference lines for means */}
           {visible.global && means.global !== undefined && (
             <ReferenceLine

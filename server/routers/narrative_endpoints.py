@@ -141,10 +141,13 @@ class ArchetypeResponse(BaseModel):
 async def get_entity_archetype(
     entity_id: int,
     weeks: int = Query(12, ge=3, le=52),
+    country: Optional[str] = Query(None, description="restrict to sources from this country"),
     session: Session = Depends(get_session),
 ):
     """Hero/villain/victim/nuisance quadrant + weekly trajectory for one entity,
-    aggregated globally across sources (analyzer/narrative_metrics.py::archetype/trajectory).
+    aggregated globally across sources (analyzer/narrative_metrics.py::archetype/trajectory),
+    or across one country's sources when `country` is given (the frontend overlays
+    country paths against the global one on the archetype quadrant).
     """
     entity = session.query(Entity).filter(Entity.id == entity_id).first()
     if not entity:
@@ -154,12 +157,19 @@ async def get_entity_archetype(
     canonical_id = entity.canonical_id or entity.id
     cutoff = (most_recent_activity(session) - timedelta(weeks=weeks)).date()
 
-    rows = session.execute(text("""
+    country_clause = ""
+    params = {"entity_id": canonical_id, "cutoff": cutoff}
+    if country:
+        country_clause = ("AND source_id IN "
+                          "(SELECT id FROM news_sources WHERE country = :country)")
+        params["country"] = country
+
+    rows = session.execute(text(f"""
         SELECT week_start, AVG(mean_power) AS power, AVG(mean_moral) AS moral
         FROM mv_source_entity_week
-        WHERE entity_id = :entity_id AND week_start >= :cutoff
+        WHERE entity_id = :entity_id AND week_start >= :cutoff {country_clause}
         GROUP BY week_start ORDER BY week_start
-    """), {"entity_id": canonical_id, "cutoff": cutoff}).fetchall()
+    """), params).fetchall()
 
     points = [(i, float(r.power), float(r.moral)) for i, r in enumerate(rows)
               if r.power is not None and r.moral is not None]
