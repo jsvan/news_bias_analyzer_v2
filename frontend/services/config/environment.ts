@@ -25,7 +25,9 @@ function getEnvironmentConfig(): EnvironmentConfig {
     apiBaseUrl,
     deploymentContext: onGitHubPages ? 'github-pages' : isDev ? 'local' : 'hosted',
     api: {
-      timeout: isDev ? 10000 : 20000,
+      // The SVD source map takes ~10s cold on the home server; 10s here made
+      // dev renders a coin flip against it.
+      timeout: isDev ? 30000 : 20000,
       retryAttempts: 3,
     },
   };

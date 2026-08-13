@@ -56,7 +56,12 @@ const SourceMapPanel: React.FC = () => {
   useEffect(() => {
     narrativeApi
       .getSourceMap({ weeks: 12 })
-      .then((d: SourceMapResponse) => setData(d))
+      .then((d: SourceMapResponse) => {
+        setData(d);
+        // Dev StrictMode double-mounts: a timed-out first fetch must not leave
+        // its error banner sitting above the chart the second fetch delivered.
+        setError(null);
+      })
       .catch((err) => setError((err as Error).message));
   }, []);
 
