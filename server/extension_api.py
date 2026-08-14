@@ -322,13 +322,30 @@ def get_entities(
         func.coalesce(mention_counts.c.mention_count, 0).desc(),
         Entity.name
     ).limit(limit).all()
-    
+
+    # Alias names merged into each canonical entity, so static-mode search
+    # (client-side over this list) can match variant spellings too. Alias rows
+    # that just repeat the canonical name (a merged loser the canonical was
+    # later renamed to match) add nothing for search - drop them.
+    canonical_names = {e.id: e.name.lower() for e in entities}
+    aliases_by_canonical = {}
+    if entities:
+        alias_rows = db.query(Entity.canonical_id, Entity.name).filter(
+            Entity.canonical_id.in_([e.id for e in entities]))
+        for canonical_id, alias_name in alias_rows:
+            if alias_name.lower() == canonical_names.get(canonical_id):
+                continue
+            bucket = aliases_by_canonical.setdefault(canonical_id, set())
+            bucket.add(alias_name)
+
     return [
         {
             "id": entity.id,
             "name": entity.name,
             "type": entity.entity_type,
-            "mention_count": entity.mention_count or 0
+            "mention_count": entity.mention_count or 0,
+            **({"aliases": sorted(aliases_by_canonical[entity.id])}
+               if entity.id in aliases_by_canonical else {})
         }
         for entity in entities
     ]

@@ -53,6 +53,21 @@ function load(relPath: string): Promise<any> {
 
 const entityBundle = (id: number) => load(`entity/${id}.json`);
 
+// Search matches the canonical name OR any merged alias spelling
+// (entities.json carries `aliases` for merged groups — e.g. "Zelenskyy"
+// finds "Volodymyr Zelensky"), mirroring the live API's tiered search.
+// Accent-insensitive so "erdogan" finds "Recep Tayyip Erdoğan" and "jose"
+// finds "José Mourinho" — canonical names carry curated diacritics that
+// nobody types into a search box.
+const fold = (s: string) =>
+  s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+function entityMatches(e: any, q: string): boolean {
+  const needle = fold(q);
+  if (fold(e.name).includes(needle)) return true;
+  return (e.aliases ?? []).some((a: string) => fold(a).includes(needle));
+}
+
 // ---- Window slicing (snapshot format 2) ------------------------------------
 // The base response's daily rows are date-stamped (YYYY-MM-DD, so string
 // comparison is chronological); a shorter window is just the rows on or after
@@ -122,7 +137,7 @@ export const staticData = {
     if (params.entity_type) result = result.filter((e: any) => e.type === params.entity_type);
     if (params.search) {
       const q = String(params.search).toLowerCase();
-      result = result.filter((e: any) => e.name.toLowerCase().includes(q));
+      result = result.filter((e: any) => entityMatches(e, q));
     }
     return result.slice(0, params.limit ?? 100);
   },
@@ -131,7 +146,7 @@ export const staticData = {
     const q = query.toLowerCase();
     const entities = await load('entities.json');
     return entities
-      .filter((e: any) => e.name.toLowerCase().includes(q))
+      .filter((e: any) => entityMatches(e, q))
       .slice(0, limit);
   },
 

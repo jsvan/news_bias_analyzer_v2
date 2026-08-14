@@ -23,6 +23,36 @@ from database.config import EntityPruningConfig
 
 logger = logging.getLogger(__name__)
 
+def add_pruning_metadata_column(session: Session):
+    """Add pruning_metadata column to entities table if it doesn't exist.
+
+    The pruning query and repositories.py both read e.pruning_metadata->>'preserve',
+    but no migration ever created the column - every pruning run since deploy died
+    with UndefinedColumn (silently: the job-level try/except just logged it)."""
+    try:
+        result = session.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'entities' AND column_name = 'pruning_metadata'
+        """)).fetchone()
+
+        if not result:
+            logger.info("Adding pruning_metadata column to entities table...")
+            session.execute(text("""
+                ALTER TABLE entities
+                ADD COLUMN pruning_metadata JSONB
+            """))
+            session.commit()
+            logger.info("Successfully added pruning_metadata column")
+        else:
+            logger.debug("pruning_metadata column already exists")
+
+    except Exception as e:
+        logger.error(f"Error adding pruning_metadata column: {e}")
+        session.rollback()
+        raise
+
+
 def add_last_updated_column(session: Session):
     """Add last_updated column to entities table if it doesn't exist."""
     try:
@@ -121,6 +151,7 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
     try:
         # First ensure we have the last_updated column and trigger
         add_last_updated_column(session)
+        add_pruning_metadata_column(session)
         update_entity_last_updated_trigger(session)
 
         # Find entities to prune

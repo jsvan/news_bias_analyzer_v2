@@ -299,6 +299,7 @@ ALIASES = {
     "kamala devi harris": "Kamala Harris",
     "vladimir vladimirovich putin": "Vladimir Putin",
     "volodymyr zelenskyy": "Volodymyr Zelensky",
+    "wolodymyr zelenskyy": "Volodymyr Zelensky",  # German transliteration
     "volodymyr zelenskiy": "Volodymyr Zelensky",
     "volodymyr zelenskyi": "Volodymyr Zelensky",
     "vladimir zelensky": "Volodymyr Zelensky",
@@ -384,6 +385,7 @@ ALIASES = {
     "anthony s. fauci": "Anthony Fauci",
     "stephen k. bannon": "Steve Bannon",
     "stephen kevin bannon": "Steve Bannon",
+    "mark elliot zuckerberg": "Mark Zuckerberg",
     "kevin h. warsh": "Kevin Warsh",
     "kevin m. warsh": "Kevin Warsh",
     "jerome h. powell": "Jerome Powell",
@@ -553,16 +555,18 @@ def merge_key(name: str, entity_type: str = "") -> str:
     return normalize_name(name, entity_type).lower()
 
 
-def propose_merges(entities, fuzzy_threshold: float = 0.85):
+def propose_merges(entities, fuzzy_threshold: float = 0.85, compute_fuzzy: bool = True):
     """Propose canonical_id merges over [(id, name, entity_type, mention_count)].
 
     Exact merge-key collisions merge automatically toward the most-mentioned
     member; near-misses above fuzzy_threshold (SequenceMatcher on merge keys)
-    are returned separately for review, never auto-merged.
+    are returned separately for review, never auto-merged. The fuzzy pass is
+    minutes of CPU at ~40k entities — pass compute_fuzzy=False to skip it when
+    only the exact tier will be used (run_merge_job does).
 
     Returns (auto, review):
       auto:   [(loser_id, canonical_id, reason)]
-      review: [(id_a, id_b, similarity)]
+      review: [(id_a, id_b, similarity)] — empty when compute_fuzzy=False
     """
     normalized = [(eid, merge_key(name, etype), count)
                   for eid, name, etype, count in entities]
@@ -581,6 +585,8 @@ def propose_merges(entities, fuzzy_threshold: float = 0.85):
 
     # Fuzzy pass over group representatives only (keeps it near-linear in practice).
     review = []
+    if not compute_fuzzy:
+        return auto, review
     reps = [(members[0][0], key) for key, members in groups.items()
             if (members.sort(key=lambda t: -t[1]) or True)]
     reps.sort(key=lambda t: t[1])
@@ -595,16 +601,25 @@ def propose_merges(entities, fuzzy_threshold: float = 0.85):
     return auto, review
 
 
-def run_merge_job(session, fuzzy_threshold: float = 0.85) -> int:
-    """DB wiring for Layer 1: auto-merge canonical entities with colliding merge keys.
+def run_merge_job(session, fuzzy_threshold: float = 0.85):
+    """DB wiring for Layer 1: auto-merge canonical entities with colliding merge keys,
+    then rename every canonical row to its curated/normalized display form.
 
     Only the exact-match tier of propose_merges() is applied — the fuzzy "review" band is
     deliberately left alone (no human review queue exists; the conservative default is to
     leave near-misses as separate entities rather than risk a bad automatic merge).
-    Non-destructive: sets canonical_id, never deletes or rewrites a row. Intended to run
-    weekly via scheduler/job_scheduler.py.
+    Merges are pointer-based (sets canonical_id, never deletes a row).
 
-    Returns the number of entities merged.
+    The rename pass exists because merging keeps the most-mentioned row as canonical,
+    and that row's raw name often isn't the curated display name ("Apple Inc" vs
+    "Apple", "Jose Mourinho" vs "José Mourinho", stray "People:" prefixes). Renaming
+    to normalize_name() makes the frontend show the curated names AND makes ingest
+    dedup (repositories.find_by_normalized_name, a lower(name) lookup) actually hit
+    the canonical row for future mentions. Two canonical rows can't share a merge key
+    (they'd have just been merged), so renames can't collide within a run. Intended
+    to run weekly via scheduler/job_scheduler.py.
+
+    Returns (entities merged, canonical rows renamed).
     """
     from sqlalchemy import text
 
@@ -617,15 +632,46 @@ def run_merge_job(session, fuzzy_threshold: float = 0.85) -> int:
     """)).fetchall()
 
     entities = [(row.id, row.name, row.entity_type, row.mention_count) for row in candidates]
-    auto, _review = propose_merges(entities, fuzzy_threshold=fuzzy_threshold)
+    # The fuzzy review band is never applied here, so don't spend minutes computing it.
+    auto, _review = propose_merges(entities, fuzzy_threshold=fuzzy_threshold,
+                                   compute_fuzzy=False)
 
+    losers = set()
     for loser_id, canonical_id, _reason in auto:
+        losers.add(loser_id)
         session.execute(
             text("UPDATE entities SET canonical_id = :canonical_id WHERE id = :loser_id"),
             {"canonical_id": canonical_id, "loser_id": loser_id}
         )
+
+    renamed = 0
+    for eid, name, etype, _count in entities:
+        if eid in losers:
+            continue
+        display = normalize_name(name, etype or "")
+        if display and display != name:
+            session.execute(
+                text("UPDATE entities SET name = :name WHERE id = :id"),
+                {"name": display, "id": eid}
+            )
+            # Keep the replaced spelling findable: park it as a zero-mention
+            # alias row unless some row already carries that name. Search
+            # matches alias names ("UNITA" must still find the renamed
+            # "National Union for the Total Independence of Angola (UNITA)"),
+            # and every query aggregates by merge group, so an empty alias row
+            # is inert everywhere else.
+            exists = session.execute(
+                text("SELECT 1 FROM entities WHERE lower(name) = lower(:n) LIMIT 1"),
+                {"n": name}).first()
+            if not exists:
+                session.execute(
+                    text("INSERT INTO entities (name, entity_type, canonical_id, created_at) "
+                         "VALUES (:n, :t, :c, NOW())"),
+                    {"n": name, "t": etype, "c": eid})
+            renamed += 1
+
     session.commit()
-    return len(auto)
+    return len(auto), renamed
 
 
 def known_entity_shortlist(article_text: str, known_entities, limit: int = 30):

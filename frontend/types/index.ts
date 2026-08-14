@@ -4,6 +4,9 @@ export interface Entity {
   name: string;
   type: EntityType;
   mention_count?: number;
+  // Variant names merged into this canonical entity (Entity.canonical_id on the
+  // server) - present only for merged groups; search matches against these too.
+  aliases?: string[];
   first_seen?: string;
   last_seen?: string;
   avg_power_score?: number;

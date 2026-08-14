@@ -217,8 +217,9 @@ def run(dry_run: bool):
 
         # Same-name rows that now share a type may be new merge candidates.
         from analyzer.entity_resolution import run_merge_job
-        merged = run_merge_job(session)
-        logger.info(f"entity_resolution.run_merge_job: {merged} new canonical merges")
+        merged, renamed = run_merge_job(session)
+        logger.info(f"entity_resolution.run_merge_job: {merged} new canonical merges, "
+                    f"{renamed} canonical names normalized")
     finally:
         session.close()
 
