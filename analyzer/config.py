@@ -11,6 +11,11 @@ DEFAULT_CONFIG = {
     "openai": {
         "default_model": "gpt-5-nano",
         "fallback_model": "gpt-5-nano",
+        # For gpt-5-family reasoning models. "minimal" fits this deterministic
+        # schema-constrained extraction (and matches the non-reasoning
+        # gpt-4.1-nano the July corpus ran on); the model-default "medium"
+        # bills ~25x the visible answer in hidden reasoning tokens.
+        "reasoning_effort": "minimal",
         "max_tokens": 4000,
         "temperature": 0.1,
         "batch_size": 5,
@@ -111,6 +116,10 @@ class ProcessorConfig:
         # OpenAI model
         if os.getenv("OPENAI_MODEL"):
             self.config["openai"]["default_model"] = os.getenv("OPENAI_MODEL")
+
+        # Reasoning effort (gpt-5-family models)
+        if os.getenv("OPENAI_REASONING_EFFORT"):
+            self.config["openai"]["reasoning_effort"] = os.getenv("OPENAI_REASONING_EFFORT")
         
         # Database URL
         if os.getenv("DATABASE_URL"):

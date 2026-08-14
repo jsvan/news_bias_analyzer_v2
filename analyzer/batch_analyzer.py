@@ -188,16 +188,30 @@ def _reset_creation_backoff():
     _creation_backoff["failures"] = 0
     _creation_backoff["until"] = 0.0
 
+# Billed output tokens per article by reasoning effort, measured on this
+# corpus: ~314 visible tokens/article (July gpt-4.1-nano run, zero reasoning)
+# vs ~7-8k total at gpt-5-nano's default "medium" (the 2026-08-14 $10 bill).
+# Rounded up - the daily-limit guard should overestimate, never under.
+OUTPUT_TOKENS_PER_ARTICLE_BY_EFFORT = {
+    "none": 600, "minimal": 600, "low": 2500, "medium": 8000,
+    "high": 16000, "xhigh": 24000, "max": 32000,
+}
+
 def estimate_batch_cost_usd(input_bytes: int, n_articles: int, model: str) -> float:
-    """Pre-submission cost estimate: bytes/4 ≈ input tokens, ~1000 output tokens
-    per article, Batch API halves standard-tier prices."""
+    """Pre-submission cost estimate: bytes/4 ≈ input tokens; output per article
+    scales with reasoning effort for gpt-5-family models (flat ~1000 for older
+    non-reasoning models). Batch API halves standard-tier prices."""
     for prefix, (in_price, out_price) in OpenAIProcessor.PRICES_PER_1M.items():
         if model.startswith(prefix):
             break
     else:
         in_price, out_price = 1.25, 10.0  # unknown model: assume mid-tier
     input_tokens = input_bytes / 4
-    output_tokens = n_articles * 1000
+    per_article_out = 1000
+    if model.startswith("gpt-5"):
+        effort = sampling_params(model, 0.0, 0).get("reasoning_effort", "medium")
+        per_article_out = OUTPUT_TOKENS_PER_ARTICLE_BY_EFFORT.get(effort, 8000)
+    output_tokens = n_articles * per_article_out
     return 0.5 * (input_tokens * in_price + output_tokens * out_price) / 1_000_000
 
 def today_estimated_spend(session: Session) -> float:
@@ -288,8 +302,12 @@ def prepare_batch_input(articles: List[NewsArticle], model: str,
                 },
             },
         }
-        if "temperature" in sampling_params(model, 0.2, 0):
-            body["temperature"] = 0.2
+        # max_tokens is deliberately not sent in batch mode (pre-existing
+        # behavior); reasoning_effort is the knob that keeps gpt-5-family
+        # output spend sane - without it nano defaults to "medium" reasoning.
+        params = sampling_params(model, 0.2, 0)
+        params.pop("max_tokens", None)
+        body.update(params)
         batch_line = {
             "custom_id": custom_id,
             "method": "POST",

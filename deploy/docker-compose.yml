@@ -45,6 +45,11 @@ services:
       # Cheapest current OpenAI model ($0.05/$0.40 per M, half that via Batch API).
       # Keep stable across the corpus - model changes shift sentiment scoring.
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
+      # Reasoning effort for gpt-5-family models. Left unset they default to
+      # "medium" and bill ~7-8k hidden reasoning tokens per article (~25x the
+      # visible answer - the 2026-08-14 $10 surprise). "minimal" fits this
+      # strict-schema extraction; raise to "low"/"medium" only deliberately.
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-minimal}
       # Hard daily ceiling (USD) on estimated OpenAI spend - the analyzer
       # refuses new batch submissions past it (analyzer/config.py cost_limits).
       OPENAI_DAILY_LIMIT: ${OPENAI_DAILY_LIMIT:-50}

@@ -31,6 +31,7 @@ from openai.types.chat import ChatCompletion
 logger = logging.getLogger(__name__)
 
 # Import the prompt from the prompts module instead of duplicating it here
+from analyzer.config import get_config
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT, ENTITY_SENTIMENT_SCHEMA
 
 # Default system prompt for entity and sentiment extraction
@@ -48,16 +49,36 @@ ENTITY_SENTIMENT_RESPONSE_FORMAT = {
 }
 
 
+def normalized_reasoning_effort(model: str, effort: str) -> str:
+    """Map the configured effort onto what this model family accepts.
+
+    The original gpt-5 family (gpt-5, gpt-5-mini, gpt-5-nano) takes
+    minimal|low|medium|high; the versioned gpt-5.x models (5.4, 5.6, ...)
+    dropped "minimal" in favor of "none" (developers.openai.com model pages,
+    checked 2026-08-14). Sending the wrong spelling is a 400 on every batch
+    line, so translate rather than trust the config value blindly.
+    """
+    versioned = model.startswith("gpt-5.")
+    if versioned and effort == "minimal":
+        return "none"
+    if not versioned and effort == "none":
+        return "minimal"
+    return effort
+
+
 def sampling_params(model: str, temperature: float, max_tokens: int) -> dict:
     """Sampling kwargs the given model actually accepts.
 
     gpt-5-family reasoning models reject BOTH temperature and max_tokens
     (verified against the live API 2026-07-18 during the gpt-5-nano pilot);
-    they run uncapped with their own default sampling. Older chat models keep
-    the explicit knobs.
+    for them the knob that matters is reasoning_effort - left unset they
+    default to "medium" and bill several thousand hidden reasoning tokens
+    per article, ~25x the visible answer (the 2026-08-14 bill surprise).
+    Older chat models keep the explicit knobs.
     """
     if model.startswith("gpt-5"):
-        return {}
+        effort = str(get_config().get("openai.reasoning_effort", "minimal"))
+        return {"reasoning_effort": normalized_reasoning_effort(model, effort)}
     return {"temperature": temperature, "max_tokens": max_tokens}
 
 
