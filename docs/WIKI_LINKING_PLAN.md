@@ -125,10 +125,20 @@ merge-key tier:
    pairs (e.g. a sloppy "Trump administration" → *Donald Trump* page link would
    otherwise merge an organization into a person) are written to a review report
    (`logs/wiki_merge_review.log`) instead of merged.
-3. Everything unlinked falls through to the existing exact merge-key tier,
+3. **Guardrail — co-mention veto.** Two labels for the same real thing almost
+   never appear as two separately-scored entities in one article; associates do,
+   constantly. Measured on this corpus (2026-08-14): of 1,695 known-good alias
+   pairs, only 7 have *any* co-mention articles (max 3), while Trump + White
+   House — the archetypal must-not-merge associate pair — co-occur as separate
+   scored entities in **132** articles. Veto any auto-merge (page-id or
+   name-key) where the pair shares **≥ 5 co-mention articles**; vetoed pairs go
+   to the review report. This is the data's own testimony that a pair is two
+   things, and it independently protects against wrong LLM links that pass the
+   type-class check.
+4. Everything unlinked falls through to the existing exact merge-key tier,
    unchanged. Merges stay pointer-based and reversible; the display-name rename
    pass is unchanged.
-4. **Disagreement report** — page ids as *negative* evidence too: members of a
+5. **Disagreement report** — page ids as *negative* evidence too: members of a
    name-merged group that carry *different* validated page ids are strong
    evidence of a wrong merge. Log them to the same review report; this lets
    wiki-linking audit the existing alias table, not just extend it.
@@ -168,6 +178,29 @@ protect against that). One-time job, roughly an hour of polite API calls, $0.
   Wikipedia; the same API returns the Wikidata QID, which opens relationship-aware
   views (e.g. a "Meta including its leadership" rollup via P169/P488 — as an
   additive query-time grouping, never a merge).
+
+## Duplicate suggesters (suggest-only, feed the review log)
+
+Auto-merge is reserved for exact keys and guarded page ids. Everything below
+only *proposes* — output goes to the review report for the weekly curation
+pass, never straight to `canonical_id`:
+
+- **Name-embedding kNN** (proven 2026-08-14: surfaced 11 real duplicates the
+  SequenceMatcher band could never see — "Dick Durbin"/"Richard J. Durbin" is
+  string-far but embedding-close — for $0.0001). Replaces the fuzzy
+  SequenceMatcher band as the string-side suggester.
+- **Behavioral twins × zero co-mention.** The Phase-4 `entity_embeddings`
+  table (co-occurrence + sentiment-profile vectors, rebuilt weekly) already
+  fingerprints how each entity behaves. Near-identical behavior + co-mention
+  ≈ 0 is the signature of an uncurated rename — the "X/Twitter" case, which
+  name embeddings place at 0.257 and wiki only catches once redirects update.
+  A numpy pass over data we already compute; no training, no new
+  infrastructure. (Training a custom embedding space was considered and
+  rejected: the learnable patterns are what normalization already handles, and
+  the residual — arbitrary renames — is memorization, which the ALIASES dict
+  and wiki redirects already do exactly.)
+- **Page-id disagreement** within name-merged groups (Phase 3, item 5) — the
+  wrong-merge auditor.
 
 ## Rollout
 
