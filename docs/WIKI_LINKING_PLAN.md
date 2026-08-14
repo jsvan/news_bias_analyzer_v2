@@ -88,11 +88,16 @@ everything → Phases 1–4 link and backfill → skip turns on.
 2. `analyzer/batch_analyzer.py::process_batch_output`: when the flag is on, append
    `(entity_id, entity_name, emitted_title)` rows to
    `batches/wiki_pilot.jsonl`. **No DB changes in this phase.**
-3. Run one day's batch with the flag on (3,600–7,000 articles ≈ well under a
-   dollar at the measured rate). The same pilot day also turns on
-   `KNOWN_ENTITY_INJECTION` — its long-pending validation — so one day's batch
-   validates both flags against the previous day's output on every metric at
-   once.
+3. Run the pilot as **two separate days** (each 3,600–7,000 articles ≈ well
+   under a dollar): **Day 1 — `WIKI_TITLE_LINKING` alone**, so every wiki gate
+   is measured against today's baseline extraction behavior. **Day 2 — add
+   `KNOWN_ENTITY_INJECTION`** (its long-pending validation). Bundling them
+   would confound attribution: injection changes *which entity names get
+   extracted*, which is the population the wiki gates are measured over.
+   Injection gets its own gates, diffed Day 2 vs Day 1: share of extractions
+   matching existing canonical names rises; new-entity mint rate falls;
+   entities-per-article holds roughly steady (injection must not suppress
+   genuinely novel entities).
 4. Validation script (`analyzer/tools/validate_wiki_titles.py`, offline): resolve
    every distinct emitted title via the Wikipedia API
    (`action=query&redirects=1&format=json`, 50 titles per request, results cached)
@@ -102,7 +107,14 @@ everything → Phases 1–4 link and backfill → skip turns on.
 
 **Go/no-go metrics:**
 
-- Emission: ≥ ~90% of extracted entities carry a non-null title (else tune prompt).
+- Emission, **segmented** (a blanket rate measures corpus composition as much
+  as model capability): for entities we already track with ≥5 mentions, ≥ ~90%
+  carry a non-null title — this segment is the pass/fail. For never-seen
+  entities the rate is informational only: local figures, small companies, and
+  entities that became notable after the model's training cutoff legitimately
+  have no page, and a correct `null` there is the model doing its job.
+  Breaking-news entities are a structural blind spot; fall-through to the name
+  machinery is the designed handling.
 - Validation: ≥ ~85% of emitted titles resolve to a real page.
 - Consistency: among entity pairs the *current* name machinery already merges,
   ≥ 95% share a page id (sanity check on both systems).
@@ -146,6 +158,13 @@ makes identity a pure function of the tally — same evidence, same outcome,
 regardless of article arrival order — where first-write-wins lets one bad early
 emission permanently fuse two entities' sentiment histories. Delta-only,
 batched, cached — expected volume tens of lookups per day.
+
+**Cache staleness:** `checked_at` gets a policy, not just a column — the job
+also re-validates a rolling handful of entries older than 90 days (a few dozen
+per day, still $0). Page *ids* survive renames (when Twitter became X the page
+id held; the redirects moved), so keyed identity is drift-resistant — the
+re-check covers what does move: retargeted redirects for new emissions, and
+rare page merges/splits/deletions.
 
 ## Phase 3 — Merge on page identity
 
@@ -249,4 +268,9 @@ One gate does not retire at go-live: all votes come from the same model with the
 same biases, so a confident majority can still be confidently wrong (same-type
 collisions — two people sharing a name — pass every automated guardrail). The
 novel-merge audit therefore continues as a **weekly hand spot-check for the
-first month** of Phase 3, via the review report.
+first month** of Phase 3, via the review report. The audit samples with
+priority, not at random — the subtlest failure is a plausible wrong title that
+*validates* (a real page for the wrong same-type entity), and it hides in a
+specific place: **same-type-class page-id merges the name machinery would not
+have made** (low name similarity — wiki's novel claims, at once the
+highest-value and highest-risk merges), ordered lowest vote count first.
