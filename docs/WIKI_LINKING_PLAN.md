@@ -195,7 +195,10 @@ mechanism.)*
 ## Phase 2 — Validation job (offline, free)
 
 New scheduler step after the daily pipeline (`scheduler/job_scheduler.py`):
-resolve uncached raw titles via the API, then assign
+resolve uncached raw titles via the API (**excluding the `'<null>'` sentinel**
+— it's a tally key, not a title; unexcluded it would be sent to Wikipedia as a
+literal title once and sit in `wiki_title_cache` as a permanent oddity), then
+assign
 `entities.wikipedia_page_id` where votes are decisive: **≥ 2 votes for one
 page id AND that page id holds > 60% of ALL votes — nulls included in the
 denominator** (or the relaxed first-validated rule, per the Phase 0
