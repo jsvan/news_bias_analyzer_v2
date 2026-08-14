@@ -73,7 +73,9 @@ pipeline's critical path.
 4. Validation script (`analyzer/tools/validate_wiki_titles.py`, offline): resolve
    every distinct emitted title via the Wikipedia API
    (`action=query&redirects=1&format=json`, 50 titles per request, results cached)
-   → canonical title + page id.
+   → canonical title + page id. **Reject any page whose `pageprops` marks it a
+   disambiguation page** (same API call returns this for free) — a title that
+   resolves to a disambiguation page is not an identity.
 
 **Go/no-go metrics:**
 
@@ -117,12 +119,19 @@ merge-key tier:
 1. Group canonical entities by `wikipedia_page_id` (strongest evidence).
 2. **Guardrail — type-class compatibility** required for auto-merge on page id:
    person↔person, business/organization↔business/organization, country↔country.
-   Incompatible pairs (e.g. a sloppy "Trump administration" → *Donald Trump* page
-   link would otherwise merge an organization into a person) are written to a
-   review report (`logs/wiki_merge_review.log`) instead of merged.
+   **`concept` and `event` entities are excluded from page-id auto-merge
+   entirely at first** — that's where linking gets mushy ("inflation",
+   "immigration" have many plausible near-miss pages). Incompatible or excluded
+   pairs (e.g. a sloppy "Trump administration" → *Donald Trump* page link would
+   otherwise merge an organization into a person) are written to a review report
+   (`logs/wiki_merge_review.log`) instead of merged.
 3. Everything unlinked falls through to the existing exact merge-key tier,
    unchanged. Merges stay pointer-based and reversible; the display-name rename
    pass is unchanged.
+4. **Disagreement report** — page ids as *negative* evidence too: members of a
+   name-merged group that carry *different* validated page ids are strong
+   evidence of a wrong merge. Log them to the same review report; this lets
+   wiki-linking audit the existing alias table, not just extend it.
 
 ## Phase 4 — Backfill without re-analysis
 
@@ -130,13 +139,29 @@ Do **not** re-run articles through the LLM (score consistency; needless spend).
 For existing canonical entities with ≥ 5 mentions (~a few thousand rows): resolve
 the *canonical name* via Wikipedia search + redirects; auto-accept only
 exact-or-redirect title matches; ambiguous names stay unlinked and are covered by
-new mentions' votes over time. One-time job, roughly an hour of polite API calls,
-$0.
+new mentions' votes over time. This is exactly the name-only lookup the plan
+critiques, so it gets the full guardrail set: disambiguation pages rejected, and
+the Phase 3 type-class rules applied to backfill matches too (a famous ambiguous
+name silently resolves to its primary-topic page — "exact match" alone doesn't
+protect against that). One-time job, roughly an hour of polite API calls, $0.
 
 ## Phase 5 — Consequences and cleanup
 
-- ROADMAP §12: Layer 2 (embeddings) removed — a shared validated page id answers
-  "same thing?" directly, which is strictly stronger than "similar string".
+- ROADMAP §12: Layer 2's *auto-merge-by-distance* form is measured and dead:
+  on 400 ground-truth same-entity pairs vs 350 hard lookalike pairs from this
+  corpus (name embeddings, text-embedding-3-small, 2026-08-14), the similarity
+  distributions overlap so badly that no epsilon works — 90% same-entity recall
+  costs a 28% false-merge rate on lookalikes, and identical scores carry
+  opposite truth ("Richard J. Durbin"/"Dick Durbin" = same person at 0.836;
+  "Anant Ambani"/"Mukesh Ambani" = father and son at 0.836). Acronyms and
+  renames — the most valuable aliases — are embedding-*far* (Twitter/X at 0.257,
+  NASA/full name at 0.534) while wiki redirects capture them exactly. But the
+  same experiment validated embeddings as a *suggester*: the nearest-neighbor
+  list surfaced 11 real unmerged duplicates the string-based fuzzy pass could
+  never see (Dick Durbin, Mike DeWine, Raúl Castro…), added to ALIASES the same
+  day for $0.0001. Optional follow-up: replace the SequenceMatcher fuzzy band
+  with embedding kNN as the offline curation aid — suggest-only, never
+  auto-merge.
 - ALIASES becomes an override + long-tail tool; expected to stop growing for
   famous entities. Layer 0 injection unchanged.
 - Free enrichment unlocked for later, all optional: entity pages can link to
@@ -150,3 +175,9 @@ Each phase ships and reverts independently. Phase 0 is an afternoon including
 batch turnaround; Phases 1–3 about a day; Phase 4 an hour of runtime. The compose
 default for `WIKI_TITLE_LINKING` stays off until Phase 3 has run clean on a week
 of daily batches.
+
+One gate does not retire at go-live: all votes come from the same model with the
+same biases, so a confident majority can still be confidently wrong (same-type
+collisions — two people sharing a name — pass every automated guardrail). The
+novel-merge audit therefore continues as a **weekly hand spot-check for the
+first month** of Phase 3, via the review report.
