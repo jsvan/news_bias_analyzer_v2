@@ -1167,13 +1167,21 @@ async def get_country_top_entities(
             )
         
         logger.info(f"📊 Found {len(top_entities)} top entities for {country}")
-        
+
+        # The ranking above aggregates whole merged groups, so the per-entity
+        # detail queries must too: map each canonical id to every id merged
+        # into it (Entity.canonical_id) in one query.
+        top_ids = [row.id for row in top_entities]
+        group_ids_by_canonical: Dict[int, List[int]] = {}
+        for eid, rid in session.query(Entity.id, resolved_id).filter(resolved_id.in_(top_ids)):
+            group_ids_by_canonical.setdefault(rid, []).append(eid)
+
         # For each top entity, get daily sentiment data by newspaper
         entities_data = []
-        
+
         for entity_id, entity_name, entity_type, total_mentions, avg_power, avg_moral in top_entities:
             logger.info(f"🔍 Processing entity '{entity_name}' ({total_mentions} mentions)")
-            
+
             # Get daily sentiment data for this entity, grouped by source (newspaper)
             daily_data_query = session.query(
                 func.date(EntityMention.created_at).label('date'),
@@ -1184,7 +1192,7 @@ async def get_country_top_entities(
             ).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
             ).filter(
-                EntityMention.entity_id == entity_id,
+                EntityMention.entity_id.in_(group_ids_by_canonical.get(entity_id, [entity_id])),
                 NewsArticle.source_id.in_(source_ids),
                 *date_filters,
                 EntityMention.power_score.isnot(None),
@@ -1324,11 +1332,13 @@ async def get_newspaper_top_entities(
         
         logger.info(f"📰 Found newspaper '{newspaper_source.name}' in {newspaper_source.country}")
         
-        # Get top entities by mention count for this newspaper over the time period
-        top_entities_query = session.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
+        # Get top entities by mention count for this newspaper over the time period.
+        # Aggregate by canonical_id first (merged entities resolve to one row - see
+        # analyzer/entity_resolution.py), then join back to the canonical row for
+        # display, same fix as get_country_top_entities.
+        resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+        agg_subq = session.query(
+            resolved_id.label('resolved_id'),
             func.count(EntityMention.id).label('mention_count'),
             func.avg(EntityMention.power_score).label('avg_power'),
             func.avg(EntityMention.moral_score).label('avg_moral')
@@ -1341,14 +1351,25 @@ async def get_newspaper_top_entities(
             *date_filters,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
-        ).having(
+        ).group_by(resolved_id).having(
             func.count(EntityMention.id) >= 3  # Minimum mentions required for individual newspaper
+        ).subquery()
+
+        top_entities_query = session.query(
+            Entity.id,
+            Entity.name,
+            Entity.entity_type,
+            agg_subq.c.mention_count,
+            agg_subq.c.avg_power,
+            agg_subq.c.avg_moral
+        ).join(
+            agg_subq, Entity.id == agg_subq.c.resolved_id
+        ).filter(
+            Entity.canonical_id.is_(None)
         ).order_by(
-            func.count(EntityMention.id).desc()
+            agg_subq.c.mention_count.desc()
         ).limit(limit)
-        
+
         top_entities = top_entities_query.all()
         
         if not top_entities:
@@ -1361,13 +1382,20 @@ async def get_newspaper_top_entities(
             )
         
         logger.info(f"📊 Found {len(top_entities)} top entities for {newspaper_name}")
-        
+
+        # Same as get_country_top_entities: detail queries must cover each
+        # canonical entity's whole merged group.
+        top_ids = [row.id for row in top_entities]
+        group_ids_by_canonical: Dict[int, List[int]] = {}
+        for eid, rid in session.query(Entity.id, resolved_id).filter(resolved_id.in_(top_ids)):
+            group_ids_by_canonical.setdefault(rid, []).append(eid)
+
         # For each top entity, get daily sentiment data for this newspaper
         entities_data = []
-        
+
         for entity_id, entity_name, entity_type, total_mentions, avg_power, avg_moral in top_entities:
             logger.info(f"🔍 Processing entity '{entity_name}' ({total_mentions} mentions)")
-            
+
             # Get daily sentiment data for this entity from this newspaper
             daily_data_query = session.query(
                 func.date(EntityMention.created_at).label('date'),
@@ -1377,7 +1405,7 @@ async def get_newspaper_top_entities(
             ).join(
                 NewsArticle, EntityMention.article_id == NewsArticle.id
             ).filter(
-                EntityMention.entity_id == entity_id,
+                EntityMention.entity_id.in_(group_ids_by_canonical.get(entity_id, [entity_id])),
                 NewsArticle.source_id == newspaper_source.id,
                 *date_filters,
                 EntityMention.power_score.isnot(None),

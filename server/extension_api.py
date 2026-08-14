@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, cast, Float, text
+from sqlalchemy import func, cast, Float, text
 import requests
 from urllib.parse import urlparse
 import re
@@ -41,7 +41,7 @@ from database.models import NewsArticle, Entity, EntityMention, NewsSource, Topi
 # Routers. Imports are deliberately NOT wrapped in try/except: a router that fails
 # to import must fail the whole server loudly, not silently drop its routes (that
 # pattern hid dead endpoints for months - see the retired extension/api/main.py).
-from server.deps import get_db
+from server.deps import get_db, resolve_entity_group
 from server.routers.statistical_endpoints import router as stats_router
 from server.routers.similarity_endpoints import router as similarity_router
 from server.routers.narrative_endpoints import router as narrative_router
@@ -109,26 +109,37 @@ SEARCH_RESULTS_CACHE = {}
 SEARCH_CACHE_TTL = 300  # 5 minutes
 
 def get_popular_entities(db: Session, limit: int = 1000):
-    """Get most popular entities with caching."""
+    """Get most popular entities with caching.
+
+    Canonical rows only, with mention counts summed across every entity merged
+    into them (Entity.canonical_id) - same resolution as get_entities."""
     global POPULAR_ENTITIES_CACHE, POPULAR_ENTITIES_CACHE_TIME
-    
+
     current_time = time.time()
     if (current_time - POPULAR_ENTITIES_CACHE_TIME) > POPULAR_ENTITIES_CACHE_TTL:
         # Cache expired, refresh
+        resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+        mention_counts = db.query(
+            resolved_id.label("resolved_id"),
+            func.count(EntityMention.id).label("mention_count")
+        ).join(
+            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+        ).group_by(resolved_id).subquery()
+
         query = db.query(
             Entity.id,
             Entity.name,
             Entity.entity_type,
-            func.count(EntityMention.id).label("mention_count")
-        ).join(
-            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
+            func.coalesce(mention_counts.c.mention_count, 0).label("mention_count")
+        ).outerjoin(
+            mention_counts, Entity.id == mention_counts.c.resolved_id
+        ).filter(
+            Entity.canonical_id.is_(None)
         ).order_by(
-            func.count(EntityMention.id).desc(),
+            func.coalesce(mention_counts.c.mention_count, 0).desc(),
             Entity.name
         ).limit(limit)
-        
+
         results = query.all()
         POPULAR_ENTITIES_CACHE = [
             {
@@ -142,6 +153,43 @@ def get_popular_entities(db: Session, limit: int = 1000):
         POPULAR_ENTITIES_CACHE_TIME = current_time
     
     return POPULAR_ENTITIES_CACHE
+
+def _canonical_name_hits(db: Session, name_filter, exclude_ids, limit: int):
+    """Canonical entities whose own name OR any merged alias's name matches
+    name_filter, with mention counts summed across the whole merged group.
+
+    Matching on alias rows too is deliberate: a search for "Zelenskyy" must
+    surface "Volodymyr Zelensky" even though only the merged alias row carries
+    that spelling."""
+    resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+    matched = db.query(
+        resolved_id.label("resolved_id")
+    ).filter(name_filter).distinct().subquery()
+
+    counts = db.query(
+        func.coalesce(Entity.canonical_id, Entity.id).label("resolved_id"),
+        func.count(EntityMention.id).label("mention_count")
+    ).join(
+        EntityMention, Entity.id == EntityMention.entity_id, isouter=True
+    ).group_by(func.coalesce(Entity.canonical_id, Entity.id)).subquery()
+
+    query = db.query(
+        Entity.id,
+        Entity.name,
+        Entity.entity_type,
+        func.coalesce(counts.c.mention_count, 0).label("mention_count")
+    ).join(
+        matched, Entity.id == matched.c.resolved_id
+    ).outerjoin(
+        counts, Entity.id == counts.c.resolved_id
+    )
+    if exclude_ids:
+        query = query.filter(~Entity.id.in_(exclude_ids))
+    return query.order_by(
+        func.coalesce(counts.c.mention_count, 0).desc(),
+        Entity.name
+    ).limit(limit).all()
+
 
 def search_entities_tiered(db: Session, query_text: str, limit: int = 15):
     """Perform tiered search: prefix match -> word boundary -> contains."""
@@ -168,77 +216,27 @@ def search_entities_tiered(db: Session, query_text: str, limit: int = 15):
         SEARCH_RESULTS_CACHE[cache_key] = (filtered, current_time)
         return filtered
     
-    # For longer queries, use tiered database search
+    # For longer queries, use tiered database search. Each tier matches alias
+    # rows too but returns canonical entities with group-wide counts.
     results = []
-    
+
     # Tier 1: Prefix match (highest priority)
     if len(results) < limit:
-        prefix_query = db.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
-            func.count(EntityMention.id).label("mention_count")
-        ).join(
-            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-        ).filter(
-            func.lower(Entity.name).like(f"{query_lower}%")
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
-        ).order_by(
-            func.count(EntityMention.id).desc(),
-            Entity.name
-        ).limit(limit)
-        
-        prefix_results = prefix_query.all()
-        results.extend(prefix_results)
-    
+        results.extend(_canonical_name_hits(
+            db, func.lower(Entity.name).like(f"{query_lower}%"),
+            [r.id for r in results], limit))
+
     # Tier 2: Word boundary match (if still need more results)
     if len(results) < limit:
-        word_boundary_query = db.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
-            func.count(EntityMention.id).label("mention_count")
-        ).join(
-            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-        ).filter(
-            and_(
-                func.lower(Entity.name).like(f"% {query_lower}%"),
-                ~Entity.id.in_([r.id for r in results])  # Exclude already found
-            )
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
-        ).order_by(
-            func.count(EntityMention.id).desc(),
-            Entity.name
-        ).limit(limit - len(results))
-        
-        word_results = word_boundary_query.all()
-        results.extend(word_results)
-    
+        results.extend(_canonical_name_hits(
+            db, func.lower(Entity.name).like(f"% {query_lower}%"),
+            [r.id for r in results], limit - len(results)))
+
     # Tier 3: Contains match (if still need more results)
     if len(results) < limit:
-        contains_query = db.query(
-            Entity.id,
-            Entity.name,
-            Entity.entity_type,
-            func.count(EntityMention.id).label("mention_count")
-        ).join(
-            EntityMention, Entity.id == EntityMention.entity_id, isouter=True
-        ).filter(
-            and_(
-                func.lower(Entity.name).like(f"%{query_lower}%"),
-                ~Entity.id.in_([r.id for r in results])  # Exclude already found
-            )
-        ).group_by(
-            Entity.id, Entity.name, Entity.entity_type
-        ).order_by(
-            func.count(EntityMention.id).desc(),
-            Entity.name
-        ).limit(limit - len(results))
-        
-        contains_results = contains_query.all()
-        results.extend(contains_results)
+        results.extend(_canonical_name_hits(
+            db, func.lower(Entity.name).like(f"%{query_lower}%"),
+            [r.id for r in results], limit - len(results)))
     
     # Format results
     formatted_results = [
@@ -346,7 +344,9 @@ def search_entities(
         return search_entities_tiered(db, q, limit)
     except Exception as e:
         logging.error(f"Error in entity search: {e}")
-        # Fallback to simple search if tiered search fails
+        # Fallback to simple search if tiered search fails. Canonical rows only
+        # so merged aliases never show up as duplicate results; counts here are
+        # per-row (not group-summed) - acceptable for an emergency path.
         query = db.query(
             Entity.id,
             Entity.name,
@@ -355,7 +355,8 @@ def search_entities(
         ).join(
             EntityMention, Entity.id == EntityMention.entity_id, isouter=True
         ).filter(
-            func.lower(Entity.name).like(f"%{q.lower()}%")
+            func.lower(Entity.name).like(f"%{q.lower()}%"),
+            Entity.canonical_id.is_(None)
         ).group_by(
             Entity.id, Entity.name, Entity.entity_type
         ).order_by(
@@ -383,12 +384,14 @@ def get_entity_sentiment(
     source_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get sentiment data for a specific entity over time."""
-    # Check if entity exists
-    entity = db.query(Entity).filter(Entity.id == entity_id).first()
+    """Get sentiment data for a specific entity over time.
+
+    Mentions are gathered across the whole merged group (Entity.canonical_id),
+    so alias rows contribute to their canonical entity's series."""
+    entity, group_ids = resolve_entity_group(db, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
-    
+
     # Build query for entity mentions
     query = db.query(
         EntityMention.power_score,
@@ -400,7 +403,7 @@ def get_entity_sentiment(
     ).join(
         NewsSource, NewsArticle.source_id == NewsSource.id
     ).filter(
-        EntityMention.entity_id == entity_id
+        EntityMention.entity_id.in_(group_ids)
     )
     
     # Apply filters
@@ -1173,17 +1176,19 @@ async def get_entity_distribution(
     days: Optional[int] = Query(None, ge=1, le=3650),
     db: Session = Depends(get_db)
 ):
-    """Get sentiment distribution data for a specific entity. Omit days for all-time."""
+    """Get sentiment distribution data for a specific entity. Omit days for all-time.
+
+    Mentions are gathered across the whole merged group (Entity.canonical_id) and
+    the canonical row is reported as the entity, so alias ids fold into one view."""
     try:
-        # Check if entity exists
-        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        entity, group_ids = resolve_entity_group(db, entity_id)
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
 
         # Calculate date range; no days param = all time
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days) if days else datetime(1970, 1, 1)
-        
+
         # Base query for entity mentions
         query = db.query(
             EntityMention.power_score,
@@ -1195,7 +1200,7 @@ async def get_entity_distribution(
         ).join(
             NewsSource, NewsArticle.source_id == NewsSource.id
         ).filter(
-            EntityMention.entity_id == entity_id,
+            EntityMention.entity_id.in_(group_ids),
             NewsArticle.publish_date >= start_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
@@ -1297,17 +1302,19 @@ async def get_historical_sentiment(
     days: Optional[int] = Query(None, ge=1, le=3650),
     db: Session = Depends(get_db)
 ):
-    """Get historical sentiment data for a specific entity. Omit days for all-time."""
+    """Get historical sentiment data for a specific entity. Omit days for all-time.
+
+    Mentions are gathered across the whole merged group (Entity.canonical_id) and
+    the canonical row is reported as the entity, so alias ids fold into one view."""
     try:
-        # Check if entity exists
-        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        entity, group_ids = resolve_entity_group(db, entity_id)
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
 
         # Calculate date range; no days param = all time
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days) if days else datetime(1970, 1, 1)
-        
+
         # Get daily sentiment averages
         daily_sentiment = db.query(
             func.date(EntityMention.created_at).label("date"),
@@ -1315,7 +1322,7 @@ async def get_historical_sentiment(
             func.avg(EntityMention.moral_score).label("avg_moral"),
             func.count(EntityMention.id).label("mention_count")
         ).filter(
-            EntityMention.entity_id == entity_id,
+            EntityMention.entity_id.in_(group_ids),
             EntityMention.created_at >= start_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
@@ -1324,14 +1331,14 @@ async def get_historical_sentiment(
         ).order_by(
             func.date(EntityMention.created_at)
         ).all()
-        
+
         # Get overall stats for the period
         overall_stats = db.query(
             func.avg(EntityMention.power_score).label("avg_power"),
             func.avg(EntityMention.moral_score).label("avg_moral"),
             func.count(EntityMention.id).label("total_mentions")
         ).filter(
-            EntityMention.entity_id == entity_id,
+            EntityMention.entity_id.in_(group_ids),
             EntityMention.created_at >= start_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
@@ -1377,11 +1384,13 @@ async def get_source_historical_sentiment(
     countries: Optional[List[str]] = Query(None),
     db: Session = Depends(get_db)
 ):
-    """Get historical sentiment data for a specific entity broken down by news source. Omit days for all-time."""
+    """Get historical sentiment data for a specific entity broken down by news source. Omit days for all-time.
+
+    Mentions are gathered across the whole merged group (Entity.canonical_id) and
+    the canonical row is reported as the entity, so alias ids fold into one view."""
     try:
         logger.info(f"Source historical sentiment request: entity_id={entity_id}, days={days}, countries={countries}")
-        # Check if entity exists
-        entity = db.query(Entity).filter(Entity.id == entity_id).first()
+        entity, group_ids = resolve_entity_group(db, entity_id)
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
 
@@ -1403,12 +1412,12 @@ async def get_source_historical_sentiment(
         ).join(
             NewsSource, NewsArticle.source_id == NewsSource.id
         ).filter(
-            EntityMention.entity_id == entity_id,
+            EntityMention.entity_id.in_(group_ids),
             EntityMention.created_at >= start_date,
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
         )
-        
+
         # Apply country filter if provided
         if countries:
             logger.info(f"Filtering by countries: {countries}")
@@ -1440,7 +1449,7 @@ async def get_source_historical_sentiment(
             ).join(
                 NewsSource, NewsArticle.source_id == NewsSource.id
             ).filter(
-                EntityMention.entity_id == entity_id,
+                EntityMention.entity_id.in_(group_ids),
                 EntityMention.created_at >= start_date,
                 EntityMention.power_score.isnot(None),
                 EntityMention.moral_score.isnot(None)

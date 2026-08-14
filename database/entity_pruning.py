@@ -156,6 +156,10 @@ def prune_low_activity_entities(session: Session, dry_run: bool = False):
                     AND e.id NOT IN (
                         SELECT DISTINCT canonical_id FROM entities WHERE canonical_id IS NOT NULL
                     )
+                    -- Never prune an alias row either: its mentions still count toward the
+                    -- canonical entity (queries aggregate over the whole merge group), so
+                    -- deleting it would silently shrink the merged entity's data
+                    AND e.canonical_id IS NULL
                 GROUP BY e.id, e.name, e.entity_type, e.created_at, samples.n
                 HAVING
                     -- Mention count must be greater than the sampling-weeks threshold (not equal)

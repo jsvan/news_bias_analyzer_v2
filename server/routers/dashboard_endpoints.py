@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from server.deps import get_db
+from server.deps import get_db, resolve_entity_group
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 
 logger = logging.getLogger(__name__)
@@ -30,13 +30,16 @@ router = APIRouter()
 
 @router.get("/entities/{entity_id}", response_model=Dict[str, Any])
 def get_entity(entity_id: int, db: Session = Depends(get_db)):
-    """Get detailed information about a specific entity."""
-    entity = db.query(Entity).filter(Entity.id == entity_id).first()
+    """Get detailed information about a specific entity.
+
+    Aggregates across the whole merged group (Entity.canonical_id) and reports
+    the canonical row, so alias ids fold into one view."""
+    entity, group_ids = resolve_entity_group(db, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
 
     mention_count = db.query(func.count(EntityMention.id)).filter(
-        EntityMention.entity_id == entity_id
+        EntityMention.entity_id.in_(group_ids)
     ).scalar()
 
     sources_query = db.query(
@@ -48,7 +51,7 @@ def get_entity(entity_id: int, db: Session = Depends(get_db)):
     ).join(
         EntityMention, NewsArticle.id == EntityMention.article_id
     ).filter(
-        EntityMention.entity_id == entity_id
+        EntityMention.entity_id.in_(group_ids)
     ).group_by(
         NewsSource.id,
         NewsSource.name
@@ -66,7 +69,7 @@ def get_entity(entity_id: int, db: Session = Depends(get_db)):
         func.avg(EntityMention.power_score).label("avg_power"),
         func.avg(EntityMention.moral_score).label("avg_moral")
     ).filter(
-        EntityMention.entity_id == entity_id
+        EntityMention.entity_id.in_(group_ids)
     ).first()
 
     return {
@@ -90,8 +93,11 @@ def get_entity_sentiment_series(
     source_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get sentiment data for a specific entity over time."""
-    entity = db.query(Entity).filter(Entity.id == entity_id).first()
+    """Get sentiment data for a specific entity over time.
+
+    Mentions are gathered across the whole merged group (Entity.canonical_id),
+    so alias rows contribute to their canonical entity's series."""
+    entity, group_ids = resolve_entity_group(db, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
 
@@ -105,7 +111,7 @@ def get_entity_sentiment_series(
     ).join(
         NewsSource, NewsArticle.source_id == NewsSource.id
     ).filter(
-        EntityMention.entity_id == entity_id
+        EntityMention.entity_id.in_(group_ids)
     )
 
     if start_date:
@@ -139,10 +145,11 @@ def get_source(source_id: int, db: Session = Depends(get_db)):
         NewsArticle.source_id == source_id
     ).scalar()
 
-    entities_query = db.query(
-        Entity.id,
-        Entity.name,
-        Entity.entity_type,
+    # Aggregate by canonical_id so merged aliases surface as one entity
+    # (see analyzer/entity_resolution.py).
+    resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+    agg = db.query(
+        resolved_id.label("resolved_id"),
         func.count(EntityMention.id).label("mention_count")
     ).join(
         EntityMention, Entity.id == EntityMention.entity_id
@@ -150,12 +157,17 @@ def get_source(source_id: int, db: Session = Depends(get_db)):
         NewsArticle, EntityMention.article_id == NewsArticle.id
     ).filter(
         NewsArticle.source_id == source_id
-    ).group_by(
+    ).group_by(resolved_id).subquery()
+
+    entities_query = db.query(
         Entity.id,
         Entity.name,
-        Entity.entity_type
+        Entity.entity_type,
+        agg.c.mention_count
+    ).join(
+        agg, Entity.id == agg.c.resolved_id
     ).order_by(
-        func.count(EntityMention.id).desc()
+        agg.c.mention_count.desc()
     ).limit(10)
 
     entities = [{
@@ -226,10 +238,11 @@ def get_source_sentiment(
         "moral_score": float(result.avg_moral) if result.avg_moral else 0
     } for result in timeseries_query.all()]
 
-    entity_query = db.query(
-        Entity.id,
-        Entity.name,
-        Entity.entity_type,
+    # Aggregate by canonical_id so merged aliases surface as one entity
+    # (see analyzer/entity_resolution.py).
+    resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
+    entity_agg = db.query(
+        resolved_id.label("resolved_id"),
         func.avg(EntityMention.power_score).label("avg_power"),
         func.avg(EntityMention.moral_score).label("avg_moral"),
         func.count(EntityMention.id).label("mention_count")
@@ -240,12 +253,19 @@ def get_source_sentiment(
     ).filter(
         NewsArticle.source_id == source_id,
         NewsArticle.publish_date.between(start_date, end_date)
-    ).group_by(
+    ).group_by(resolved_id).subquery()
+
+    entity_query = db.query(
         Entity.id,
         Entity.name,
-        Entity.entity_type
+        Entity.entity_type,
+        entity_agg.c.avg_power,
+        entity_agg.c.avg_moral,
+        entity_agg.c.mention_count
+    ).join(
+        entity_agg, Entity.id == entity_agg.c.resolved_id
     ).order_by(
-        func.count(EntityMention.id).desc()
+        entity_agg.c.mention_count.desc()
     ).limit(20)
 
     entities = [{
