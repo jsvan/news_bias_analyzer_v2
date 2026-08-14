@@ -23,6 +23,8 @@
  * - getTrendingEntities serves the all-time snapshot regardless of days, and
  *   returns [] for countries outside the snapshot set (DataContext hides those
  *   from the pickers in static mode).
+ * - getContestedRanking serves one fixed 30-day moral-dimension snapshot
+ *   regardless of days/dimension params; limit slices client-side.
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -160,6 +162,13 @@ export const staticData = {
       // Non-snapshotted country, or a pre-trending snapshot still cached.
       return [];
     }
+  },
+
+  // "The front line" panel. The exporter writes the endpoint's response shape
+  // for the one parameterization the panel requests (30 days, moral).
+  getContestedRanking: async (params: any = {}) => {
+    const data = await load('stats/contested.json');
+    return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 20) };
   },
 
   getEntityDistribution: async (id: number) =>

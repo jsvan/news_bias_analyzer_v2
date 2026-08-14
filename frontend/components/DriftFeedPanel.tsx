@@ -5,6 +5,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import { tokens, monoNumber } from '../theme';
 import { useData } from '../context/DataContext';
 import { driftApi } from '../services/api';
+import { isStaticMode } from '../services/config/environment';
 
 interface DriftFeedEntry {
   entity_id: number;
@@ -30,10 +31,16 @@ const DriftFeedPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isStaticMode()) return;
     driftApi.getDriftFeed({ dimension: 'moral', scope: 'all', limit: 10 })
       .then((data) => setEntries(data.events))
       .catch((err) => setError((err as Error).message));
   }, []);
+
+  // The drift feed isn't snapshotted (and the entity_drift_events table can't
+  // have events until ~8 weeks of corpus accumulate - pettitt_test's floor), so
+  // on the static site render nothing rather than a permanent error box.
+  if (isStaticMode()) return null;
 
   return (
     <Card>

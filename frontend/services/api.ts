@@ -306,11 +306,13 @@ export const statsApi = {
 };
 
 // Narrative statistics (server/routers/narrative_endpoints.py) - wires
-// analyzer/narrative_metrics.py's kernels into real cross-source queries. Live-API only
-// for now; not yet part of the static-snapshot export (server/export_snapshots.py).
+// analyzer/narrative_metrics.py's kernels into real cross-source queries. The contested
+// ranking is part of the static-snapshot export (server/export_snapshots.py); the rest
+// is live-API only for now.
 export const narrativeApi = {
   getContestedRanking: async (params: { days?: number; dimension?: 'power' | 'moral'; limit?: number } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getContestedRanking(params);
+    if (isApiUnavailable()) {
       throw new Error('Contested-entity ranking requires a live backend and is not available in this demo.');
     }
     const response = await api.get('/narrative/contested', { params });

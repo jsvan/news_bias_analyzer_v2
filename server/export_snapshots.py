@@ -22,6 +22,9 @@ Output layout (under --out, default frontend/public/snapshots/):
     country/{Country}_{days}.json  top-entities page data. Still one file per window:
                                   unlike the entity series, these are top-10 rankings
                                   *within* each window, so the windows genuinely differ.
+    stats/contested.json         cross-country contested ranking ("The front line"
+                                  panel). One fixed 30-day moral-dimension file - the
+                                  only shape the page requests.
 
 All floats are rounded to 4 decimals on write (scores live on a -2..2 scale and the
 UI shows 1-2 decimals; full float repr was pure bloat).
@@ -47,6 +50,8 @@ COUNTRIES = ["USA", "UK", "Canada", "Australia", "Germany",
              "France", "Japan", "Russia", "China", "India"]
 # EntityAnalysisPage asks for 40; export headroom so the page can grow.
 TRENDING_LIMIT = 100
+# ContestedEntitiesPanel shows 8; same headroom reasoning.
+CONTESTED_LIMIT = 20
 
 
 def round_floats(o, ndigits: int = 4):
@@ -72,12 +77,12 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
 
     fetchers: entities(limit), sources(), distribution(id), historical(id, days),
               source_historical(id, days), country_top(country, days),
-              trending(limit, country), most_recent_article_date() — each returns a
-              JSON-serializable value or raises to skip (most_recent_article_date
-              raising just omits the field).
+              trending(limit, country), contested(), most_recent_article_date() —
+              each returns a JSON-serializable value or raises to skip
+              (most_recent_article_date raising just omits the field).
     """
     counts = {"entities": 0, "entity_files": 0, "country_files": 0,
-              "trending_files": 0, "skipped": 0}
+              "trending_files": 0, "contested_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
     write_json(out_dir, "entities.json", entities)
@@ -111,6 +116,13 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         except Exception as ex:
             print(f"  skip {rel}: {ex}")
             counts["skipped"] += 1
+
+    try:
+        write_json(out_dir, "stats/contested.json", fetchers["contested"]())
+        counts["contested_files"] = 1
+    except Exception as ex:
+        print(f"  skip stats/contested.json: {ex}")
+        counts["skipped"] += 1
 
     for country in COUNTRIES:
         for days in COUNTRY_DAYS:
@@ -154,6 +166,7 @@ def live_fetchers(session):
         get_trending_entities,
     )
     from server.routers.statistical_endpoints import get_country_top_entities
+    from server.routers.narrative_endpoints import get_contested_ranking
 
     def run(coro):
         return jsonable_encoder(asyncio.run(coro))
@@ -179,6 +192,9 @@ def live_fetchers(session):
         "trending": lambda limit, country: run(
             # days=None: all-time, matching the page's calls.
             get_trending_entities(limit=limit, days=None, country=country, db=session)),
+        "contested": lambda: run(
+            get_contested_ranking(days=30, dimension="moral",
+                                  limit=CONTESTED_LIMIT, session=session)),
         "most_recent_article_date": most_recent_article_date,
     }
 
@@ -226,6 +242,9 @@ def self_test():
                     if country == "India" else [{"id": 1, "entity": "Ada", "type": "person",
                                                  "power_score": 1.0, "moral_score": 0.5,
                                                  "mention_count": 9}][:limit],
+        "contested": lambda: {"days": 30, "dimension": "moral",
+                              "entities": [{"entity_name": "Ada",
+                                            "divergence": 0.55555555}]},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
@@ -253,6 +272,11 @@ def self_test():
             assert json.load(f)[0]["entity"] == "Ada"
         assert os.path.exists(os.path.join(out, "stats", "trending_USA.json"))
         assert not os.path.exists(os.path.join(out, "stats", "trending_India.json"))
+
+        assert counts["contested_files"] == 1
+        with open(os.path.join(out, "stats", "contested.json")) as f:
+            contested = json.load(f)
+        assert contested["entities"][0]["divergence"] == 0.5556  # rounded
 
         with open(os.path.join(out, "meta.json")) as f:
             meta = json.load(f)
