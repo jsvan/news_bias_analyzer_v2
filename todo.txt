@@ -2,6 +2,21 @@
 
 ## High Priority
 
+### 0. Fix Le Monde scraping (broke 2026-08-14)
+- [ ] All 20 Le Monde articles scraped on 2026-08-14 came back as "JavaScript is
+      disabled" paywall stubs (~400 chars: headline + boilerplate only). The 190
+      articles scraped before that date have full text, so lemonde.fr changed
+      something on their end (JS challenge / bot detection) that day.
+- [ ] Known signature: extraction_info records title "Client Challenge",
+      text_length 286 — lemonde.fr is serving a bot-challenge interstitial
+      (likely Datadome), so this is bot detection, not just a JS paywall.
+- [ ] Reproduce: fetch any lemonde.fr article URL with the scraper's user agent
+      and compare to a browser fetch; identify what the site now requires.
+- [ ] Fix or work around in scrapers/ (different UA, RSS full-text feed, or drop
+      the source if it now hard-requires JS).
+- [ ] Until fixed, the MIN_ARTICLE_CHARS=500 floor (database/models.py) silently
+      drops every Le Monde article — the source contributes no data.
+
 ### 1. Implement Pearson correlation similarity for news sources
 - [ ] Create function: pearson_similarity_on_common_entities(source1_id, source2_id, start_date, end_date)
 - [ ] Query: Get all entity mentions for both sources in time window

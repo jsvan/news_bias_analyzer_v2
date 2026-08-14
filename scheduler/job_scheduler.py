@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.append(str(ROOT_DIR))
 
-from database.models import get_db_connection, NewsArticle
+from database.models import get_db_connection, NewsArticle, MIN_ARTICLE_CHARS
 from sqlalchemy import func, text
 from sqlalchemy.orm import sessionmaker
 from clustering.source_similarity import SourceSimilarityComputer
@@ -156,7 +156,9 @@ def ensure_analyzer_if_work():
         pending = session.query(NewsArticle).filter(
             NewsArticle.analysis_status.in_(["unanalyzed", "in_progress"]),
             NewsArticle.text != None,
-            NewsArticle.text != "",
+            # Stub rows below the length floor are never submitted, so they
+            # must not count toward (or perpetually trigger) daemon restarts
+            func.length(NewsArticle.text) >= MIN_ARTICLE_CHARS,
             # Retired articles (3 failed submissions) are not pending work
             func.coalesce(NewsArticle.analysis_attempts, 0) < 3
         ).count()
@@ -244,10 +246,11 @@ def run_entity_merge():
         Session = sessionmaker(bind=engine)
         session = Session()
 
-        merged_count = run_merge_job(session)
+        merged_count, renamed_count = run_merge_job(session)
 
         session.close()
-        logger.info(f"Entity merge job completed: {merged_count} entities merged")
+        logger.info(f"Entity merge job completed: {merged_count} entities merged, "
+                    f"{renamed_count} canonical names normalized")
 
     except Exception as e:
         logger.error(f"Error in entity merge job: {e}", exc_info=True)

@@ -111,6 +111,12 @@ class NewsSource(Base):
         return f"<NewsSource(name='{self.name}', country='{self.country}')>"
 
 
+# Articles shorter than this are paywall/JS-blocked stubs (e.g. Le Monde's
+# "JavaScript is disabled" page) or headline-only fragments — too little text
+# to carry sentiment signal. Enforced at scrape time and at analysis selection.
+MIN_ARTICLE_CHARS = 500
+
+
 class NewsArticle(Base):
     """Represents a scraped news article."""
     __tablename__ = 'news_articles'

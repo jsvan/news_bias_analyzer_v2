@@ -28,7 +28,7 @@ load_dotenv()
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database.db import DatabaseManager
-from database.models import NewsArticle, NewsSource
+from database.models import NewsArticle, NewsSource, MIN_ARTICLE_CHARS
 from scrapers.news_sources import get_news_sources
 from scrapers.parallel_scraper import scrape_feeds, scrape_feeds_generator
 
@@ -132,7 +132,7 @@ def insert_articles_batch(db_manager: DatabaseManager, articles: List[Dict[str, 
             
             # First, check if this article is worth processing (has sufficient text)
             text_length = len(article.get('text', '')) if article.get('text') else 0
-            if text_length < 100:  # Skip very short articles
+            if text_length < MIN_ARTICLE_CHARS:  # paywall/JS stubs and headline-only fragments
                 print(f"SKIPPING ARTICLE {article_id}: Text too short ({text_length} chars)")
                 logger.warning(f"SKIPPING: Short article text ({text_length} chars): {article_title[:30]}...")
                 skipped_count += 1

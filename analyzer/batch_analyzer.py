@@ -35,7 +35,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 # Local imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database.models import NewsArticle, Entity, EntityMention, NewsSource, OpenAIBatch
+from database.models import NewsArticle, Entity, EntityMention, NewsSource, OpenAIBatch, MIN_ARTICLE_CHARS
 from database.services import DatabaseService
 from database.config import AnalysisConfig, LoggingConfig
 from analyzer.config import get_config
@@ -228,7 +228,8 @@ def get_unanalyzed_articles(session: Session, limit: int = BATCH_SIZE) -> List[N
         articles = session.query(NewsArticle).filter(
             NewsArticle.analysis_status == "unanalyzed",
             NewsArticle.text != None,
-            NewsArticle.text != "",
+            # Guard against stub rows scraped before the scrape-time length check
+            func.length(NewsArticle.text) >= MIN_ARTICLE_CHARS,
             func.coalesce(NewsArticle.analysis_attempts, 0) < MAX_ANALYSIS_ATTEMPTS
         ).limit(limit).all()
 
