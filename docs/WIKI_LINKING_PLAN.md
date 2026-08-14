@@ -50,14 +50,18 @@ arrays were dropped from the schema (they were 58–78% of visible output; the
 | Wikipedia API (validation + backfill) | $0 — batched 50 titles/request, cached, polite User-Agent; tens of lookups/day after backfill |
 | Storage (2 columns + 2 small tables) | negligible |
 
-**KNOWN-list skip (steady state only — NOT during the pilot):** after the
-Phase 4 backfill, known entities carry validated page ids, so the prompt can
-say: *for entities from the KNOWN list, emit `null` for wikipedia_title* —
-title tokens are then only spent on never-seen entities, a handful per
-article. During Phase 0 the skip stays **off** on purpose: two of the five
-gates (agreement-with-current-merges, emission disagreement) can only be
-measured if known entities emit titles too. Sequencing: pilot emits for
-everything → Phases 1–4 link and backfill → skip turns on.
+**Linked-entity skip (steady state only — NOT during the pilot):** after the
+Phase 4 backfill, the skip applies to entities that **already carry a validated
+`wikipedia_page_id`** — NOT to the whole KNOWN list. (Backfill leaves ambiguous
+names unlinked, "covered by new mentions' votes over time"; a whole-list skip
+would starve exactly those entities of votes and they'd stay unlinked forever.)
+The injected shortlist block annotates which of its entries are linked, and the
+prompt says: *for the entities marked linked, emit `null` for wikipedia_title.*
+Title tokens are then spent only on unlinked and never-seen entities — a
+handful per article. During Phase 0 the skip stays **off** on purpose: the
+agreement and emission-disagreement gates can only be measured if known
+entities emit titles too. Sequencing: pilot emits for everything → Phases 1–4
+link and backfill → skip turns on for linked entities.
 
 ## Principles (carried over from §12)
 
@@ -129,6 +133,14 @@ everything → Phases 1–4 link and backfill → skip turns on.
 - Effort sensitivity: we run extraction at `reasoning_effort=minimal`; if
   validation rate is poor, re-pilot the same articles at `low` and compare (still
   cents) before concluding anything.
+- **Extraction stability**: adding a field to a strict structured-output schema
+  can shift model behavior on the *other* fields, especially at
+  `reasoning_effort=minimal` — and nothing else here measures that. On ~300
+  paired articles (same texts run with and without the flag, offline, ≈
+  pennies): entity-set Jaccard ≥ ~0.9, mean |Δ power/moral| ≤ ~0.1, and
+  entities-per-article within a few percent. If this gate fails, the field
+  design (name, position, description) gets tuned before anything else is
+  concluded.
 - **Emission disagreement**: of entities with ≥2 emissions in the pilot, the
   fraction whose emissions resolve to more than one page id. This decides the
   Phase 2 trust rule: under ~1%, relax "≥2 votes + >60% majority" to
@@ -181,6 +193,19 @@ regardless of article arrival order — where first-write-wins lets one bad earl
 emission permanently fuse two entities' sentiment histories. Delta-only,
 batched, cached — expected volume tens of lookups per day.
 
+**Type-vs-page check at assignment:** before assigning a page id, the job
+fetches the page's Wikidata item (`wikibase_item` arrives in the same
+`pageprops` call the disambiguation check uses) and its instance-of (P31,
+batched + cached like everything else), mapped to our coarse type classes
+(human → person; org/company classes → organization/business; country classes
+→ country; event/occurrence classes → event). An entity whose own type is
+incompatible with the page's type **never gets the id at all** — logged
+instead. This catches cross-type redirect traps at the source: two
+co-conspirators plain-redirecting to the crime's event page (no fragment, so
+the section-redirect guard is silent) would both be person-typed entities
+pointing at an event-typed page — rejected at assignment, before any merge
+could form.
+
 **Cache staleness:** `checked_at` gets a policy, not just a column — the job
 also re-validates a rolling handful of entries older than 90 days (a few dozen
 per day, still $0). Page *ids* survive renames (when Twitter became X the page
@@ -232,10 +257,13 @@ For existing canonical entities with ≥ 5 mentions (~a few thousand rows): reso
 the *canonical name* via Wikipedia search + redirects; auto-accept only
 exact-or-redirect title matches; ambiguous names stay unlinked and are covered by
 new mentions' votes over time. This is exactly the name-only lookup the plan
-critiques, so it gets the full guardrail set: disambiguation pages rejected, and
-the Phase 3 type-class rules applied to backfill matches too (a famous ambiguous
-name silently resolves to its primary-topic page — "exact match" alone doesn't
-protect against that). One-time job, roughly an hour of polite API calls, $0.
+critiques, so it gets the full guardrail set: disambiguation pages and section
+redirects rejected, and the type check applied — which in backfill compares one
+DB entity against one Wikipedia *page*, so it runs through the Phase 2
+type-vs-page mechanism (Wikidata P31 via `pageprops`' `wikibase_item`, cached),
+not the two-entity type-class rule. (A famous ambiguous name silently resolves
+to its primary-topic page — "exact match" alone doesn't protect against that.)
+One-time job, roughly an hour of polite API calls, $0.
 
 ## Phase 5 — Consequences and cleanup
 
@@ -300,4 +328,9 @@ priority, not at random — the subtlest failure is a plausible wrong title that
 *validates* (a real page for the wrong same-type entity), and it hides in a
 specific place: **same-type-class page-id merges the name machinery would not
 have made** (low name similarity — wiki's novel claims, at once the
-highest-value and highest-risk merges), ordered lowest vote count first.
+highest-value and highest-risk merges), ordered lowest vote count first. That
+priority list explicitly includes same-type co-redirects — two entities of one
+type plain-redirecting to the same page (e.g. two associates → one group's
+page): they pass type-class, the P31 assignment check (same type on both
+sides), and often validation; the co-mention veto is the main automated
+defense, and the audit is the backstop.
