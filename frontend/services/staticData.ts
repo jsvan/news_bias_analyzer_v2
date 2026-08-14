@@ -19,7 +19,8 @@
  *   branch of the live endpoint); a countries filter selects among those rather
  *   than expanding to per-source series.
  * - entity history windows clamp to base_days; country pages clamp to the
- *   nearest snapshotted range.
+ *   nearest snapshotted range. An all-time request (the falsy ALL_TIME
+ *   sentinel, 0) serves the widest window available.
  * - getTrendingEntities serves the all-time snapshot regardless of days, and
  *   returns [] for countries outside the snapshot set (DataContext hides those
  *   from the pickers in static mode) and for newspapers without a per-source
@@ -182,19 +183,26 @@ export const staticData = {
 
   getHistoricalSentiment: async (entityId: number, params: any = {}) => {
     const bundle = await entityBundle(entityId);
+    // The ALL_TIME sentinel (0) is falsy BY DESIGN: the live path's
+    // `if (params.days)` guards omit the param and the backend returns
+    // everything. Here "everything" is the widest snapshotted window — a
+    // plain `?? 30` would let 0 through as a zero-day slice (one row, and
+    // the trend chart shows "not enough data" for every entity).
+    const days = params.days || Math.max(...HIST_DAYS);
     if (bundle.format >= 2) {
-      const days = Math.min(params.days ?? 30, bundle.base_days);
-      return sliceHistorical(bundle.historical, days);
+      return sliceHistorical(bundle.historical, Math.min(days, bundle.base_days));
     }
-    return bundle.historical[String(nearestDays(params.days ?? 30, HIST_DAYS))];
+    return bundle.historical[String(nearestDays(days, HIST_DAYS))];
   },
 
   getSourceHistoricalSentiment: async (entityId: number, params: any = {}) => {
     const bundle = await entityBundle(entityId);
+    // ALL_TIME (0) = widest window, as in getHistoricalSentiment above.
+    const days = params.days || Math.max(...HIST_DAYS);
     const data = bundle.format >= 2
       ? sliceSourceHistorical(bundle.source_historical,
-          Math.min(params.days ?? 30, bundle.base_days))
-      : bundle.source_historical[String(nearestDays(params.days ?? 30, HIST_DAYS))];
+          Math.min(days, bundle.base_days))
+      : bundle.source_historical[String(nearestDays(days, HIST_DAYS))];
     if (params.countries?.length) {
       const wanted = new Set(params.countries);
       const sources: Record<string, any> = {};
@@ -207,7 +215,8 @@ export const staticData = {
   },
 
   getCountryTopEntities: async (country: string, params: any = {}) => {
-    const days = nearestDays(params.days ?? 30, COUNTRY_DAYS);
+    // ALL_TIME (0) maps to the widest snapshotted window, not nearest-to-zero.
+    const days = nearestDays(params.days || Math.max(...COUNTRY_DAYS), COUNTRY_DAYS);
     return load(`country/${country}_${days}.json`);
   },
 
@@ -218,7 +227,7 @@ export const staticData = {
     const sources = await load('sources.json');
     const source = sources.find((s: any) => s.name === newspaperName);
     const country = source?.country ?? 'Unknown';
-    const days = nearestDays(params.days ?? 30, COUNTRY_DAYS);
+    const days = nearestDays(params.days || Math.max(...COUNTRY_DAYS), COUNTRY_DAYS);
     const countryData = await load(`country/${country}_${days}.json`);
 
     const entities = (countryData.entities ?? [])
