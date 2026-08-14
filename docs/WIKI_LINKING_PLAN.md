@@ -1,10 +1,11 @@
 # Wikipedia-Grounded Entity Identity ("wiki-linking")
 
 *Plan written 2026-08-14. Supersedes ROADMAP_IDEAS_2026.md §12 Layer 2 (embedding
-merge candidates — no longer needed) and absorbs Layer 3 (Wikidata grounding) with
-a better implementation. Layers 0–1 (prompt injection, normalization + ALIASES +
-weekly merge job) stay exactly as they are: they remain the floor everything falls
-back to.*
+merge candidates — measured and dead as an auto-merger, retained suggest-only; see
+"Duplicate suggesters") and absorbs Layer 3 (Wikidata grounding) with a better
+implementation. Layers 0–1 (prompt injection, normalization + ALIASES + weekly
+merge job) stay exactly as they are: they remain the floor everything falls back
+to.*
 
 ## Why
 
@@ -49,11 +50,14 @@ arrays were dropped from the schema (they were 58–78% of visible output; the
 | Wikipedia API (validation + backfill) | $0 — batched 50 titles/request, cached, polite User-Agent; tens of lookups/day after backfill |
 | Storage (2 columns + 2 small tables) | negligible |
 
-**KNOWN-list skip:** once `KNOWN_ENTITY_INJECTION` is on (validated the same
-pilot day — it has waited since July), known entities already carry validated
-page ids, so the prompt says: *for entities from the KNOWN list, emit `null`
-for wikipedia_title.* Title tokens are then only spent on never-seen entities —
-at steady state, a handful per article.
+**KNOWN-list skip (steady state only — NOT during the pilot):** after the
+Phase 4 backfill, known entities carry validated page ids, so the prompt can
+say: *for entities from the KNOWN list, emit `null` for wikipedia_title* —
+title tokens are then only spent on never-seen entities, a handful per
+article. During Phase 0 the skip stays **off** on purpose: two of the five
+gates (agreement-with-current-merges, emission disagreement) can only be
+measured if known entities emit titles too. Sequencing: pilot emits for
+everything → Phases 1–4 link and backfill → skip turns on.
 
 ## Principles (carried over from §12)
 
@@ -68,7 +72,7 @@ at steady state, a handful per article.
   only.
 - **Default off until measured.** Same rollout pattern as `KNOWN_ENTITY_INJECTION`.
 
-## Phase 0 — Pilot: measure before any schema change
+## Phase 0 — Pilot: measure before any database change
 
 1. Behind env flag `WIKI_TITLE_LINKING` (default off, wired like
    `KNOWN_ENTITY_INJECTION` in `analyzer/batch_analyzer.py`):
