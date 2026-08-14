@@ -23,7 +23,7 @@ import DriftFeedPanel from '../components/DriftFeedPanel';
 import { EntitySentimentSummary } from '../types';
 import { tokens, archetypeColor, archetypeLabel, monoNumber, ArchetypeLabel } from '../theme';
 
-const ARCHETYPES: ArchetypeLabel[] = ['Hero', 'Victim', 'Villain', 'Threat'];
+const ARCHETYPES: ArchetypeLabel[] = ['Hero', 'Victim', 'Villain', 'Wretch'];
 
 const EntityAnalysisPage: React.FC = () => {
   const { entities, availableCountries } = useData();

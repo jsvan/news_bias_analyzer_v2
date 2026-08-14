@@ -145,7 +145,7 @@ const SalienceAsymmetryPanel: React.FC<Props> = ({ countryA, countries }) => {
                         sx={{
                           width: `${frac * 100}%`,
                           height: 8,
-                          bgcolor: tokens.threat,
+                          bgcolor: tokens.nuisance,
                           borderRadius: '4px 0 0 4px',
                           opacity: 0.75,
                         }}

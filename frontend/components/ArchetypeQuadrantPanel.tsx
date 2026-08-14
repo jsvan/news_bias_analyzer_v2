@@ -18,7 +18,7 @@ import { useData } from '../context/DataContext';
 // get_entity_archetype, kernels in analyzer/narrative_metrics.py::archetype/
 // trajectory). The entity's position on the power x moral plane, aggregated
 // globally across sources, with its weekly path - how a portrayal *moves*
-// through hero/victim/villain/threat space, not just where it sits today.
+// through hero/victim/villain/nuisance space, not just where it sits today.
 // Up to two country paths can be overlaid against the global one - same
 // endpoint with its `country` filter.
 
@@ -41,7 +41,7 @@ const ARCHETYPE_DISPLAY: Record<string, { label: string; color: string }> = {
   hero: { label: 'Hero', color: tokens.hero },
   victim: { label: 'Victim', color: tokens.victim },
   villain: { label: 'Villain', color: tokens.villain },
-  nuisance: { label: 'Threat', color: tokens.threat },
+  nuisance: { label: 'Wretch', color: tokens.nuisance },
   neutral: { label: 'Neutral', color: tokens.inkMuted },
 };
 
@@ -49,7 +49,7 @@ const QUADRANT_LABELS = [
   { x: 1.1, y: 1.6, text: 'HERO', color: tokens.hero },
   { x: -1.1, y: 1.6, text: 'VICTIM', color: tokens.victim },
   { x: 1.1, y: -1.7, text: 'VILLAIN', color: tokens.villain },
-  { x: -1.1, y: -1.7, text: 'THREAT', color: tokens.threat },
+  { x: -1.1, y: -1.7, text: 'WRETCH', color: tokens.nuisance },
 ];
 
 const MAX_OVERLAYS = 2;

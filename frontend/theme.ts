@@ -14,7 +14,7 @@ export const tokens = {
   hero: '#1E7A4C',
   victim: '#7C3F8C',
   villain: '#AC2A3C',
-  threat: '#B06A0E',
+  nuisance: '#B06A0E',
   categorical: [
     '#0E6E78', // teal
     '#B06A0E', // amber
@@ -39,14 +39,14 @@ export function categoricalColor(key: string, seenOrder: string[]): string {
 
 export const archetypeColor = (powerScore: number, moralScore: number): string => {
   if (moralScore >= 0) return powerScore >= 0 ? tokens.hero : tokens.victim;
-  return powerScore >= 0 ? tokens.villain : tokens.threat;
+  return powerScore >= 0 ? tokens.villain : tokens.nuisance;
 };
 
-export type ArchetypeLabel = 'Hero' | 'Victim' | 'Villain' | 'Threat';
+export type ArchetypeLabel = 'Hero' | 'Victim' | 'Villain' | 'Wretch';
 
 export const archetypeLabel = (powerScore: number, moralScore: number): ArchetypeLabel => {
   if (moralScore >= 0) return powerScore >= 0 ? 'Hero' : 'Victim';
-  return powerScore >= 0 ? 'Villain' : 'Threat';
+  return powerScore >= 0 ? 'Villain' : 'Wretch';
 };
 
 const fontDisplay = '"Newsreader", Georgia, serif';
@@ -59,7 +59,7 @@ export const theme = createTheme({
     primary: { main: tokens.accent, dark: tokens.accentHover, contrastText: '#FFFFFF' },
     secondary: { main: tokens.villain, contrastText: '#FFFFFF' },
     success: { main: tokens.hero },
-    warning: { main: tokens.threat },
+    warning: { main: tokens.nuisance },
     error: { main: tokens.villain },
     info: { main: tokens.accent },
     background: { default: tokens.paper, paper: tokens.surface },

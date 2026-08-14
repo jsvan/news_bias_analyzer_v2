@@ -111,7 +111,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     { x: 1, y: 1, text: 'HERO', color: tokens.hero },
     { x: -1, y: 1, text: 'VICTIM', color: tokens.victim },
     { x: 1, y: -1, text: 'VILLAIN', color: tokens.villain },
-    { x: -1, y: -1, text: 'THREAT', color: tokens.threat }
+    { x: -1, y: -1, text: 'WRETCH', color: tokens.nuisance }
   ];
 
   // Dashed connectors between each entity's global anchor and its country

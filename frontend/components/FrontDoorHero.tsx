@@ -12,7 +12,7 @@ const ARCHETYPES = [
   { label: 'Hero', desc: 'high power, high moral standing', color: tokens.hero },
   { label: 'Victim', desc: 'low power, high moral standing', color: tokens.victim },
   { label: 'Villain', desc: 'high power, low moral standing', color: tokens.villain },
-  { label: 'Threat', desc: 'low power, low moral standing', color: tokens.threat },
+  { label: 'Wretch', desc: 'low power, low moral standing', color: tokens.nuisance },
 ];
 
 const Stat: React.FC<{ value: number; label: string }> = ({ value, label }) => (
@@ -58,13 +58,11 @@ const FrontDoorHero: React.FC<FrontDoorHeroProps> = ({ entityCount, sourceCount,
             mb: 2,
           } as any}
         >
-          Every source navigates the same world differently.
+          Every News Source Constructs the Same World Differently.
         </Typography>
         <Typography sx={{ color: tokens.inkMuted, maxWidth: '62ch', textWrap: 'pretty', mb: 3 } as any}>
-          If every newsroom had perfect information and no slant, coverage would move together.
-          It doesn't. This instrument reads how sources and countries portray the same people,
-          states, and organizations — then measures the distance between each one and the
-          global average. It doesn't decide who's right. It shows you where you're standing.
+          Read how sources and countries portray the same people, states, and organizations,
+          and how their opinions change.
         </Typography>
 
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
