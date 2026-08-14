@@ -34,11 +34,26 @@ pipeline's critical path.
 
 ## Cost ("free" check)
 
+Measured baseline (2026-08-14, live probes at `reasoning_effort=minimal`, batch
+rate): ~2,850 prompt + ~180 completion tokens/article after the mentions/quote
+arrays were dropped from the schema (they were 58–78% of visible output; the
+"$10/day" era was the pre-8/14 medium-reasoning default, not volume) —
+**$0.11 per 1,000 articles**. Real scrape volume is 3,600–7,000 articles/day
+(not the ~300 older estimates assumed), so total analysis spend is
+**$0.40–0.80/day** before wiki-linking.
+
 | Item | Cost |
 |---|---|
-| Extra output tokens (~10–50/article for one short field) | ≈ 2–4¢ per 1,000 articles (gpt-5-nano @ $0.40/M out) ≈ $0.01/week at current volume |
+| Wiki title field (~30–50 output tokens/article) | ≈ 1–2¢ per 1,000 articles; shrinks further with the KNOWN-list skip below |
+| `KNOWN_ENTITY_INJECTION` (~100–300 *input* tokens/article) | ≈ 1–2¢ per 1,000 articles (input is 8× cheaper than output) |
 | Wikipedia API (validation + backfill) | $0 — batched 50 titles/request, cached, polite User-Agent; tens of lookups/day after backfill |
 | Storage (2 columns + 2 small tables) | negligible |
+
+**KNOWN-list skip:** once `KNOWN_ENTITY_INJECTION` is on (validated the same
+pilot day — it has waited since July), known entities already carry validated
+page ids, so the prompt says: *for entities from the KNOWN list, emit `null`
+for wikipedia_title.* Title tokens are then only spent on never-seen entities —
+at steady state, a handful per article.
 
 ## Principles (carried over from §12)
 
@@ -69,7 +84,11 @@ pipeline's critical path.
 2. `analyzer/batch_analyzer.py::process_batch_output`: when the flag is on, append
    `(entity_id, entity_name, emitted_title)` rows to
    `batches/wiki_pilot.jsonl`. **No DB changes in this phase.**
-3. Run one day's batch with the flag on (~250–350 articles ≈ a few cents).
+3. Run one day's batch with the flag on (3,600–7,000 articles ≈ well under a
+   dollar at the measured rate). The same pilot day also turns on
+   `KNOWN_ENTITY_INJECTION` — its long-pending validation — so one day's batch
+   validates both flags against the previous day's output on every metric at
+   once.
 4. Validation script (`analyzer/tools/validate_wiki_titles.py`, offline): resolve
    every distinct emitted title via the Wikipedia API
    (`action=query&redirects=1&format=json`, 50 titles per request, results cached)

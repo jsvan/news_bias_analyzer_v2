@@ -25,20 +25,8 @@ ENTITY_SENTIMENT_SCHEMA = {
                     "entity_type": {"type": "string", "enum": ENTITY_TYPES},
                     "power_score": {"type": "number"},
                     "moral_score": {"type": "number"},
-                    "mentions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "text": {"type": "string"},
-                                "context": {"type": "string"},
-                            },
-                            "required": ["text", "context"],
-                            "additionalProperties": False,
-                        },
-                    },
                 },
-                "required": ["entity", "entity_type", "power_score", "moral_score", "mentions"],
+                "required": ["entity", "entity_type", "power_score", "moral_score"],
                 "additionalProperties": False,
             },
         },
@@ -83,9 +71,8 @@ Skip minor players, demographic groups, and entities that don't warrant politica
 
 For each key entity, provide:
 1. A precise score on each dimension using the -2 to +2 scale (decimal values are allowed)
-2. 1-2 KEY PHRASES (not full sentences) that demonstrate sentiment toward it
-3. The entity type from the valid categories listed below
-4. Use the OFFICIAL, STANDARDIZED ENGLISH name for each entity:
+2. The entity type from the valid categories listed below
+3. Use the OFFICIAL, STANDARDIZED ENGLISH name for each entity:
    - People: Full official name in English, not titles or shortened versions (e.g., "Xi Jinping", not "习近平" or "President Xi")
    - Countries: Standard English country name, not government references or capital cities (e.g., "Germany", not "Deutschland" or "Federal Republic of Germany")
    - Organizations: Official English name or widely recognized English abbreviation (e.g., "European Union", not "Union européenne")
@@ -155,10 +142,7 @@ FORMAT YOUR RESPONSE AS A JSON OBJECT with this exact structure:
       "entity": "Entity Name",
       "entity_type": "one of: country|person|business|organization|event|concept",
       "power_score": number,
-      "moral_score": number,
-      "mentions": [
-        {"text": "complete sentence from article containing the entity", "context": "explanation of how this shows power/moral sentiment"}
-      ]
+      "moral_score": number
     }
   ]
 }

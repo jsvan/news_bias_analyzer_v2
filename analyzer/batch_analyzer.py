@@ -191,9 +191,11 @@ def _reset_creation_backoff():
 # Billed output tokens per article by reasoning effort, measured on this
 # corpus: ~314 visible tokens/article (July gpt-4.1-nano run, zero reasoning)
 # vs ~7-8k total at gpt-5-nano's default "medium" (the 2026-08-14 $10 bill).
+# 2026-08-14: the mentions/quote arrays (58-78% of visible output) were dropped
+# from the schema - measured ~560 visible tokens/article with them, ~250 without.
 # Rounded up - the daily-limit guard should overestimate, never under.
 OUTPUT_TOKENS_PER_ARTICLE_BY_EFFORT = {
-    "none": 600, "minimal": 600, "low": 2500, "medium": 8000,
+    "none": 400, "minimal": 400, "low": 2500, "medium": 8000,
     "high": 16000, "xhigh": 24000, "max": 32000,
 }
 

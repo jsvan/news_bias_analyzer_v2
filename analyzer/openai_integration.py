@@ -589,8 +589,7 @@ if __name__ == "__main__":
         print(f"\n{entity['entity']} ({entity['entity_type']})")
         print(f"Power Score: {entity['power_score']}")
         print(f"Moral Score: {entity['moral_score']}")
-        print("Mentions:")
-        for mention in entity['mentions']:
+        for mention in entity.get('mentions', []):
             print(f"- \"{mention['text']}\" ({mention['context']})")
     
     print("\nAPI Usage Stats:")
