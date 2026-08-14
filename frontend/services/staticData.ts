@@ -22,7 +22,8 @@
  *   nearest snapshotted range.
  * - getTrendingEntities serves the all-time snapshot regardless of days, and
  *   returns [] for countries outside the snapshot set (DataContext hides those
- *   from the pickers in static mode).
+ *   from the pickers in static mode) and for newspapers without a per-source
+ *   file (meta.trending_sources clamps that picker).
  * - getContestedRanking serves one fixed 30-day moral-dimension snapshot
  *   regardless of days/dimension params; limit slices client-side.
  */
@@ -154,12 +155,17 @@ export const staticData = {
 
   getSources: async () => load('sources.json'),
 
-  getTrendingEntities: async (limit: number = 25, _days?: number, country?: string) => {
+  getTrendingEntities: async (limit: number = 25, _days?: number, country?: string, sourceId?: number) => {
     try {
-      const rows = await load(country ? `stats/trending_${country}.json` : 'stats/trending_global.json');
+      // Per-source files only exist for papers with enough data
+      // (meta.trending_sources is the authoritative list).
+      const rel = sourceId
+        ? `stats/trending_source_${sourceId}.json`
+        : country ? `stats/trending_${country}.json` : 'stats/trending_global.json';
+      const rows = await load(rel);
       return rows.slice(0, limit);
     } catch {
-      // Non-snapshotted country, or a pre-trending snapshot still cached.
+      // Non-snapshotted country/source, or a pre-trending snapshot still cached.
       return [];
     }
   },

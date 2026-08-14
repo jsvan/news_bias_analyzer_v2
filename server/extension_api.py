@@ -1121,6 +1121,7 @@ async def get_trending_entities(
     limit: int = Query(10, ge=1, le=100),
     days: Optional[int] = Query(None, ge=1, le=3650),
     country: Optional[str] = Query(None),
+    source_id: Optional[int] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Most-mentioned entities with average power/moral scores. Omit days for all-time.
@@ -1128,7 +1129,10 @@ async def get_trending_entities(
     Aggregates across merged entities via Entity.canonical_id (same resolution as
     /entities), so e.g. two "Donald Trump" rows surface as one canonical point.
     With country set, only mentions published by that country's sources count —
-    the same numbers, seen from one national sphere.
+    the same numbers, seen from one national sphere. With source_id set, only that
+    one newspaper's mentions count; single-paper averages over 1-2 mentions are
+    noise (per-mention scores are integers on -2..2), so source-scoped rows need
+    at least 3 mentions.
     """
     try:
         resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
@@ -1144,17 +1148,22 @@ async def get_trending_entities(
             EntityMention.moral_score.isnot(None)
         )
 
-        if country:
-            agg = agg.join(
-                NewsArticle, EntityMention.article_id == NewsArticle.id
-            ).join(
-                NewsSource, NewsArticle.source_id == NewsSource.id
-            ).filter(NewsSource.country == country)
+        if country or source_id:
+            agg = agg.join(NewsArticle, EntityMention.article_id == NewsArticle.id)
+            if source_id:
+                agg = agg.filter(NewsArticle.source_id == source_id)
+            if country:
+                agg = agg.join(
+                    NewsSource, NewsArticle.source_id == NewsSource.id
+                ).filter(NewsSource.country == country)
 
         if days:
             agg = agg.filter(EntityMention.created_at >= datetime.utcnow() - timedelta(days=days))
 
-        agg = agg.group_by(resolved_id).subquery()
+        agg = agg.group_by(resolved_id)
+        if source_id:
+            agg = agg.having(func.count(EntityMention.id) >= 3)
+        agg = agg.subquery()
 
         trending = db.query(
             Entity.id,

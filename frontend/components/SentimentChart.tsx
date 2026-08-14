@@ -18,7 +18,7 @@ import { tokens, archetypeColor } from '../theme';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
-  layer: 'global' | 'country';
+  layer: 'baseline' | 'overlay';
 }
 
 interface SentimentChartProps {
@@ -26,11 +26,14 @@ interface SentimentChartProps {
   entityTypes?: Record<string, string[]>; // Type to list of entities mapping
   height?: number;
   showLabels?: boolean;
-  // One country's reading of the same entities, drawn against the global
-  // baseline. When set, global points recede to gray anchors and the country's
-  // points carry the archetype color — the same baseline-vs-reading idiom as
-  // the My Bubble divergence glyphs.
-  overlay?: { country: string; data: EntitySentimentSummary[] } | null;
+  // One sphere's reading of the same entities (a country, or a single
+  // newspaper), drawn against the baseline. When set, baseline points recede
+  // to gray anchors and the overlay's points carry the archetype color — the
+  // same baseline-vs-reading idiom as the My Bubble divergence glyphs.
+  overlay?: { label: string; data: EntitySentimentSummary[] } | null;
+  // What `data` represents in tooltips: 'Global' unless the baseline is itself
+  // a country (the newspaper-vs-its-country comparison).
+  baselineLabel?: string;
   // entity name -> cross-country Jensen-Shannon divergence. Entities whose
   // spheres disagree get a dashed ring: a mean near neutral can be genuine
   // consensus or a fought-over average, and without this channel the two are
@@ -44,6 +47,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   height = 400,
   showLabels = true,
   overlay = null,
+  baselineLabel = 'Global',
   contested = {}
 }) => {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
@@ -67,13 +71,13 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
       ...item,
       // Radius from log mention count: 40k-mention entities read bigger without drowning 100-mention ones
       size: 5 + Math.log10(Math.max(item.mention_count || 1, 1)) * 2.2,
-      layer: 'global' as const,
+      layer: 'baseline' as const,
     }));
 
   const hasOverlay = !!overlay && overlay.data.length > 0;
 
-  // Country points are only drawn for entities present in the global set —
-  // this keeps the chart a comparison. A global entity with NO country point
+  // Overlay points are only drawn for entities present in the baseline set —
+  // this keeps the chart a comparison. A baseline entity with NO overlay point
   // is itself a finding (that sphere is silent on it), noted in the tooltip.
   const globalByName = new Map(filteredData.map((d) => [d.entity, d]));
   const overlayData: SentimentDataPoint[] = hasOverlay
@@ -82,7 +86,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
         .map((d) => ({
           ...d,
           size: 5 + Math.log10(Math.max(d.mention_count || 1, 1)) * 2.2,
-          layer: 'country' as const,
+          layer: 'overlay' as const,
         }))
     : [];
   const overlayByName = new Map(overlayData.map((d) => [d.entity, d]));
@@ -236,25 +240,25 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               if (!active || !p || !p.entity) return null;
               const jsd = contested[p.entity];
               const counterpart =
-                p.layer === 'global' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
+                p.layer === 'baseline' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
               return (
                 <Box sx={{ bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 1, px: 1.5, py: 1 }}>
                   <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
                     {p.entity}
                   </Typography>
                   <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-                    {hasOverlay ? (p.layer === 'global' ? 'Global · ' : `${overlay!.country} · `) : ''}
+                    {hasOverlay ? (p.layer === 'baseline' ? `${baselineLabel} · ` : `${overlay!.label} · `) : ''}
                     Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
                   </Typography>
                   {counterpart && (
                     <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-                      {p.layer === 'global' ? `${overlay!.country} · ` : 'Global · '}
+                      {p.layer === 'baseline' ? `${overlay!.label} · ` : `${baselineLabel} · `}
                       Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
                     </Typography>
                   )}
-                  {hasOverlay && p.layer === 'global' && !counterpart && (
+                  {hasOverlay && p.layer === 'baseline' && !counterpart && (
                     <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-                      Not among {overlay!.country}'s most-covered entities
+                      Not among {overlay!.label}'s most-covered entities
                     </Typography>
                   )}
                   {p.mention_count != null && (
@@ -290,8 +294,8 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
 
           {hasOverlay && <Customized component={renderPairLinks} />}
 
-          {/* Global layer: archetype-colored when it is the subject, receding to
-              gray anchors when a country overlay makes it the baseline. */}
+          {/* Baseline layer: archetype-colored when it is the subject, receding
+              to gray anchors when an overlay makes it the reference. */}
           <Scatter
             name="Entities"
             data={filteredData}
@@ -340,10 +344,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             )}
           </Scatter>
 
-          {/* Country layer: the selected sphere's reading, archetype-colored. */}
+          {/* Overlay layer: the selected sphere's reading, archetype-colored. */}
           {hasOverlay && (
             <Scatter
-              name={overlay!.country}
+              name={overlay!.label}
               data={overlayData}
               isAnimationActive={false}
               shape={(props: any) => {

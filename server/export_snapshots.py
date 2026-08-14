@@ -22,6 +22,12 @@ Output layout (under --out, default frontend/public/snapshots/):
     country/{Country}_{days}.json  top-entities page data. Still one file per window:
                                   unlike the entity series, these are top-10 rankings
                                   *within* each window, so the windows genuinely differ.
+    stats/trending_source_{id}.json  all-time trending scoped to one newspaper (the
+                                  entity scatter's "By newspaper" overlay). Only
+                                  written for sources with enough qualifying
+                                  entities; meta.json's trending_sources lists the
+                                  ids that exist, and the frontend clamps its
+                                  newspaper picker to that list in static mode.
     stats/contested.json         cross-country contested ranking ("The front line"
                                   panel). One fixed 30-day moral-dimension file - the
                                   only shape the page requests.
@@ -50,6 +56,9 @@ COUNTRIES = ["USA", "UK", "Canada", "Australia", "Germany",
              "France", "Japan", "Russia", "China", "India"]
 # EntityAnalysisPage asks for 40; export headroom so the page can grow.
 TRENDING_LIMIT = 100
+# A newspaper overlay with fewer entities than this can't say anything about
+# divergence — skip the file and keep the paper out of the static-mode picker.
+MIN_SOURCE_TRENDING = 5
 # ContestedEntitiesPanel shows 8; same headroom reasoning.
 CONTESTED_LIMIT = 20
 
@@ -77,16 +86,19 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
 
     fetchers: entities(limit), sources(), distribution(id), historical(id, days),
               source_historical(id, days), country_top(country, days),
-              trending(limit, country), contested(), most_recent_article_date() —
+              trending(limit, country), trending_source(source_id), contested(),
+              most_recent_article_date() —
               each returns a JSON-serializable value or raises to skip
               (most_recent_article_date raising just omits the field).
     """
     counts = {"entities": 0, "entity_files": 0, "country_files": 0,
-              "trending_files": 0, "contested_files": 0, "skipped": 0}
+              "trending_files": 0, "source_trending_files": 0,
+              "contested_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
     write_json(out_dir, "entities.json", entities)
-    write_json(out_dir, "sources.json", fetchers["sources"]())
+    sources = fetchers["sources"]()
+    write_json(out_dir, "sources.json", sources)
     counts["entities"] = len(entities)
 
     base_days = max(HIST_DAYS)
@@ -117,6 +129,26 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             print(f"  skip {rel}: {ex}")
             counts["skipped"] += 1
 
+    # Per-newspaper trending (the scatter's "By newspaper" overlay). Most of the
+    # ~150 configured sources are dead or thin — only papers that clear
+    # MIN_SOURCE_TRENDING get a file, and meta.trending_sources is the picker's
+    # source of truth for which those are. Thin sources are expected, not
+    # errors, so they aren't counted as skips (a fetcher raising still is).
+    trending_source_ids = []
+    for s in sources:
+        sid = s["id"]
+        try:
+            rows = fetchers["trending_source"](sid)
+        except Exception as ex:
+            print(f"  skip stats/trending_source_{sid}.json ({s.get('name')}): {ex}")
+            counts["skipped"] += 1
+            continue
+        if len(rows) < MIN_SOURCE_TRENDING:
+            continue
+        write_json(out_dir, f"stats/trending_source_{sid}.json", rows)
+        trending_source_ids.append(sid)
+        counts["source_trending_files"] += 1
+
     try:
         write_json(out_dir, "stats/contested.json", fetchers["contested"]())
         counts["contested_files"] = 1
@@ -142,6 +174,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         "hist_days": HIST_DAYS,
         "country_days": COUNTRY_DAYS,
         "countries": COUNTRIES,
+        "trending_sources": trending_source_ids,
     }
     try:
         # Distinct from generated_at (snapshot build time): the actual most recent
@@ -191,7 +224,11 @@ def live_fetchers(session):
             get_country_top_entities(country, days=days, limit=10, session=session)),
         "trending": lambda limit, country: run(
             # days=None: all-time, matching the page's calls.
-            get_trending_entities(limit=limit, days=None, country=country, db=session)),
+            get_trending_entities(limit=limit, days=None, country=country,
+                                  source_id=None, db=session)),
+        "trending_source": lambda sid: run(
+            get_trending_entities(limit=TRENDING_LIMIT, days=None, country=None,
+                                  source_id=sid, db=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -228,7 +265,10 @@ def self_test():
                      {"id": 2, "name": "Borg", "type": "org", "mention_count": 3}]
     fetchers = {
         "entities": lambda limit: fake_entities[:limit],
-        "sources": lambda: [{"id": 5, "name": "Src", "country": "USA", "language": "en"}],
+        "sources": lambda: [
+            {"id": 5, "name": "Src", "country": "USA", "language": "en"},
+            {"id": 6, "name": "Thin", "country": "USA", "language": "en"},
+            {"id": 7, "name": "Broken", "country": "USA", "language": "en"}],
         "distribution": lambda eid: {"entity": {"id": eid}, "distributions": {}},
         "historical": lambda eid, days: {
             "daily_data": [{"date": "2026-01-01", "power_score": 1.23456789}], "days": days},
@@ -242,6 +282,14 @@ def self_test():
                     if country == "India" else [{"id": 1, "entity": "Ada", "type": "person",
                                                  "power_score": 1.0, "moral_score": 0.5,
                                                  "mention_count": 9}][:limit],
+        # id 5 clears MIN_SOURCE_TRENDING, id 6 is thin (silently no file),
+        # id 7 raises (counted as a skip).
+        "trending_source": lambda sid: (_ for _ in ()).throw(ValueError("boom"))
+                           if sid == 7 else
+                           [{"id": i, "entity": f"E{i}", "type": "person",
+                             "power_score": 0.5, "moral_score": -0.5,
+                             "mention_count": 3}
+                            for i in range(MIN_SOURCE_TRENDING if sid == 5 else 2)],
         "contested": lambda: {"days": 30, "dimension": "moral",
                               "entities": [{"entity_name": "Ada",
                                             "divergence": 0.55555555}]},
@@ -254,7 +302,8 @@ def self_test():
         assert counts["entity_files"] == 1          # entity 2 fails -> skipped whole bundle
         assert counts["country_files"] == 9 * len(COUNTRY_DAYS)
         assert counts["trending_files"] == len(COUNTRIES)  # global + 9 (India fails)
-        assert counts["skipped"] == 1 + len(COUNTRY_DAYS) + 1
+        assert counts["source_trending_files"] == 1        # 5 written, 6 thin, 7 raises
+        assert counts["skipped"] == 1 + len(COUNTRY_DAYS) + 1 + 1
 
         with open(os.path.join(out, "entity", "1.json")) as f:
             bundle = json.load(f)
@@ -273,6 +322,10 @@ def self_test():
         assert os.path.exists(os.path.join(out, "stats", "trending_USA.json"))
         assert not os.path.exists(os.path.join(out, "stats", "trending_India.json"))
 
+        assert os.path.exists(os.path.join(out, "stats", "trending_source_5.json"))
+        assert not os.path.exists(os.path.join(out, "stats", "trending_source_6.json"))
+        assert not os.path.exists(os.path.join(out, "stats", "trending_source_7.json"))
+
         assert counts["contested_files"] == 1
         with open(os.path.join(out, "stats", "contested.json")) as f:
             contested = json.load(f)
@@ -282,6 +335,7 @@ def self_test():
             meta = json.load(f)
         assert meta["entity_count"] == 2 and meta["hist_days"] == HIST_DAYS
         assert meta["format"] == 2
+        assert meta["trending_sources"] == [5]
         assert meta["most_recent_article_date"] == "2026-01-01T00:00:00+00:00"
 
     print("export_snapshots self-test OK")

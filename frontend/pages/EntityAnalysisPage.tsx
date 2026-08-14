@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -11,30 +11,45 @@ import {
   Autocomplete,
   TextField,
   IconButton,
+  Tab,
+  Tabs,
   Tooltip,
   Chip,
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import { useData } from '../context/DataContext';
 import { statsApi, narrativeApi } from '../services/api';
+import { isStaticMode } from '../services/config/environment';
 import SentimentChart from '../components/SentimentChart';
 import ContestedEntitiesPanel from '../components/ContestedEntitiesPanel';
 import DriftFeedPanel from '../components/DriftFeedPanel';
-import { EntitySentimentSummary } from '../types';
+import { EntitySentimentSummary, NewsSource } from '../types';
 import { tokens, archetypeColor, archetypeLabel, monoNumber, ArchetypeLabel } from '../theme';
 
 const ARCHETYPES: ArchetypeLabel[] = ['Hero', 'Victim', 'Villain', 'Wretch'];
 
 const EntityAnalysisPage: React.FC = () => {
-  const { entities, availableCountries } = useData();
+  const { entities, sources, meta, availableCountries } = useData();
   const navigate = useNavigate();
   const [selectedArchetypes, setSelectedArchetypes] = useState<ArchetypeLabel[]>([]);
   const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
+
+  // Two flavors of the same comparison, as tabs: a country's sphere against the
+  // global baseline, or a single newspaper against its country (or the globe).
+  const [scatterTab, setScatterTab] = useState(0);
 
   // The comparison layer: one country's reading of the same entities, drawn
   // against the global baseline instead of replacing it.
   const [overlayCountry, setOverlayCountry] = useState<string | null>(null);
   const [overlayEntities, setOverlayEntities] = useState<EntitySentimentSummary[]>([]);
+
+  // "By newspaper": one paper's reading, drawn against a chosen baseline —
+  // its own country by default (the divergence people actually wonder about),
+  // or the global average.
+  const [selectedSource, setSelectedSource] = useState<NewsSource | null>(null);
+  const [sourceBaseline, setSourceBaseline] = useState<string>('Global');
+  const [sourceEntities, setSourceEntities] = useState<EntitySentimentSummary[]>([]);
+  const [baselineEntities, setBaselineEntities] = useState<EntitySentimentSummary[]>([]);
 
   // entity name -> cross-country JSD, so contested entities are visually
   // distinct from genuinely neutral ones (both average near the origin).
@@ -76,9 +91,75 @@ const EntityAnalysisPage: React.FC = () => {
     };
   }, [overlayCountry]);
 
-  const filteredHighlighted = selectedArchetypes.length
-    ? highlightedEntities.filter((e) => selectedArchetypes.includes(archetypeLabel(e.power_score, e.moral_score)))
-    : highlightedEntities;
+  // The paper's own reading. Limit 100 (vs the baseline's 40): per-source
+  // coverage is sparse and the chart only draws entities shared with the
+  // baseline, so extra overlay rows just improve pairing.
+  useEffect(() => {
+    if (!selectedSource) {
+      setSourceEntities([]);
+      return;
+    }
+    let cancelled = false;
+    statsApi
+      .getTrendingEntities(100, undefined, undefined, selectedSource.id)
+      .then((data) => {
+        if (!cancelled) setSourceEntities(data);
+      })
+      .catch(() => {
+        if (!cancelled) setSourceEntities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSource]);
+
+  useEffect(() => {
+    if (sourceBaseline === 'Global') {
+      setBaselineEntities([]);
+      return;
+    }
+    let cancelled = false;
+    statsApi
+      .getTrendingEntities(40, undefined, sourceBaseline)
+      .then((data) => {
+        if (!cancelled) setBaselineEntities(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBaselineEntities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceBaseline]);
+
+  // Static mode only snapshots papers with enough scored mentions
+  // (meta.trending_sources) — offering the rest would give empty overlays.
+  const newspaperOptions = useMemo(() => {
+    const snapshotted =
+      isStaticMode() && meta?.trending_sources ? new Set(meta.trending_sources) : null;
+    return sources
+      .filter((s) => !snapshotted || snapshotted.has(s.id))
+      .slice()
+      .sort(
+        (a, b) =>
+          (a.country || '').localeCompare(b.country || '') || a.name.localeCompare(b.name)
+      );
+  }, [sources, meta]);
+
+  const handleSourceChange = (s: NewsSource | null) => {
+    setSelectedSource(s);
+    // Default baseline: the paper's own country when we have data for it
+    // (static mode only snapshots some countries), else the global average.
+    setSourceBaseline(s && availableCountries.includes(s.country) ? s.country : 'Global');
+  };
+
+  const byArchetype = (list: EntitySentimentSummary[]) =>
+    selectedArchetypes.length
+      ? list.filter((e) => selectedArchetypes.includes(archetypeLabel(e.power_score, e.moral_score)))
+      : list;
+
+  const filteredHighlighted = byArchetype(highlightedEntities);
+  const newspaperBaseline = sourceBaseline === 'Global' ? highlightedEntities : baselineEntities;
 
   const toggleArchetype = (a: ArchetypeLabel) => {
     setSelectedArchetypes((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
@@ -130,12 +211,16 @@ const EntityAnalysisPage: React.FC = () => {
             <CardHeader
               title="Entity Sentiment Analysis"
               subheader={
-                overlayCountry
-                  ? `Gray: global baseline. Colored: how ${overlayCountry}'s sources read the same entities.`
-                  : 'Power vs. Moral positioning of key entities, all sources combined'
+                scatterTab === 0
+                  ? overlayCountry
+                    ? `Gray: global baseline. Colored: how ${overlayCountry}'s sources read the same entities.`
+                    : 'Power vs. Moral positioning of key entities, all sources combined'
+                  : selectedSource
+                    ? `Gray: ${sourceBaseline === 'Global' ? 'global baseline' : `${sourceBaseline}'s sources`}. Colored: how ${selectedSource.name} reads the same entities.`
+                    : 'Pick a newspaper to see how far it strays from its country — or the world'
               }
               action={
-                <Tooltip title="Each dot is an entity's average position across analyzed coverage; the quadrants are narrative archetypes. A dashed ring marks entities whose national spheres disagree most (cross-country Jensen-Shannon divergence) — a ringed dot near the center is an average of conflicting readings, not consensus. Pick a country to overlay its reading against the global baseline.">
+                <Tooltip title="Each dot is an entity's average position across analyzed coverage; the quadrants are narrative archetypes. A dashed ring marks entities whose national spheres disagree most (cross-country Jensen-Shannon divergence) — a ringed dot near the center is an average of conflicting readings, not consensus. Overlay a country against the global baseline, or a single newspaper against its own country's sphere.">
                   <IconButton>
                     <InfoIcon />
                   </IconButton>
@@ -143,32 +228,75 @@ const EntityAnalysisPage: React.FC = () => {
               }
             />
             <CardContent>
-              <Autocomplete
-                size="small"
-                options={availableCountries}
-                value={overlayCountry}
-                onChange={(_, v) => setOverlayCountry(v)}
-                renderInput={(params) => (
-                  <TextField {...params} label="Compare a country against the global baseline" />
-                )}
-                sx={{ maxWidth: 360, mb: 1 }}
-              />
+              <Tabs
+                value={scatterTab}
+                onChange={(_, v) => setScatterTab(v)}
+                sx={{ mb: 1.5, minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}
+              >
+                <Tab label="By country" />
+                <Tab label="By newspaper" />
+              </Tabs>
+              {scatterTab === 0 ? (
+                <Autocomplete
+                  size="small"
+                  options={availableCountries}
+                  value={overlayCountry}
+                  onChange={(_, v) => setOverlayCountry(v)}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Compare a country against the global baseline" />
+                  )}
+                  sx={{ maxWidth: 360, mb: 1 }}
+                />
+              ) : (
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+                  <Autocomplete
+                    size="small"
+                    options={newspaperOptions}
+                    groupBy={(s) => s.country || 'Other'}
+                    getOptionLabel={(s) => s.name}
+                    value={selectedSource}
+                    onChange={(_, v) => handleSourceChange(v)}
+                    renderInput={(params) => <TextField {...params} label="Newspaper" />}
+                    sx={{ flex: 1, minWidth: 240, maxWidth: 360 }}
+                  />
+                  <Autocomplete
+                    size="small"
+                    disableClearable
+                    options={['Global', ...availableCountries]}
+                    value={sourceBaseline}
+                    onChange={(_, v) => setSourceBaseline(v)}
+                    renderInput={(params) => <TextField {...params} label="Compare against" />}
+                    sx={{ minWidth: 200 }}
+                  />
+                </Box>
+              )}
               <SentimentChart
-                data={filteredHighlighted}
+                data={scatterTab === 0 ? filteredHighlighted : byArchetype(newspaperBaseline)}
                 height={500}
                 showLabels={true}
                 overlay={
-                  overlayCountry && overlayEntities.length > 0
-                    ? { country: overlayCountry, data: overlayEntities }
-                    : null
+                  scatterTab === 0
+                    ? overlayCountry && overlayEntities.length > 0
+                      ? { label: overlayCountry, data: overlayEntities }
+                      : null
+                    : selectedSource && sourceEntities.length > 0
+                      ? { label: selectedSource.name, data: sourceEntities }
+                      : null
                 }
+                baselineLabel={scatterTab === 1 && sourceBaseline !== 'Global' ? sourceBaseline : 'Global'}
                 contested={contested}
               />
               <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
                 Dashed ring = contested across countries (stronger ring, sharper disagreement).
-                {overlayCountry
-                  ? ' Dashed line = the gap between the global baseline and this country’s reading; a gray dot with no partner is an entity this country’s press is largely silent on.'
-                  : ' Averages hide contestation — overlay a country to see who disagrees.'}
+                {scatterTab === 0
+                  ? overlayCountry
+                    ? ' Dashed line = the gap between the global baseline and this country’s reading; a gray dot with no partner is an entity this country’s press is largely silent on.'
+                    : ' Averages hide contestation — overlay a country to see who disagrees.'
+                  : selectedSource
+                    ? sourceEntities.length > 0
+                      ? ' Dashed line = the gap between the baseline and this paper’s reading; a gray dot with no partner is an entity this paper has barely covered (fewer than 3 scored mentions).'
+                      : ` Not enough scored coverage from ${selectedSource.name} yet to draw its reading.`
+                    : ' National averages hide the outliers — pick a paper to see how far one newsroom strays from its sphere.'}
               </Typography>
             </CardContent>
           </Card>

@@ -28,6 +28,9 @@ export interface SnapshotMeta {
   hist_days: number[];
   country_days: number[];
   countries: string[];
+  // Source ids with a stats/trending_source_{id}.json snapshot - the newspaper
+  // scatter overlay only offers these in static mode. Absent in older snapshots.
+  trending_sources?: number[];
 }
 
 // Sentiment Data Types

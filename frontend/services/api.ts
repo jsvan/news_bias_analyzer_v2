@@ -208,9 +208,10 @@ export const statsApi = {
   },
   
   // Most-mentioned entities with average power/moral scores. days omitted = all time;
-  // country omitted = all sources worldwide (the global baseline).
-  getTrendingEntities: async (limit: number = 25, days?: number, country?: string) => {
-    if (isStaticMode()) return staticData.getTrendingEntities(limit, days, country);
+  // country omitted = all sources worldwide (the global baseline); sourceId set =
+  // one newspaper's reading (the backend requires >=3 mentions per entity there).
+  getTrendingEntities: async (limit: number = 25, days?: number, country?: string, sourceId?: number) => {
+    if (isStaticMode()) return staticData.getTrendingEntities(limit, days, country, sourceId);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access entity sentiment data.');
     }
@@ -218,6 +219,7 @@ export const statsApi = {
     const params: any = { limit };
     if (days) params.days = days;
     if (country) params.country = country;
+    if (sourceId) params.source_id = sourceId;
     const response = await api.get('/stats/trending_entities', { params });
     return response.data;
   },
