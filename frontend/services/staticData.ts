@@ -6,12 +6,20 @@
  * (GitHub Pages, or VITE_DATA_MODE=static). Only the methods the pages actually
  * call are implemented.
  *
+ * Snapshot format 2: each entity bundle carries ONE timestamped daily series
+ * (the base_days=365 API response) for historical and source_historical; the
+ * slice* helpers below derive any shorter window from it, reproducing each
+ * endpoint's own summary math (mention-weighted mean for the entity summary,
+ * unweighted daily mean for per-source summaries). Format-1 bundles (a full
+ * copy per window) are still readable for cache-skew resilience.
+ *
  * Known degradations vs the live API, by design:
  * - Search covers only the snapshotted top-N entities.
  * - getSourceHistoricalSentiment returns country-level aggregates (the no-filter
  *   branch of the live endpoint); a countries filter selects among those rather
  *   than expanding to per-source series.
- * - days values are clamped to the nearest snapshotted range.
+ * - entity history windows clamp to base_days; country pages clamp to the
+ *   nearest snapshotted range.
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -42,6 +50,66 @@ function load(relPath: string): Promise<any> {
 
 const entityBundle = (id: number) => load(`entity/${id}.json`);
 
+// ---- Window slicing (snapshot format 2) ------------------------------------
+// The base response's daily rows are date-stamped (YYYY-MM-DD, so string
+// comparison is chronological); a shorter window is just the rows on or after
+// its start date, with the summary recomputed the way the live endpoint does.
+
+function windowStart(endIso: string, days: number): string {
+  const end = new Date(`${endIso}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() - days);
+  return end.toISOString().slice(0, 10);
+}
+
+function sliceHistorical(base: any, days: number) {
+  const start = windowStart(base.date_range.end, days);
+  const daily = base.daily_data.filter((r: any) => r.date >= start);
+  const mentions = daily.reduce((s: number, r: any) => s + r.mention_count, 0);
+  // Mention-weighted: matches the live endpoint's AVG over individual mentions.
+  const wavg = (k: string) => mentions
+    ? daily.reduce((s: number, r: any) => s + r[k] * r.mention_count, 0) / mentions
+    : 0;
+  return {
+    ...base,
+    date_range: { start, end: base.date_range.end, days },
+    daily_data: daily,
+    summary: {
+      avg_power_score: wavg('power_score'),
+      avg_moral_score: wavg('moral_score'),
+      total_mentions: mentions,
+    },
+  };
+}
+
+function sliceSourceHistorical(base: any, days: number) {
+  const start = windowStart(base.date_range.end, days);
+  const sliced: [string, any][] = [];
+  for (const [key, src] of Object.entries<any>(base.sources)) {
+    const daily = src.daily_data.filter((r: any) => r.date >= start);
+    if (!daily.length) continue;  // source has no data inside this window
+    // Unweighted mean of daily values: matches the live endpoint's summary.
+    const mean = (k: string) =>
+      daily.reduce((s: number, r: any) => s + r[k], 0) / daily.length;
+    sliced.push([key, {
+      ...src,
+      daily_data: daily,
+      summary: {
+        avg_power_score: mean('power_score'),
+        avg_moral_score: mean('moral_score'),
+        total_mentions: daily.reduce((s: number, r: any) => s + r.mention_count, 0),
+        days_with_data: daily.length,
+      },
+    }]);
+  }
+  // The live endpoint orders sources by total mentions within the window.
+  sliced.sort((a, b) => b[1].summary.total_mentions - a[1].summary.total_mentions);
+  return {
+    ...base,
+    date_range: { start, end: base.date_range.end, days },
+    sources: Object.fromEntries(sliced),
+  };
+}
+
 export const staticData = {
   getMeta: async () => load('meta.json'),
 
@@ -70,13 +138,20 @@ export const staticData = {
     (await entityBundle(id)).distribution,
 
   getHistoricalSentiment: async (entityId: number, params: any = {}) => {
-    const days = nearestDays(params.days ?? 30, HIST_DAYS);
-    return (await entityBundle(entityId)).historical[String(days)];
+    const bundle = await entityBundle(entityId);
+    if (bundle.format >= 2) {
+      const days = Math.min(params.days ?? 30, bundle.base_days);
+      return sliceHistorical(bundle.historical, days);
+    }
+    return bundle.historical[String(nearestDays(params.days ?? 30, HIST_DAYS))];
   },
 
   getSourceHistoricalSentiment: async (entityId: number, params: any = {}) => {
-    const days = nearestDays(params.days ?? 30, HIST_DAYS);
-    const data = (await entityBundle(entityId)).source_historical[String(days)];
+    const bundle = await entityBundle(entityId);
+    const data = bundle.format >= 2
+      ? sliceSourceHistorical(bundle.source_historical,
+          Math.min(params.days ?? 30, bundle.base_days))
+      : bundle.source_historical[String(nearestDays(params.days ?? 30, HIST_DAYS))];
     if (params.countries?.length) {
       const wanted = new Set(params.countries);
       const sources: Record<string, any> = {};

@@ -6,15 +6,25 @@ their return values to files — the snapshot shapes therefore always match the
 API shapes, with nothing duplicated.
 
 Output layout (under --out, default frontend/public/snapshots/):
-    meta.json                    {generated_at, most_recent_article_date, entity_count,
-                                  hist_days, countries} — generated_at is snapshot build
-                                  time; most_recent_article_date is the honest freshness
-                                  signal (the two can diverge a lot if scraping stalls)
+    meta.json                    {format, generated_at, most_recent_article_date,
+                                  entity_count, hist_days, countries} — generated_at is
+                                  snapshot build time; most_recent_article_date is the
+                                  honest freshness signal (the two can diverge a lot if
+                                  scraping stalls)
     entities.json                top-N entities (dashboard list + client-side search)
     sources.json                 all sources
-    entity/{id}.json             {entity, distribution, historical: {days: ...},
-                                  source_historical: {days: ...}}
-    country/{Country}_{days}.json  top-entities page data
+    entity/{id}.json             format 2: {format: 2, entity, distribution, base_days,
+                                  historical, source_historical} where historical and
+                                  source_historical are the single base_days(=365) API
+                                  responses; the frontend (staticData.ts) slices shorter
+                                  windows from the timestamped daily rows client-side.
+                                  (Format 1 stored a full copy per window — 5x bloat.)
+    country/{Country}_{days}.json  top-entities page data. Still one file per window:
+                                  unlike the entity series, these are top-10 rankings
+                                  *within* each window, so the windows genuinely differ.
+
+All floats are rounded to 4 decimals on write (scores live on a -2..2 scale and the
+UI shows 1-2 decimals; full float repr was pure bloat).
 
 Run on the machine with the database:
     python -m server.export_snapshots --entities 200
@@ -37,11 +47,21 @@ COUNTRIES = ["USA", "UK", "Canada", "Australia", "Germany",
              "France", "Japan", "Russia", "China", "India"]
 
 
+def round_floats(o, ndigits: int = 4):
+    if isinstance(o, float):
+        return round(o, ndigits)
+    if isinstance(o, dict):
+        return {k: round_floats(v, ndigits) for k, v in o.items()}
+    if isinstance(o, list):
+        return [round_floats(v, ndigits) for v in o]
+    return o
+
+
 def write_json(out_dir: str, rel_path: str, data) -> str:
     path = os.path.join(out_dir, rel_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
-        json.dump(data, f, separators=(",", ":"), default=str)
+        json.dump(round_floats(data), f, separators=(",", ":"), default=str)
     return path
 
 
@@ -60,14 +80,16 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     write_json(out_dir, "sources.json", fetchers["sources"]())
     counts["entities"] = len(entities)
 
+    base_days = max(HIST_DAYS)
     for e in entities:
         eid = e["id"]
-        bundle = {"entity": e, "historical": {}, "source_historical": {}}
+        # One base_days response each; staticData.ts derives shorter windows
+        # from the timestamped daily rows (they're strict subsets).
+        bundle = {"format": 2, "entity": e, "base_days": base_days}
         try:
             bundle["distribution"] = fetchers["distribution"](eid)
-            for days in HIST_DAYS:
-                bundle["historical"][str(days)] = fetchers["historical"](eid, days)
-                bundle["source_historical"][str(days)] = fetchers["source_historical"](eid, days)
+            bundle["historical"] = fetchers["historical"](eid, base_days)
+            bundle["source_historical"] = fetchers["source_historical"](eid, base_days)
         except Exception as ex:
             print(f"  skip entity {eid} ({e.get('name')}): {ex}")
             counts["skipped"] += 1
@@ -87,6 +109,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             counts["country_files"] += 1
 
     meta = {
+        "format": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entity_count": counts["entities"],
         "hist_days": HIST_DAYS,
@@ -172,7 +195,8 @@ def self_test():
         "entities": lambda limit: fake_entities[:limit],
         "sources": lambda: [{"id": 5, "name": "Src", "country": "USA", "language": "en"}],
         "distribution": lambda eid: {"entity": {"id": eid}, "distributions": {}},
-        "historical": lambda eid, days: {"daily_data": [], "days": days},
+        "historical": lambda eid, days: {
+            "daily_data": [{"date": "2026-01-01", "power_score": 1.23456789}], "days": days},
         "source_historical": lambda eid, days: (_ for _ in ()).throw(ValueError("no data"))
                              if eid == 2 else {"sources": {}, "days": days},
         "country_top": lambda country, days: {"country": country, "entities": [],
@@ -191,9 +215,11 @@ def self_test():
 
         with open(os.path.join(out, "entity", "1.json")) as f:
             bundle = json.load(f)
-        assert set(bundle) == {"entity", "distribution", "historical", "source_historical"}
-        assert set(bundle["historical"]) == {str(d) for d in HIST_DAYS}
-        assert bundle["historical"]["90"]["days"] == 90
+        assert set(bundle) == {"format", "entity", "base_days",
+                               "distribution", "historical", "source_historical"}
+        assert bundle["format"] == 2 and bundle["base_days"] == max(HIST_DAYS)
+        assert bundle["historical"]["days"] == max(HIST_DAYS)
+        assert bundle["historical"]["daily_data"][0]["power_score"] == 1.2346  # rounded
 
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30
@@ -202,6 +228,7 @@ def self_test():
         with open(os.path.join(out, "meta.json")) as f:
             meta = json.load(f)
         assert meta["entity_count"] == 2 and meta["hist_days"] == HIST_DAYS
+        assert meta["format"] == 2
         assert meta["most_recent_article_date"] == "2026-01-01T00:00:00+00:00"
 
     print("export_snapshots self-test OK")
