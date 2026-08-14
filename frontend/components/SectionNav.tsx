@@ -11,6 +11,7 @@ const SECTIONS = [
   { to: '/stories', label: 'Stories' },
   { to: '/my-bubble', label: 'My Bubble' },
   { to: '/methodology', label: 'How this works' },
+  { to: '/infrastructure', label: 'Infrastructure' },
 ];
 
 const linkStyle = (isActive: boolean): React.CSSProperties => ({
