@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { entityApi, sourcesApi, metaApi } from '../services/api';
+import { isStaticMode } from '../services/config/environment';
 import { Entity, NewsSource, SnapshotMeta } from '../types';
 
 interface DataContextValue {
@@ -57,7 +58,11 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refresh = useCallback(() => load(true), [load]);
 
-  const availableCountries = [...new Set(sources.map((s) => s.country).filter(Boolean))].sort();
+  // Static mode: only meta.countries have country snapshots — offering the full
+  // source-country list would give pickers entries with no data behind them.
+  const availableCountries = isStaticMode() && meta?.countries?.length
+    ? [...meta.countries].sort()
+    : [...new Set(sources.map((s) => s.country).filter(Boolean))].sort();
 
   const getEntityById = useCallback((id: number) => entities.find((e) => e.id === id), [entities]);
   const getSourceByName = useCallback((name: string) => sources.find((s) => s.name === name), [sources]);

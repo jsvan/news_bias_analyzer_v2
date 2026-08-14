@@ -45,6 +45,8 @@ HIST_DAYS = [7, 30, 90, 180, 365]
 COUNTRY_DAYS = [7, 30, 90]
 COUNTRIES = ["USA", "UK", "Canada", "Australia", "Germany",
              "France", "Japan", "Russia", "China", "India"]
+# EntityAnalysisPage asks for 40; export headroom so the page can grow.
+TRENDING_LIMIT = 100
 
 
 def round_floats(o, ndigits: int = 4):
@@ -70,10 +72,12 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
 
     fetchers: entities(limit), sources(), distribution(id), historical(id, days),
               source_historical(id, days), country_top(country, days),
-              most_recent_article_date() — each returns a JSON-serializable value or
-              raises to skip (most_recent_article_date raising just omits the field).
+              trending(limit, country), most_recent_article_date() — each returns a
+              JSON-serializable value or raises to skip (most_recent_article_date
+              raising just omits the field).
     """
-    counts = {"entities": 0, "entity_files": 0, "country_files": 0, "skipped": 0}
+    counts = {"entities": 0, "entity_files": 0, "country_files": 0,
+              "trending_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
     write_json(out_dir, "entities.json", entities)
@@ -96,6 +100,17 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             continue
         write_json(out_dir, f"entity/{eid}.json", bundle)
         counts["entity_files"] += 1
+
+    # All-time trending (the entity scatter): one global file plus one per
+    # snapshotted country. No days variants — the page only asks for all-time.
+    for country in [None] + COUNTRIES:
+        rel = f"stats/trending_{country or 'global'}.json"
+        try:
+            write_json(out_dir, rel, fetchers["trending"](TRENDING_LIMIT, country))
+            counts["trending_files"] += 1
+        except Exception as ex:
+            print(f"  skip {rel}: {ex}")
+            counts["skipped"] += 1
 
     for country in COUNTRIES:
         for days in COUNTRY_DAYS:
@@ -136,6 +151,7 @@ def live_fetchers(session):
     from server.extension_api import (
         get_entities, get_sources, get_entity_distribution,
         get_historical_sentiment, get_source_historical_sentiment,
+        get_trending_entities,
     )
     from server.routers.statistical_endpoints import get_country_top_entities
 
@@ -160,6 +176,9 @@ def live_fetchers(session):
             get_source_historical_sentiment(eid, days=days, countries=None, db=session)),
         "country_top": lambda country, days: run(
             get_country_top_entities(country, days=days, limit=10, session=session)),
+        "trending": lambda limit, country: run(
+            # days=None: all-time, matching the page's calls.
+            get_trending_entities(limit=limit, days=None, country=country, db=session)),
         "most_recent_article_date": most_recent_article_date,
     }
 
@@ -203,6 +222,10 @@ def self_test():
                                               "available_newspapers": [],
                                               "time_period_days": days}
                        if country != "India" else (_ for _ in ()).throw(ValueError("no data")),
+        "trending": lambda limit, country: (_ for _ in ()).throw(ValueError("no data"))
+                    if country == "India" else [{"id": 1, "entity": "Ada", "type": "person",
+                                                 "power_score": 1.0, "moral_score": 0.5,
+                                                 "mention_count": 9}][:limit],
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
@@ -211,7 +234,8 @@ def self_test():
         assert counts["entities"] == 2
         assert counts["entity_files"] == 1          # entity 2 fails -> skipped whole bundle
         assert counts["country_files"] == 9 * len(COUNTRY_DAYS)
-        assert counts["skipped"] == 1 + len(COUNTRY_DAYS)
+        assert counts["trending_files"] == len(COUNTRIES)  # global + 9 (India fails)
+        assert counts["skipped"] == 1 + len(COUNTRY_DAYS) + 1
 
         with open(os.path.join(out, "entity", "1.json")) as f:
             bundle = json.load(f)
@@ -224,6 +248,11 @@ def self_test():
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30
         assert not os.path.exists(os.path.join(out, "country", "India_30.json"))
+
+        with open(os.path.join(out, "stats", "trending_global.json")) as f:
+            assert json.load(f)[0]["entity"] == "Ada"
+        assert os.path.exists(os.path.join(out, "stats", "trending_USA.json"))
+        assert not os.path.exists(os.path.join(out, "stats", "trending_India.json"))
 
         with open(os.path.join(out, "meta.json")) as f:
             meta = json.load(f)

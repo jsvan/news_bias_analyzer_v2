@@ -210,6 +210,7 @@ export const statsApi = {
   // Most-mentioned entities with average power/moral scores. days omitted = all time;
   // country omitted = all sources worldwide (the global baseline).
   getTrendingEntities: async (limit: number = 25, days?: number, country?: string) => {
+    if (isStaticMode()) return staticData.getTrendingEntities(limit, days, country);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access entity sentiment data.');
     }

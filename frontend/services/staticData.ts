@@ -20,6 +20,9 @@
  *   than expanding to per-source series.
  * - entity history windows clamp to base_days; country pages clamp to the
  *   nearest snapshotted range.
+ * - getTrendingEntities serves the all-time snapshot regardless of days, and
+ *   returns [] for countries outside the snapshot set (DataContext hides those
+ *   from the pickers in static mode).
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -133,6 +136,16 @@ export const staticData = {
   },
 
   getSources: async () => load('sources.json'),
+
+  getTrendingEntities: async (limit: number = 25, _days?: number, country?: string) => {
+    try {
+      const rows = await load(country ? `stats/trending_${country}.json` : 'stats/trending_global.json');
+      return rows.slice(0, limit);
+    } catch {
+      // Non-snapshotted country, or a pre-trending snapshot still cached.
+      return [];
+    }
+  },
 
   getEntityDistribution: async (id: number) =>
     (await entityBundle(id)).distribution,
