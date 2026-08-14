@@ -91,7 +91,10 @@ link and backfill → skip turns on for linked entities.
      corpus behavior is byte-identical.
 2. `analyzer/batch_analyzer.py::process_batch_output`: when the flag is on, append
    `(entity_id, entity_name, emitted_title)` rows to
-   `batches/wiki_pilot.jsonl`. **No DB changes in this phase.**
+   `batches/wiki_pilot.jsonl` — **including `null` emissions**. The segmented
+   emission gate needs the denominator, and "the model repeatedly declined to
+   link" is different signal from "the entity was never asked." **No DB changes
+   in this phase.**
 3. Run the pilot as **two separate days** (each 3,600–7,000 articles ≈ well
    under a dollar): **Day 1 — `WIKI_TITLE_LINKING` alone**, so every wiki gate
    is measured against today's baseline extraction behavior. **Day 2 — add
@@ -124,7 +127,15 @@ link and backfill → skip turns on for linked entities.
   entities that became notable after the model's training cutoff legitimately
   have no page, and a correct `null` there is the model doing its job.
   Breaking-news entities are a structural blind spot; fall-through to the name
-  machinery is the designed handling.
+  machinery is the designed handling. **English-wiki anchor caveat:** this is
+  an international corpus (German, Spanish, Korean… sources), and regionally
+  notable entities often have articles only on other-language wikis — they will
+  *correctly* emit null and stay unlinked. If the ≥5-mention segment misses its
+  target with the misses clustering on non-English entities, that is a corpus
+  finding, not a model failure — adjust the gate, don't conclude no-go. If that
+  population turns out to matter, the fix is Wikidata QIDs via sitelinks
+  (language-neutral identity; the API returns `wikibase_item` anyway — see
+  Phase 5).
 - Validation: ≥ ~85% of emitted titles resolve to a real page.
 - Consistency: among entity pairs the *current* name machinery already merges,
   ≥ 95% share a page id (sanity check on both systems).
@@ -167,7 +178,10 @@ mechanism.)*
   extraction-model swap auditable (votes from a differently-biased model would
   otherwise mix silently with new ones); retrofitting them means losing
   history. gpt-5.6-luna is already the named quality-upgrade path, so a swap is
-  plausible, not hypothetical.
+  plausible, not hypothetical. **Null emissions are recorded as votes too**
+  (`raw_title` nullable): a flood of nulls for an entity is the model
+  repeatedly declining to link — its own signal, and the denominator every
+  rate needs.
 - `wiki_title_cache (raw_title PK, canonical_title, page_id, checked_at)` — every
   Wikipedia lookup goes through this; steady-state API volume is only never-seen
   titles.
@@ -287,7 +301,10 @@ One-time job, roughly an hour of polite API calls, $0.
 - Free enrichment unlocked for later, all optional: entity pages can link to
   Wikipedia; the same API returns the Wikidata QID, which opens relationship-aware
   views (e.g. a "Meta including its leadership" rollup via P169/P488 — as an
-  additive query-time grouping, never a merge).
+  additive query-time grouping, never a merge). The QID is also the upgrade
+  path if the English-wiki anchor proves too narrow for this international
+  corpus: sitelinks make identity language-neutral, so a de-wiki-only
+  politician links the same as an en-wiki one.
 
 ## Duplicate suggesters (suggest-only, feed the review log)
 
@@ -318,6 +335,15 @@ Each phase ships and reverts independently. Phase 0 is an afternoon including
 batch turnaround; Phases 1–3 about a day; Phase 4 an hour of runtime. The compose
 default for `WIKI_TITLE_LINKING` stays off until Phase 3 has run clean on a week
 of daily batches.
+
+**Success measures (post-rollout, so the expected payoff is checked, not
+assumed):** weekly new-duplicate mint rate among wiki-linked entities (should
+drop hard — transliterations, suffix variants, acronyms, and renames are
+exactly what the redirect graph memorizes), and ALIASES growth rate (should
+plateau into an override/long-tail tool). The honest residual stays on the
+name machinery by design: local figures, small companies, breaking-news
+entities — curation shrinks rather than disappears, but that tail carries thin
+sentiment histories, so the stakes of a missed merge there are low.
 
 One gate does not retire at go-live: all votes come from the same model with the
 same biases, so a confident majority can still be confidently wrong (same-type
