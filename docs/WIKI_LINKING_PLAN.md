@@ -88,6 +88,15 @@ pipeline's critical path.
 - Effort sensitivity: we run extraction at `reasoning_effort=minimal`; if
   validation rate is poor, re-pilot the same articles at `low` and compare (still
   cents) before concluding anything.
+- **Emission disagreement**: of entities with ≥2 emissions in the pilot, the
+  fraction whose emissions resolve to more than one page id. This decides the
+  Phase 2 trust rule: under ~1%, relax "≥2 votes + >60% majority" to
+  first-validated-emission-links-it and lean on the guardrails + disagreement
+  report (note the trade: singletons then link from one shot, and the tail's
+  protection rests entirely on type-class + co-mention veto); at a few percent,
+  the majority gate stays. The emission log (`entity_wiki_votes`) stays in
+  either outcome — the recurring audits consume it, and it is the same three
+  columns; only the one-line trust rule is at stake.
 
 ## Phase 1 — Capture (migration 020)
 
@@ -107,9 +116,13 @@ pipeline's critical path.
 New scheduler step after the daily pipeline (`scheduler/job_scheduler.py`):
 resolve uncached raw titles via the API, then assign
 `entities.wikipedia_page_id` where votes are decisive: **≥ 2 votes AND > 60%
-majority** for one page id. Entities below that bar stay unlinked and keep using
-the name machinery. Delta-only, batched, cached — expected volume tens of lookups
-per day.
+majority** for one page id (or the relaxed first-validated rule, per the Phase 0
+emission-disagreement gate). Entities below the bar stay unlinked and keep using
+the name machinery. Majority is chosen over first-write-wins deliberately: it
+makes identity a pure function of the tally — same evidence, same outcome,
+regardless of article arrival order — where first-write-wins lets one bad early
+emission permanently fuse two entities' sentiment histories. Delta-only,
+batched, cached — expected volume tens of lookups per day.
 
 ## Phase 3 — Merge on page identity
 
