@@ -103,7 +103,13 @@ everything → Phases 1–4 link and backfill → skip turns on.
    (`action=query&redirects=1&format=json`, 50 titles per request, results cached)
    → canonical title + page id. **Reject any page whose `pageprops` marks it a
    disambiguation page** (same API call returns this for free) — a title that
-   resolves to a disambiguation page is not an identity.
+   resolves to a disambiguation page is not an identity. **Reject section
+   redirects the same way**: when the redirect response carries `tofragment`,
+   the title points at a *section* of a parent article — a subsidiary
+   redirecting into its parent company's page, a person notable for one event
+   redirecting into the event article. Treating that page id as identity would
+   auto-merge child into parent, and the type-class guardrail can't catch it
+   when both are typed organization. No identity; log to the review report.
 
 **Go/no-go metrics:**
 
@@ -135,11 +141,21 @@ everything → Phases 1–4 link and backfill → skip turns on.
 
 ## Phase 1 — Capture (migration 020)
 
+*(Numbering note: this repo's live migration convention is the standalone
+`database/run_migration_NNN.py` scripts, currently at 019 — hence 020. The
+alembic `migrations/versions/` tree stopped at 013 and is not the live
+mechanism.)*
+
 - `entities.wikipedia_page_id BIGINT NULL` and `entities.wikipedia_title TEXT NULL`
   (the *validated canonical* title, for display/links — not the raw emission).
-- `entity_wiki_votes (entity_id, raw_title, votes)` — per-article emissions
-  disagree sometimes; votes make the disagreement visible and let a majority rule
-  decide instead of first-write-wins flip-flopping.
+- `entity_wiki_votes (entity_id, raw_title, votes, last_voted_at, model)` —
+  per-article emissions disagree sometimes; votes make the disagreement visible
+  and let a majority rule decide instead of first-write-wins flip-flopping.
+  `last_voted_at` and the model tag cost nothing now and make a future
+  extraction-model swap auditable (votes from a differently-biased model would
+  otherwise mix silently with new ones); retrofitting them means losing
+  history. gpt-5.6-luna is already the named quality-upgrade path, so a swap is
+  plausible, not hypothetical.
 - `wiki_title_cache (raw_title PK, canonical_title, page_id, checked_at)` — every
   Wikipedia lookup goes through this; steady-state API volume is only never-seen
   titles.
@@ -152,7 +168,13 @@ New scheduler step after the daily pipeline (`scheduler/job_scheduler.py`):
 resolve uncached raw titles via the API, then assign
 `entities.wikipedia_page_id` where votes are decisive: **≥ 2 votes AND > 60%
 majority** for one page id (or the relaxed first-validated rule, per the Phase 0
-emission-disagreement gate). Entities below the bar stay unlinked and keep using
+emission-disagreement gate). **Tally per canonical group, not per raw entity
+id** — after the name machinery merges rows, their votes live under different
+entity ids, and a per-id tally would fragment exactly when consolidation
+matters most. Each run recomputes assignments from the full group-aggregated
+tally and logs any assignment that changed since the last run to the review
+report — which also gives late majority shifts a defined behavior instead of an
+undefined one. Entities below the bar stay unlinked and keep using
 the name machinery. Majority is chosen over first-write-wins deliberately: it
 makes identity a pure function of the tally — same evidence, same outcome,
 regardless of article arrival order — where first-write-wins lets one bad early
@@ -189,7 +211,12 @@ merge-key tier:
    name-key) where the pair shares **≥ 5 co-mention articles**; vetoed pairs go
    to the review report. This is the data's own testimony that a pair is two
    things, and it independently protects against wrong LLM links that pass the
-   type-class check.
+   type-class check. *(Deferred, revisit after month 1: the absolute threshold
+   drifts as the corpus grows — a true rename pair could accumulate 5+ "X,
+   formerly Twitter" co-mentions over months. Vetoed pairs land in the review
+   report rather than vanishing, so this is safe to defer; re-check the veto's
+   false-positive list after a month and move to a ratio — co-mentions /
+   min(mention count) — if it starts blocking real merges.)*
 4. Everything unlinked falls through to the existing exact merge-key tier,
    unchanged. Merges stay pointer-based and reversible; the display-name rename
    pass is unchanged.
