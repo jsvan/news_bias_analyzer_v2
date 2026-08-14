@@ -178,10 +178,14 @@ mechanism.)*
   extraction-model swap auditable (votes from a differently-biased model would
   otherwise mix silently with new ones); retrofitting them means losing
   history. gpt-5.6-luna is already the named quality-upgrade path, so a swap is
-  plausible, not hypothetical. **Null emissions are recorded as votes too**
-  (`raw_title` nullable): a flood of nulls for an entity is the model
-  repeatedly declining to link — its own signal, and the denominator every
-  rate needs.
+  plausible, not hypothetical. **Null emissions are recorded as votes too** —
+  stored under a sentinel (`'<null>'`), keeping `raw_title` NOT NULL: this
+  Postgres is pg13, where NULLs are never equal in a unique constraint
+  (`NULLS NOT DISTINCT` is a PG15 feature), so an
+  `ON CONFLICT (entity_id, raw_title)` upsert would never match a SQL NULL and
+  every decline would insert a fresh row instead of incrementing the counter.
+  A flood of null votes is the model repeatedly declining to link — its own
+  signal, and the denominator every rate needs.
 - `wiki_title_cache (raw_title PK, canonical_title, page_id, checked_at)` — every
   Wikipedia lookup goes through this; steady-state API volume is only never-seen
   titles.
@@ -192,9 +196,14 @@ mechanism.)*
 
 New scheduler step after the daily pipeline (`scheduler/job_scheduler.py`):
 resolve uncached raw titles via the API, then assign
-`entities.wikipedia_page_id` where votes are decisive: **≥ 2 votes AND > 60%
-majority** for one page id (or the relaxed first-validated rule, per the Phase 0
-emission-disagreement gate). **Tally per canonical group, not per raw entity
+`entities.wikipedia_page_id` where votes are decisive: **≥ 2 votes for one
+page id AND that page id holds > 60% of ALL votes — nulls included in the
+denominator** (or the relaxed first-validated rule, per the Phase 0
+emission-disagreement gate). Counting nulls is deliberate: an entity with 10
+declines and 2 plausible titles is a de-wiki-only politician the model
+occasionally hallucinates an en-wiki page for — 2/12 stays unlinked, which is
+correct; 2/2 among non-nulls would link it, which is not. Declining to link is
+evidence against linking. **Tally per canonical group, not per raw entity
 id** — after the name machinery merges rows, their votes live under different
 entity ids, and a per-id tally would fragment exactly when consolidation
 matters most. Each run recomputes assignments from the full group-aggregated
