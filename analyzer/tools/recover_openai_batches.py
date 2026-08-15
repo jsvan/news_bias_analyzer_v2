@@ -82,35 +82,25 @@ def extract_article_data(input_data):
                     title_match = content.split('Title: ', 1)
                     if len(title_match) > 1:
                         title_line = title_match[1].split('\n', 1)[0]
-                        
-                        # Check if title contains source information in old format
+                        title = title_line
                         source_name = None
-                        if " - " in title_line:
-                            # Format might be "Title - Source"
-                            title_parts = title_line.rsplit(" - ", 1)
-                            if len(title_parts) > 1:
-                                title = title_parts[0].strip()
-                                source_name = title_parts[1].strip()
-                            else:
-                                title = title_line
-                        else:
-                            title = title_line
-                        
+
                         # Extract content and look for source information
                         article_content = None
-                        remaining_content = ""
-                        
-                        if len(title_match) > 1 and '\n' in title_match[1]:
+
+                        if '\n' in title_match[1]:
                             remaining = title_match[1].split('\n', 1)[1].strip()
-                            
-                            # Check for Source: line (new format)
+
+                            # Check for Source: line (new format). When present it is
+                            # authoritative — it must never be overridden by the
+                            # "Title - Source" suffix heuristic below, which misreads
+                            # headlines that merely contain " - " (that override once
+                            # registered headline fragments as news sources).
                             if "Source: " in remaining:
                                 source_parts = remaining.split("Source: ", 1)
                                 if len(source_parts) > 1 and '\n' in source_parts[1]:
                                     source_line = source_parts[1].split('\n', 1)[0].strip()
-                                    # Extract source name
-                                    if not source_name:  # Only set if not already found in title
-                                        source_name = source_line
+                                    source_name = source_line
                                     # Get the rest as content
                                     article_content = source_parts[1].split('\n', 1)[1].strip()
                                 else:
@@ -131,7 +121,13 @@ def extract_article_data(input_data):
                                     article_content = remaining
                             else:
                                 article_content = remaining
-                        
+
+                        if source_name is None and " - " in title_line:
+                            # Old-format fallback (no Source: line): "Title - Source"
+                            title_parts = title_line.rsplit(" - ", 1)
+                            title = title_parts[0].strip()
+                            source_name = title_parts[1].strip()
+
                         return {
                             "title": title,
                             "content": article_content,
