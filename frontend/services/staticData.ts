@@ -196,8 +196,14 @@ export const staticData = {
   },
 
   // Source Space page: the stored weekly similarity matrix (constellations),
-  // the MDS source map, and the shared international agenda.
+  // the MDS source map, the shared international agenda, and the
+  // dividing-lines table. Each is one fixed 4-week moral-dimension snapshot.
   getSimilarityMatrix: async () => load('stats/similarity_matrix.json'),
+
+  getDividingLines: async (params: any = {}) => {
+    const data = await load('stats/dividing_lines.json');
+    return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 20) };
+  },
 
   getSourceMap: async () => load('stats/source_map.json'),
 

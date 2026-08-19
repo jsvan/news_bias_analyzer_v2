@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from .base import BaseAnalyzer, log_timing
 from analyzer.source_similarity import (
     pairwise_pearson, cluster_by_correlation, significance_weight, weighted_mds,
+    dividing_entities,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,11 @@ MIN_MAP_COUNTRY_BREADTH = 3
 # A source needs at least this many known correlations to be placeable; with
 # fewer, MDS would park it wherever the init happened to put it.
 MIN_MAP_KNOWN_PAIRS = 3
+# Dividing-lines entities must be covered by this many of the grouped sources:
+# without the floor, a celebrity two sources scored at opposite extremes
+# outranks the divides the whole press actually shares (measured 2026-08-19:
+# Čeferin/Jared Leto/Bob Iger topped the raw F ranking).
+MIN_DIVIDING_COVERAGE = 10
 
 
 def latest_week(session: Session) -> Optional[date]:
@@ -383,6 +389,89 @@ def compute_global_agenda(session: Session, weeks: int = 4,
              "mean_moral": round(float(r.mean_moral), 4),
              "mean_power": round(float(r.mean_power), 4)}
             for r in rows
+        ],
+    }
+
+
+def compute_dividing_lines(session: Session, weeks: int = 4,
+                           dimension: str = "moral", max_groups: int = 6,
+                           limit: int = 20) -> dict:
+    """What the constellations disagree about: per-group mean scores for the
+    entities that best separate the top clusters (one-way F ranking,
+    analyzer/source_similarity.py::dividing_entities).
+
+    Groups are the latest stored clusters with >= 2 members, largest first,
+    capped at max_groups - numbered to match the constellations panel, which
+    orders the same way. Each returned entity carries per-group means and
+    source counts aligned to the groups array (null / 0 where a group lacks
+    the 2-source support floor).
+    """
+    empty = {"window_start": None, "window_end": None, "dimension": dimension,
+             "groups": [], "entities": []}
+    week_start = latest_week(session)
+    if week_start is None:
+        return empty
+    rows = window_cells(session, week_start, weeks, dimension)
+    if not rows:
+        return empty
+    source_ids, entity_ids, matrix = _cell_matrix(rows)
+
+    assignments = session.execute(text("""
+        SELECT source_id, cluster_id, is_centroid
+        FROM source_clusters
+        WHERE assigned_date = (SELECT MAX(assigned_date) FROM source_clusters)
+    """)).fetchall()
+    members: dict = {}
+    centroid_of: dict = {}
+    matrix_sources = set(source_ids)
+    for a in assignments:
+        if a.source_id in matrix_sources:
+            members.setdefault(a.cluster_id, []).append(a.source_id)
+            if a.is_centroid:
+                centroid_of[a.cluster_id] = a.source_id
+    top = sorted(((cid, srcs) for cid, srcs in members.items() if len(srcs) >= 2),
+                 key=lambda kv: (-len(kv[1]), kv[0]))[:max_groups]
+    if len(top) < 2:
+        return empty
+
+    group_of = {sid: gi for gi, (_cid, srcs) in enumerate(top) for sid in srcs}
+    labels = [group_of.get(sid, -1) for sid in source_ids]
+
+    # Only entities the grouped press broadly covers can be dividing lines -
+    # the panel is about what the blocs share and still read differently.
+    labeled = np.array([l >= 0 for l in labels])
+    coverage = (~np.isnan(matrix[labeled])).sum(axis=0)
+    keep_cols = np.where(coverage >= MIN_DIVIDING_COVERAGE)[0]
+    matrix = matrix[:, keep_cols]
+    entity_ids = [entity_ids[c] for c in keep_cols]
+
+    ranked = dividing_entities(matrix, labels)[:limit]
+
+    names = dict(session.execute(text(
+        "SELECT id, name FROM entities WHERE id = ANY(:ids)"
+    ), {"ids": [entity_ids[col] for col, _f, _msb, _m, _n in ranked]}).fetchall()) if ranked else {}
+    source_names = {r.id: r.name for r in session.execute(text(
+        "SELECT id, name FROM news_sources WHERE id = ANY(:ids)"
+    ), {"ids": [centroid_of.get(cid, srcs[0]) for cid, srcs in top]})}
+
+    window_start, window_end = _window_dates(week_start, weeks)
+    return {
+        "window_start": window_start, "window_end": window_end,
+        "dimension": dimension,
+        "groups": [
+            {"cluster_id": cid, "label": f"Group {gi + 1}", "size": len(srcs),
+             "centroid": source_names.get(centroid_of.get(cid, srcs[0]), "")}
+            for gi, (cid, srcs) in enumerate(top)
+        ],
+        "entities": [
+            {"entity_id": entity_ids[col],
+             "name": names.get(entity_ids[col], str(entity_ids[col])),
+             "f": round(f, 2),
+             "spread": round(msb, 3),
+             "means": [round(m[gi], 3) if gi in m else None
+                       for gi in range(len(top))],
+             "support": [n.get(gi, 0) for gi in range(len(top))]}
+            for col, f, msb, m, n in ranked
         ],
     }
 

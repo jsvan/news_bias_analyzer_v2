@@ -53,6 +53,9 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   window, entities covered by >= 2 sources - the
                                   client intersects two sources' vectors to draw
                                   any pair scatter without n-squared pair files.
+    stats/dividing_lines.json    per-cluster mean scores for the entities that
+                                  best separate the constellations (the
+                                  "dividing lines" panel).
 
 All floats are rounded to 4 decimals on write (scores live on a -2..2 scale and the
 UI shows 1-2 decimals; full float repr was pure bloat).
@@ -236,7 +239,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     # failing (e.g. the weekly job hasn't populated the matrix yet) doesn't
     # take the others.
     for key in ("similarity_matrix", "source_map", "global_agenda",
-                "source_vectors"):
+                "source_vectors", "dividing_lines"):
         rel = f"stats/{key}.json"
         try:
             write_json(out_dir, rel, fetchers[key]())
@@ -291,7 +294,9 @@ def live_fetchers(session):
     from server.routers.narrative_endpoints import (
         get_contested_ranking, get_source_map, get_global_agenda,
     )
-    from server.routers.similarity_endpoints import get_similarity_matrix
+    from server.routers.similarity_endpoints import (
+        get_similarity_matrix, get_dividing_lines,
+    )
     from clustering.source_similarity import compute_source_vectors
 
     def run(coro):
@@ -355,6 +360,9 @@ def live_fetchers(session):
         "global_agenda": lambda: run(
             get_global_agenda(weeks=4, limit=AGENDA_LIMIT, session=session)),
         "source_vectors": lambda: compute_source_vectors(session),
+        "dividing_lines": lambda: run(
+            get_dividing_lines(weeks=4, dimension="moral", limit=20,
+                               session=session)),
         "most_recent_article_date": most_recent_article_date,
     }
 
@@ -436,6 +444,14 @@ def self_test():
             "entities": [{"entity_id": 1, "name": "Ada", "type": "person",
                           "countries": 12, "sources": 30, "mentions": 400,
                           "mean_moral": 0.12345678, "mean_power": 0.5}]},
+        "dividing_lines": lambda: {
+            "window_start": "2026-01-01", "window_end": "2026-01-28",
+            "dimension": "moral",
+            "groups": [{"cluster_id": "w-C0", "label": "Group 1", "size": 3,
+                        "centroid": "Src"}],
+            "entities": [{"entity_id": 1, "name": "Ada", "f": 9.1,
+                          "spread": 2.5, "means": [0.5, None],
+                          "support": [3, 0]}]},
         # USA clears MIN_NATIONAL_MENTIONS, UK is thin (pruned), the rest raise
         # (swallowed — thin coverage is expected, not an export error).
         "national_distribution": lambda eid, country:
@@ -505,8 +521,10 @@ def self_test():
             contested = json.load(f)
         assert contested["entities"][0]["divergence"] == 0.5556  # rounded
 
-        # Source space: matrix + agenda + vectors written, the raising map skipped.
-        assert counts["source_space_files"] == 3
+        # Source space: matrix + agenda + vectors + dividing lines written,
+        # the raising map skipped.
+        assert counts["source_space_files"] == 4
+        assert os.path.exists(os.path.join(out, "stats", "dividing_lines.json"))
         with open(os.path.join(out, "stats", "similarity_matrix.json")) as f:
             assert json.load(f)["pairs"][0]["score"] == 0.8333  # rounded
         with open(os.path.join(out, "stats", "global_agenda.json")) as f:

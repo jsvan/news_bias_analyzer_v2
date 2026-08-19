@@ -16,7 +16,7 @@ import { similarityApi } from '../services/api';
 import SourceMapPanel from '../components/SourceMapPanel';
 import GlobalAgendaPanel from '../components/GlobalAgendaPanel';
 import SimilarityMatrixPanel from '../components/SimilarityMatrixPanel';
-import SourceTreePanel from '../components/SourceTreePanel';
+import DividingLinesPanel from '../components/DividingLinesPanel';
 import SourceSpectrumStrip, { SpectrumRow } from '../components/SourceSpectrumStrip';
 import PairScatterDialog, { PairRef } from '../components/PairScatterDialog';
 
@@ -48,10 +48,9 @@ interface MatrixResponse {
   window_end: string | null;
   sources: MatrixSource[];
   pairs: MatrixPair[];
-  // Seriation from the backend: source_ids in optimal dendrogram-leaf order,
-  // plus the nested merge tree (see SimilarityMatrixPanel / SourceTreePanel).
+  // Seriation from the backend: source_ids in optimal dendrogram-leaf order
+  // (see SimilarityMatrixPanel).
   order?: number[] | null;
-  tree?: any;
 }
 
 interface NeighborEntry {
@@ -346,11 +345,11 @@ const SourceSpacePage: React.FC = () => {
       </Box>
 
       <Box sx={{ mt: 3 }}>
-        <SourceMapPanel />
+        <DividingLinesPanel />
       </Box>
 
       <Box sx={{ mt: 3 }}>
-        <SourceTreePanel tree={matrix?.tree ?? null} countryOrder={countryOrder} />
+        <SourceMapPanel />
       </Box>
 
       <Box sx={{ mt: 3 }}>
@@ -364,11 +363,12 @@ const SourceSpacePage: React.FC = () => {
         moral scores over entities both sources covered (minimum 10 shared; unknown pairs
         stay unknown, never "dissimilar"), with r confidence-weighted by shared-entity
         count so thin overlaps can't bridge groups. Constellations cut the average-linkage
-        tree at weighted r = 0.5; the family tree is that hierarchy uncut; the matrix is
-        every pairwise r drawn losslessly in optimal leaf order; the map is weighted MDS on
-        the same 1 − r distances over the internationally shared agenda (entities covered
-        by 3+ countries); and the pair scatter is one correlation opened up into the
-        entities behind it.
+        tree at weighted r = 0.5; the matrix is every pairwise r drawn losslessly in
+        optimal leaf order; the dividing lines rank the entities whose group means spread
+        widest (support-weighted, noise-filtered); the map is weighted MDS on the same
+        1 − r distances over the internationally shared agenda (entities covered by 3+
+        countries); and the pair scatter is one correlation opened up into the entities
+        behind it.
       </Typography>
     </Box>
   );

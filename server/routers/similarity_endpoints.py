@@ -25,7 +25,7 @@ from server.deps import get_db as get_session  # per-request session, closed aft
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 # Import clustering module
 from clustering.similarity_api import SimilarityAPI
-from clustering.source_similarity import latest_week
+from clustering.source_similarity import latest_week, compute_dividing_lines
 from analyzer.source_similarity import seriation
 
 logger = logging.getLogger(__name__)
@@ -56,9 +56,6 @@ class SimilarityMatrixResponse(BaseModel):
     pairs: List[MatrixPair]
     # Seriation for the heatmap: source_ids in optimal dendrogram-leaf order.
     order: Optional[List[int]] = None
-    # Nested dendrogram: leaves {source_id, name, country}, internal nodes
-    # {r, children} where r is the significance-weighted correlation at merge.
-    tree: Optional[Any] = None
 
 
 class NeighborEntry(BaseModel):
@@ -112,11 +109,10 @@ async def get_similarity_matrix(session: Session = Depends(get_session)):
     names = {s.id: s for s in session.query(NewsSource).filter(NewsSource.id.in_(source_ids)).all()}
 
     # Seriation over the stored pairs: rebuild the corr/common matrices and
-    # derive the heatmap leaf order + dendrogram (analyzer/source_similarity.py
-    # ::seriation - the same weighted-average-linkage geometry the stored
-    # clusters were cut from).
+    # derive the heatmap leaf order (analyzer/source_similarity.py::seriation -
+    # the same weighted-average-linkage geometry the stored clusters were cut
+    # from).
     order_ids = None
-    tree = None
     if len(source_ids) >= 2:
         index = {sid: i for i, sid in enumerate(source_ids)}
         n = len(source_ids)
@@ -127,24 +123,13 @@ async def get_similarity_matrix(session: Session = Depends(get_session)):
             i, j = index[r.source_id_1], index[r.source_id_2]
             corr[i, j] = corr[j, i] = float(r.similarity_score)
             common[i, j] = common[j, i] = int(r.common_entities)
-        order, merges = seriation(corr, common)
+        order, _merges = seriation(corr, common)
         order_ids = [source_ids[i] for i in order]
-        nodes: List[Any] = [
-            {"source_id": sid,
-             "name": names[sid].name if sid in names else str(sid),
-             "country": names[sid].country if sid in names else None}
-            for sid in source_ids
-        ]
-        for a, b, dist in merges:
-            nodes.append({"r": round(1.0 - dist, 4),
-                          "children": [nodes[a], nodes[b]]})
-        tree = nodes[-1]
 
     return SimilarityMatrixResponse(
         window_start=window_start.date().isoformat() if window_start else None,
         window_end=latest.date().isoformat(),
         order=order_ids,
-        tree=tree,
         sources=[MatrixSource(
             source_id=sid,
             name=names[sid].name if sid in names else str(sid),
@@ -206,6 +191,47 @@ async def get_source_neighbors(
         nearest=[entry(r) for r in rows[:limit]],
         farthest=[entry(r) for r in rows[-limit:]][::-1] if len(rows) > limit else [],
     )
+
+class DividingGroup(BaseModel):
+    cluster_id: str
+    label: str
+    size: int
+    centroid: str
+
+
+class DividingEntity(BaseModel):
+    entity_id: int
+    name: str
+    f: float
+    spread: float
+    means: List[Optional[float]]
+    support: List[int]
+
+
+class DividingLinesResponse(BaseModel):
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    dimension: str
+    groups: List[DividingGroup]
+    entities: List[DividingEntity]
+
+
+@router.get("/dividing-lines", response_model=DividingLinesResponse)
+async def get_dividing_lines(
+    weeks: int = Query(4, ge=2, le=52),
+    dimension: str = Query("moral", regex="^(power|moral)$"),
+    limit: int = Query(20, ge=1, le=100),
+    session: Session = Depends(get_session),
+):
+    """What the constellations disagree about: per-group mean scores for the
+    entities that best separate the top clusters
+    (clustering/source_similarity.py::compute_dividing_lines - support-weighted
+    between-group spread, F-filtered against noise). Group numbering matches
+    the constellations panel (largest first).
+    """
+    return DividingLinesResponse(**compute_dividing_lines(
+        session, weeks=weeks, dimension=dimension, limit=limit))
+
 
 class PairSource(BaseModel):
     source_id: int

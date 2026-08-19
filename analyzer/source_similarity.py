@@ -187,6 +187,64 @@ def weighted_mds(dist, weights, n_dims: int = 2, n_iter: int = 500, tol: float =
     return coords, stress1, share
 
 
+def dividing_entities(matrix, labels, min_group_sources: int = 2,
+                      min_groups: int = 2, ridge: float = 0.05,
+                      min_f: float = 3.0):
+    """Entities that best separate the clusters: support-weighted group spread.
+
+    The substance behind the sociology - the constellations say WHO groups
+    together; this ranks WHAT they disagree about. For each entity (column),
+    consider the clusters with >= min_group_sources scored sources; if at
+    least min_groups qualify, compute a one-way ANOVA:
+
+    - Rank = msb, the between-group mean square (support-weighted spread of
+      the group means): pure effect size, so a wide split backed by many
+      sources beats a small gap. Ranking by F instead lets any two unanimous
+      groups top the list on a trivial gap - integer per-cell scores make
+      zero within-variance routine (measured 2026-08-19: Jared Leto at
+      -2.00 vs -1.00 outranked the Communist Party of China's ±1 split).
+    - Filter = F >= min_f (with `ridge` added to the within-group mean
+      square), so msb still can't promote splits that are just noise.
+
+    Args:
+        matrix: sources x entities, NaN = no coverage.
+        labels: per-source int group label; negative = ignore that source.
+
+    Returns [(entity_col, f, msb, {label: group_mean}, {label: group_n})],
+    sorted by msb descending. Entities without min_groups qualifying groups,
+    or below min_f, are omitted.
+    """
+    m = np.asarray(matrix, float)
+    lab = np.asarray(labels, int)
+    groups = sorted({l for l in lab if l >= 0})
+    out = []
+    for col in range(m.shape[1]):
+        means, counts, values = {}, {}, {}
+        for g in groups:
+            v = m[(lab == g), col]
+            v = v[~np.isnan(v)]
+            if len(v) >= min_group_sources:
+                means[g] = float(v.mean())
+                counts[g] = len(v)
+                values[g] = v
+        if len(means) < min_groups:
+            continue
+        all_v = np.concatenate(list(values.values()))
+        grand = all_v.mean()
+        ssb = sum(counts[g] * (means[g] - grand) ** 2 for g in means)
+        ssw = sum(float(((values[g] - means[g]) ** 2).sum()) for g in means)
+        dfb = len(means) - 1
+        dfw = len(all_v) - len(means)
+        msw = ssw / dfw if dfw > 0 else 0.0
+        msb = ssb / dfb
+        f = msb / (msw + ridge)
+        if f < min_f:
+            continue
+        out.append((col, float(f), float(msb), means, counts))
+    out.sort(key=lambda t: -t[2])
+    return out
+
+
 def seriation(corr, common, full: int = 50):
     """Leaf order + merge tree for the similarity heatmap and dendrogram.
 
@@ -326,6 +384,36 @@ def self_test():
     assert abs(pos[0] - pos[1]) == 1, order
     assert abs(pos[2] - pos[3]) == 1, order
     assert len(merges) == 4 and all(len(m) == 3 for m in merges), merges
+
+    # 12. Dividing entities: the sharply split column survives the F filter
+    #     and reports its group means; the near-unanimous column is filtered
+    #     as noise, the single-group column is omitted, and ignored sources
+    #     (label -1) don't contribute.
+    m12 = np.array([
+        # split   agree  onegroup
+        [+1.0,    0.50,  0.3],
+        [+0.9,    0.55,  0.4],
+        [-1.0,    0.50,  np.nan],
+        [-0.9,    0.45,  np.nan],
+        [+9.0,    9.00,  9.0],   # label -1: must be invisible
+    ])
+    ranked = dividing_entities(m12, [0, 0, 1, 1, -1])
+    assert [t[0] for t in ranked] == [0], ranked
+    assert ranked[0][3][0] > 0.9 and ranked[0][3][1] < -0.9, ranked[0][3]
+    assert ranked[0][4] == {0: 2, 1: 2}, ranked[0][4]
+
+    # 13. Rank is effect size, not F: a wide well-supported split must beat a
+    #     small unanimous gap even though the latter has (near-)zero
+    #     within-variance and therefore the larger F.
+    wide = np.concatenate([np.array([2.0, 1.0, 3.0, -2.0, -1.0, -3.0]),
+                           np.full(2, np.nan)])
+    tiny = np.concatenate([np.full(6, np.nan), np.array([-2.0, 0.0])])
+    m13 = np.column_stack([wide, tiny])
+    labels13 = [0, 0, 0, 1, 1, 1, 2, 3]
+    ranked13 = dividing_entities(m13, labels13, min_group_sources=1)
+    assert [t[0] for t in ranked13] == [0, 1], ranked13
+    assert ranked13[0][2] > ranked13[1][2], "wide split must outrank tiny gap"
+    assert ranked13[1][1] > ranked13[0][1], "the tiny unanimous gap has the larger F"
 
     print("source_similarity self-test: all assertions passed")
 

@@ -454,6 +454,16 @@ export const similarityApi = {
     });
     return response.data;
   },
+  // What the constellations disagree about: per-group mean scores for the
+  // entities that best separate the top clusters.
+  getDividingLines: async (params: { weeks?: number; limit?: number } = {}) => {
+    if (isStaticMode()) return staticData.getDividingLines(params);
+    if (isApiUnavailable()) {
+      throw new Error('Dividing lines require a live backend and are not available in this demo.');
+    }
+    const response = await api.get('/similarity/dividing-lines', { params });
+    return response.data;
+  },
 };
 
 // Export the base API instance

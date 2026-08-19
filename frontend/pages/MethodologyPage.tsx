@@ -344,8 +344,9 @@ The Guardian (UK)           x=-0.18  y=+0.08`}
           <Kernel>pairwise_pearson</Kernel> + <Kernel>significance_weight</Kernel> + <Kernel>weighted_mds</Kernel> ·{' '}
           <Kernel>clustering/source_similarity.py::compute_source_map</Kernel> · <Kernel>narrative_endpoints.py::get_source_map</Kernel> →{' '}
           <Kernel>GET /narrative/source-map</Kernel> · rendered on the Source Space page (<Kernel>SourceMapPanel</Kernel>), alongside{' '}
-          <Kernel>GET /narrative/global-agenda</Kernel> (<Kernel>GlobalAgendaPanel</Kernel>), the seriated correlation heatmap and merge tree
-          (<Kernel>seriation</Kernel> via <Kernel>GET /similarity/matrix</Kernel>), and the per-pair entity scatter (<Kernel>GET /similarity/pair</Kernel>)
+          <Kernel>GET /narrative/global-agenda</Kernel> (<Kernel>GlobalAgendaPanel</Kernel>), the seriated correlation heatmap
+          (<Kernel>seriation</Kernel> via <Kernel>GET /similarity/matrix</Kernel>), the dividing-lines table
+          (<Kernel>dividing_entities</Kernel> via <Kernel>GET /similarity/dividing-lines</Kernel>), and the per-pair entity scatter (<Kernel>GET /similarity/pair</Kernel>)
         </Meta>
       </Section>
 
