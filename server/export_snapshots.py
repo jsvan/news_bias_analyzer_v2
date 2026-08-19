@@ -66,6 +66,8 @@ import json
 import os
 from datetime import datetime, timezone
 
+from server.json_rounding import round_floats
+
 # Must mirror the frontend selectors (Dashboard.tsx time-range menu,
 # CountryEntityPage.tsx availableCountries). The country endpoint caps days at 90.
 HIST_DAYS = [7, 30, 90, 180, 365]
@@ -86,16 +88,6 @@ MIN_NATIONAL_MENTIONS = 5
 CONTESTED_LIMIT = 20
 # GlobalAgendaPanel shows 15; same headroom reasoning.
 AGENDA_LIMIT = 100
-
-
-def round_floats(o, ndigits: int = 4):
-    if isinstance(o, float):
-        return round(o, ndigits)
-    if isinstance(o, dict):
-        return {k: round_floats(v, ndigits) for k, v in o.items()}
-    if isinstance(o, list):
-        return [round_floats(v, ndigits) for v in o]
-    return o
 
 
 def write_json(out_dir: str, rel_path: str, data) -> str:

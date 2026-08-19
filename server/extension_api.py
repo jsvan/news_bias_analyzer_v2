@@ -8,6 +8,7 @@ sentiment analysis data.
 
 import os
 import sys
+import json
 import logging
 import time
 import re
@@ -16,6 +17,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, Body, APIRouter
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
@@ -50,11 +52,37 @@ from server.routers.drift_endpoints import router as drift_router
 from server.routers.synchrony_endpoints import router as synchrony_router
 from server.routers.dashboard_endpoints import router as dashboard_router
 
+from server.json_rounding import round_floats
+
+
+class RoundedJSONResponse(JSONResponse):
+    """JSONResponse that rounds every float to 4 decimals before encoding.
+
+    Installed app-wide via default_response_class (no endpoint returns a
+    Response directly, so this covers everything). render() receives content
+    already passed through FastAPI's jsonable encoding, so the dict/list/float
+    walk in round_floats reaches every value; the json.dumps kwargs match
+    JSONResponse.render's exactly - the rounding pass is the only difference.
+    The snapshot exporter rounds the same way on write, so static-mode files
+    and live responses carry identical precision.
+    """
+
+    def render(self, content) -> bytes:
+        return json.dumps(
+            round_floats(content),
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Bias Analyzer Extension API",
     description="API for the news bias analyzer browser extension",
-    version="0.1.0"
+    version="0.1.0",
+    default_response_class=RoundedJSONResponse
 )
 
 # Configure CORS based on environment
