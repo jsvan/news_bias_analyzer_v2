@@ -21,6 +21,7 @@ import { useData } from '../context/DataContext';
 import { statsApi, narrativeApi } from '../services/api';
 import { isStaticMode } from '../services/config/environment';
 import SentimentChart from '../components/SentimentChart';
+import EntityInfoPlate, { ActiveEntityInfo } from '../components/EntityInfoPlate';
 import ContestedEntitiesPanel from '../components/ContestedEntitiesPanel';
 import DriftFeedPanel from '../components/DriftFeedPanel';
 import { EntitySentimentSummary, NewsSource } from '../types';
@@ -55,6 +56,10 @@ const EntityAnalysisPage: React.FC = () => {
   // distinct from genuinely neutral ones (both average near the origin).
   const [contested, setContested] = useState<Record<string, number>>({});
 
+  // The scatter's hovered/pinned reading, shown in the static plate beside the
+  // pickers instead of a popup chasing the cursor.
+  const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
+
   useEffect(() => {
     statsApi
       .getTrendingEntities(40)
@@ -78,8 +83,12 @@ const EntityAnalysisPage: React.FC = () => {
       return;
     }
     let cancelled = false;
+    // Deep limit + includeGlobalTop: the overlay exists to pair with the global
+    // baseline, so it must carry this country's readings of the global top
+    // entities — not just the country's own most-covered list. Extra rows the
+    // baseline doesn't hold simply don't render.
     statsApi
-      .getTrendingEntities(40, undefined, overlayCountry)
+      .getTrendingEntities(300, undefined, overlayCountry, undefined, 100)
       .then((data) => {
         if (!cancelled) setOverlayEntities(data);
       })
@@ -91,8 +100,8 @@ const EntityAnalysisPage: React.FC = () => {
     };
   }, [overlayCountry]);
 
-  // The paper's own reading. Limit 100 (vs the baseline's 40): per-source
-  // coverage is sparse and the chart only draws entities shared with the
+  // The paper's own reading. Deep limit + includeGlobalTop (same reasoning as
+  // the country overlay): the chart only draws entities shared with the
   // baseline, so extra overlay rows just improve pairing.
   useEffect(() => {
     if (!selectedSource) {
@@ -101,7 +110,7 @@ const EntityAnalysisPage: React.FC = () => {
     }
     let cancelled = false;
     statsApi
-      .getTrendingEntities(100, undefined, undefined, selectedSource.id)
+      .getTrendingEntities(300, undefined, undefined, selectedSource.id, 100)
       .then((data) => {
         if (!cancelled) setSourceEntities(data);
       })
@@ -220,7 +229,7 @@ const EntityAnalysisPage: React.FC = () => {
                     : 'Pick a newspaper to see how far it strays from its country — or the world'
               }
               action={
-                <Tooltip title="Each dot is an entity's average position across analyzed coverage; the quadrants are narrative archetypes. A dashed ring marks entities whose national spheres disagree most (cross-country Jensen-Shannon divergence) — a ringed dot near the center is an average of conflicting readings, not consensus. Overlay a country against the global baseline, or a single newspaper against its own country's sphere.">
+                <Tooltip title="Each dot is an entity's average position across analyzed coverage; the quadrants are narrative archetypes. Overlay a country against the global baseline, or a single newspaper against its own country's sphere — overlay dots are colored by the direction they drift from the baseline, and hovering a dot fills the reading plate (click to pin it).">
                   <IconButton>
                     <InfoIcon />
                   </IconButton>
@@ -236,40 +245,45 @@ const EntityAnalysisPage: React.FC = () => {
                 <Tab label="By country" />
                 <Tab label="By newspaper" />
               </Tabs>
-              {scatterTab === 0 ? (
-                <Autocomplete
-                  size="small"
-                  options={availableCountries}
-                  value={overlayCountry}
-                  onChange={(_, v) => setOverlayCountry(v)}
-                  renderInput={(params) => (
-                    <TextField {...params} label="Compare a country against the global baseline" />
-                  )}
-                  sx={{ maxWidth: 360, mb: 1 }}
-                />
-              ) : (
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+              {/* One row: the tab's pickers on the left, the static reading
+                  plate right-aligned with the plot's right edge. */}
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'flex-start', mb: 1 }}>
+                {scatterTab === 0 ? (
                   <Autocomplete
                     size="small"
-                    options={newspaperOptions}
-                    groupBy={(s) => s.country || 'Other'}
-                    getOptionLabel={(s) => s.name}
-                    value={selectedSource}
-                    onChange={(_, v) => handleSourceChange(v)}
-                    renderInput={(params) => <TextField {...params} label="Newspaper" />}
+                    options={availableCountries}
+                    value={overlayCountry}
+                    onChange={(_, v) => setOverlayCountry(v)}
+                    renderInput={(params) => (
+                      <TextField {...params} label="Compare a country against the global baseline" />
+                    )}
                     sx={{ flex: 1, minWidth: 240, maxWidth: 360 }}
                   />
-                  <Autocomplete
-                    size="small"
-                    disableClearable
-                    options={['Global', ...availableCountries]}
-                    value={sourceBaseline}
-                    onChange={(_, v) => setSourceBaseline(v)}
-                    renderInput={(params) => <TextField {...params} label="Compare against" />}
-                    sx={{ minWidth: 200 }}
-                  />
-                </Box>
-              )}
+                ) : (
+                  <>
+                    <Autocomplete
+                      size="small"
+                      options={newspaperOptions}
+                      groupBy={(s) => s.country || 'Other'}
+                      getOptionLabel={(s) => s.name}
+                      value={selectedSource}
+                      onChange={(_, v) => handleSourceChange(v)}
+                      renderInput={(params) => <TextField {...params} label="Newspaper" />}
+                      sx={{ flex: 1, minWidth: 240, maxWidth: 360 }}
+                    />
+                    <Autocomplete
+                      size="small"
+                      disableClearable
+                      options={['Global', ...availableCountries]}
+                      value={sourceBaseline}
+                      onChange={(_, v) => setSourceBaseline(v)}
+                      renderInput={(params) => <TextField {...params} label="Compare against" />}
+                      sx={{ minWidth: 200 }}
+                    />
+                  </>
+                )}
+                <EntityInfoPlate info={activeInfo} sx={{ ml: 'auto' }} />
+              </Box>
               <SentimentChart
                 data={scatterTab === 0 ? filteredHighlighted : byArchetype(newspaperBaseline)}
                 height={500}
@@ -285,12 +299,13 @@ const EntityAnalysisPage: React.FC = () => {
                 }
                 baselineLabel={scatterTab === 1 && sourceBaseline !== 'Global' ? sourceBaseline : 'Global'}
                 contested={contested}
+                onActiveChange={setActiveInfo}
               />
               <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
-                Dashed ring = contested across countries (stronger ring, sharper disagreement).
+                Hover a dot to read it in the plate above; click to pin, click anywhere to release.
                 {scatterTab === 0
                   ? overlayCountry
-                    ? ' Dashed line = the gap between the global baseline and this country’s reading; dot color = drift direction (green toward Hero, red toward Villain, purple Victim, orange Wretch). A gray dot with no partner is an entity this country’s press is largely silent on.'
+                    ? ' Dashed line = the gap between the global baseline and this country’s reading; dot color = drift direction (green toward Hero, red toward Villain, purple Victim, orange Wretch). A gray dot with no partner is an entity this country’s press has too few scored mentions of.'
                     : ' Averages hide contestation — overlay a country to see who disagrees.'
                   : selectedSource
                     ? sourceEntities.length > 0

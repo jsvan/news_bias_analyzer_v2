@@ -1146,10 +1146,11 @@ async def analyze_article(request: ArticleAnalysisRequest, db: Session = Depends
 # Trending entities endpoint for dashboard
 @app.get("/stats/trending_entities", response_model=List[Dict[str, Any]])
 async def get_trending_entities(
-    limit: int = Query(10, ge=1, le=100),
+    limit: int = Query(10, ge=1, le=300),
     days: Optional[int] = Query(None, ge=1, le=3650),
     country: Optional[str] = Query(None),
     source_id: Optional[int] = Query(None),
+    include_global_top: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db)
 ):
     """Most-mentioned entities with average power/moral scores. Omit days for all-time.
@@ -1161,6 +1162,13 @@ async def get_trending_entities(
     one newspaper's mentions count; single-paper averages over 1-2 mentions are
     noise (per-mention scores are integers on -2..2), so source-scoped rows need
     at least 3 mentions.
+
+    include_global_top (scoped requests only): also return this sphere's readings
+    of the global top-N entities, appended after the ranked rows. The scatter
+    overlay pairs a sphere against the global baseline — without this, a global
+    entity outside the sphere's own top-`limit` has no partner even when the
+    sphere has plenty of scored mentions of it. Union rows carry the same ≥3
+    mention floor as source scoping (thinner averages are integer-score noise).
     """
     try:
         resolved_id = func.coalesce(Entity.canonical_id, Entity.id)
@@ -1205,6 +1213,42 @@ async def get_trending_entities(
         ).order_by(
             agg.c.mention_count.desc()
         ).limit(limit).all()
+
+        if include_global_top and (country or source_id):
+            # This sphere's readings of the global top-N, so every global
+            # baseline point can find its overlay partner when the data exists.
+            rid = func.coalesce(Entity.canonical_id, Entity.id)
+            global_top = db.query(rid.label('rid')).join(
+                EntityMention, Entity.id == EntityMention.entity_id
+            ).filter(
+                EntityMention.power_score.isnot(None),
+                EntityMention.moral_score.isnot(None)
+            )
+            if days:
+                global_top = global_top.filter(
+                    EntityMention.created_at >= datetime.utcnow() - timedelta(days=days))
+            global_ids = [
+                r.rid for r in global_top.group_by(rid)
+                .order_by(func.count(EntityMention.id).desc())
+                .limit(include_global_top).all()
+            ]
+            already = {row.id for row in trending}
+            extra = db.query(
+                Entity.id,
+                Entity.name,
+                Entity.entity_type,
+                agg.c.mention_count,
+                agg.c.avg_power,
+                agg.c.avg_moral
+            ).join(
+                agg, Entity.id == agg.c.resolved_id
+            ).filter(
+                agg.c.resolved_id.in_(global_ids),
+                agg.c.mention_count >= 3
+            ).order_by(
+                agg.c.mention_count.desc()
+            ).all()
+            trending = list(trending) + [r for r in extra if r.id not in already]
 
         return [
             {

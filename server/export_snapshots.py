@@ -319,12 +319,18 @@ def live_fetchers(session):
             # entities split between the divergence and consensus panels.
             get_country_top_entities(country, days=days, limit=20, session=session)),
         "trending": lambda limit, country: run(
-            # days=None: all-time, matching the page's calls.
+            # days=None: all-time, matching the page's calls. Scoped (country)
+            # files union in the sphere's readings of the global top so every
+            # global baseline dot can find its overlay partner; the global file
+            # needs no union with itself. All args explicit — Query-default trap.
             get_trending_entities(limit=limit, days=None, country=country,
-                                  source_id=None, db=session)),
+                                  source_id=None,
+                                  include_global_top=(limit if country else 0),
+                                  db=session)),
         "trending_source": lambda sid: run(
             get_trending_entities(limit=TRENDING_LIMIT, days=None, country=None,
-                                  source_id=sid, db=session)),
+                                  source_id=sid,
+                                  include_global_top=TRENDING_LIMIT, db=session)),
         # layers= restricts the SQL fetch to the one subset asked for — without it
         # every call below would pull all of an entity's mentions and KDE a global
         # layer nobody uses.

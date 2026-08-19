@@ -6,15 +6,14 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-  LabelList,
   Label,
   ReferenceLine,
   Customized
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
-import { tokens, archetypeColor, archetypeLabel } from '../theme';
+import { tokens, archetypeColor } from '../theme';
+import EntityInfoPlate, { ActiveEntityInfo } from './EntityInfoPlate';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
@@ -33,13 +32,12 @@ interface SentimentChartProps {
   // toward Hero, etc.) — the overlay answers "which way does this sphere
   // pull?", not "which quadrant did it land in".
   overlay?: { label: string; data: EntitySentimentSummary[] } | null;
-  // What `data` represents in tooltips: 'Global' unless the baseline is itself
+  // What `data` represents in readings: 'Global' unless the baseline is itself
   // a country (the newspaper-vs-its-country comparison).
   baselineLabel?: string;
-  // entity name -> cross-country Jensen-Shannon divergence. Entities whose
-  // spheres disagree get a dashed ring: a mean near neutral can be genuine
-  // consensus or a fought-over average, and without this channel the two are
-  // indistinguishable.
+  // entity name -> cross-country Jensen-Shannon divergence, surfaced in the
+  // info plate: a mean near neutral can be genuine consensus or a fought-over
+  // average, and without this number the two are indistinguishable.
   contested?: Record<string, number>;
   // By default the baseline defines the entity set and overlay points without a
   // baseline partner are dropped (the entity-page comparison). The source
@@ -53,19 +51,11 @@ interface SentimentChartProps {
   // hover-raise and click-to-pin behavior, which need no wiring.
   selectedEntity?: string | null;
   onEntityClick?: (entity: EntitySentimentSummary) => void;
+  // The hovered/pinned entity's full reading, for a page-sited EntityInfoPlate
+  // (static box above the plot instead of a popup chasing the cursor). When
+  // omitted, the chart renders its own plate right-aligned above the plot.
+  onActiveChange?: (info: ActiveEntityInfo | null) => void;
 }
-
-// Stable pseudo-random priority per entity name (FNV-1a). Label sampling must
-// not re-roll on hover re-renders, so "random" here means hash-arbitrary: an
-// unpredictable but repeatable pick, uncorrelated with mention counts.
-const labelPriority = (name: string): number => {
-  let h = 2166136261;
-  for (let i = 0; i < name.length; i++) {
-    h ^= name.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) / 4294967296;
-};
 
 const SentimentChart: React.FC<SentimentChartProps> = ({
   data,
@@ -77,13 +67,14 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   contested = {},
   includeUnmatchedOverlay = false,
   selectedEntity = null,
-  onEntityClick
+  onEntityClick,
+  onActiveChange
 }) => {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     entityTypes ? Object.keys(entityTypes) : []
   );
-  // Hover raises a point (and its drift partner) above the crowd; a click pins
-  // that raised state plus an info card until a click anywhere dismisses it.
+  // Hover raises a point (and its drift partner) above the crowd and fills the
+  // info plate; a click pins that state until a click anywhere dismisses it.
   const [hoverEntity, setHoverEntity] = useState<string | null>(null);
   const [pinnedEntity, setPinnedEntity] = useState<string | null>(null);
 
@@ -97,8 +88,8 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   }, [pinnedEntity]);
 
   // Derived collections are memoized: hover state changes re-render the chart
-  // constantly now, and fresh array identities would replay scatter animations
-  // and re-run the label draw every mouse move.
+  // constantly, and fresh array identities would replay scatter animations and
+  // re-run the label placement every mouse move.
   const filteredData: SentimentDataPoint[] = useMemo(
     () =>
       data
@@ -126,7 +117,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
 
   // Overlay points are only drawn for entities present in the baseline set —
   // this keeps the chart a comparison. A baseline entity with NO overlay point
-  // is itself a finding (that sphere is silent on it), noted in the tooltip.
+  // is itself a finding (that sphere is silent on it), noted in the info plate.
   // includeUnmatchedOverlay inverts the orientation: the overlay is the subject
   // set, so its points render regardless of a baseline partner.
   const globalByName = useMemo(
@@ -155,27 +146,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     [overlayData, globalByName]
   );
 
-  const maxJsd = Math.max(0.001, ...Object.values(contested));
-
   // Check if we have enough data for a meaningful scatter plot. Unmatched
   // overlay points count — with an inverted orientation the subject set can be
   // full while the baseline is still loading or sparse.
   const hasEnoughData = filteredData.length + unmatchedOverlay.length >= 5;
-
-  // One label per 0.5×0.5 data-unit cell, pseudo-randomly chosen. Ranking by
-  // mentions piled every label onto the dense center while outlying regions
-  // went unnamed; per-cell sampling spreads the names across the plane.
-  const labeledEntities = useMemo(() => {
-    const bestPerCell = new Map<string, SentimentDataPoint>();
-    for (const d of [...filteredData, ...unmatchedOverlay]) {
-      const key = `${Math.floor(d.power_score / 0.5)}|${Math.floor(d.moral_score / 0.5)}`;
-      const cur = bestPerCell.get(key);
-      if (!cur || labelPriority(d.entity) > labelPriority(cur.entity)) {
-        bestPerCell.set(key, d);
-      }
-    }
-    return new Set([...bestPerCell.values()].map((d) => d.entity));
-  }, [filteredData, unmatchedOverlay]);
 
   const handleTypeChange = (event: SelectChangeEvent<string[]>) => {
     const value = event.target.value;
@@ -206,72 +180,29 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     onMouseLeave: () => setHoverEntity((h) => (h === entityName ? null : h)),
   });
 
-  // The full per-entity reading, shared verbatim between the hover tooltip and
-  // the pinned card so pinning never changes what the reader sees.
-  const entityCard = (p: SentimentDataPoint, pinned = false) => {
-    const jsd = contested[p.entity];
-    const counterpart =
-      p.layer === 'baseline' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
-    return (
-      <Box
-        sx={{
-          bgcolor: tokens.surface,
-          border: `1px solid ${tokens.border}`,
-          borderRadius: 1,
-          px: 1.5,
-          py: 1,
-          ...(pinned ? { boxShadow: 3, display: 'inline-block', maxWidth: 260 } : {}),
-        }}
-      >
-        <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
-          {p.entity}
-        </Typography>
-        <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-          {hasOverlay ? (p.layer === 'baseline' ? `${baselineLabel} · ` : `${overlay!.label} · `) : ''}
-          Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
-        </Typography>
-        {counterpart && (
-          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-            {p.layer === 'baseline' ? `${overlay!.label} · ` : `${baselineLabel} · `}
-            Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
-          </Typography>
-        )}
-        {counterpart && (() => {
-          // Drift is always overlay minus baseline, whichever layer is hovered —
-          // this line names the direction the dot's color encodes.
-          const o = p.layer === 'overlay' ? p : counterpart;
-          const b = p.layer === 'overlay' ? counterpart : p;
-          const dp = o.power_score - b.power_score;
-          const dm = o.moral_score - b.moral_score;
-          return (
-            <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
-              More {archetypeLabel(dp, dm)} · Power {dp >= 0 ? '+' : ''}{dp.toFixed(2)} · Moral {dm >= 0 ? '+' : ''}{dm.toFixed(2)}
-            </Typography>
-          );
-        })()}
-        {hasOverlay && p.layer === 'baseline' && !counterpart && (
-          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-            Not among {overlay!.label}'s most-covered entities
-          </Typography>
-        )}
-        {hasOverlay && p.layer === 'overlay' && !counterpart && (
-          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-            No {baselineLabel} reading to compare (too few scored mentions there)
-          </Typography>
-        )}
-        {p.mention_count != null && (
-          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-            {p.mention_count.toLocaleString()} mentions
-          </Typography>
-        )}
-        {jsd != null && (
-          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-            Cross-country disagreement: JSD {jsd.toFixed(2)}
-          </Typography>
-        )}
-      </Box>
-    );
-  };
+  // What the plate shows: the hovered dot while the mouse is on one, else the
+  // pinned dot. Hovering while pinned previews the other entity and reverts on
+  // mouse-out, so pinning never blocks exploration.
+  const activeName = hoverEntity ?? pinnedEntity;
+  const activeInfo = useMemo<ActiveEntityInfo | null>(() => {
+    if (!activeName) return null;
+    const base = globalByName.get(activeName);
+    const over = overlayByName.get(activeName);
+    if (!base && !over) return null;
+    return {
+      entity: activeName,
+      baseline: base,
+      overlay: over,
+      baselineLabel,
+      overlayLabel: hasOverlay ? overlay!.label : undefined,
+      jsd: contested[activeName],
+      pinned: pinnedEntity === activeName,
+    };
+  }, [activeName, globalByName, overlayByName, baselineLabel, hasOverlay, overlay, contested, pinnedEntity]);
+
+  useEffect(() => {
+    onActiveChange?.(activeInfo);
+  }, [activeInfo, onActiveChange]);
 
   // Define quadrant labels
   const quadrantLabels = [
@@ -312,16 +243,53 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     );
   };
 
+  // Collision-free name labels, replacing recharts' LabelList: walk the points
+  // by prominence (mention count) and keep a label only when its estimated
+  // pixel box clears every box already kept. Dense regions self-thin to their
+  // most-mentioned entity while sparse regions keep their names — and no two
+  // labels ever sit on each other. Needs pixel coords, hence a Customized
+  // layer instead of per-point labels.
+  const renderPointLabels = (props: any) => {
+    const xScale = (Object.values(props.xAxisMap ?? {})[0] as any)?.scale;
+    const yScale = (Object.values(props.yAxisMap ?? {})[0] as any)?.scale;
+    if (!xScale || !yScale || !showLabels) return <g />;
+    const candidates = [...filteredData, ...unmatchedOverlay].sort(
+      (a, b) => (b.mention_count || 0) - (a.mention_count || 0)
+    );
+    const kept: { x1: number; y1: number; x2: number; y2: number; x: number; y: number; name: string }[] = [];
+    for (const d of candidates) {
+      const cx = xScale(d.power_score);
+      const cy = yScale(d.moral_score);
+      // ~5.8px per character at font-size 10 — an estimate, padded below.
+      const w = d.entity.length * 5.8;
+      const x1 = cx - w / 2;
+      const x2 = cx + w / 2;
+      const y2 = cy - d.size - 4; // text baseline sits above the dot
+      const y1 = y2 - 12;
+      if (kept.some((k) => x1 < k.x2 + 6 && x2 > k.x1 - 6 && y1 < k.y2 + 3 && y2 > k.y1 - 3)) {
+        continue;
+      }
+      kept.push({ x1, y1, x2, y2, x: cx, y: y2, name: d.entity });
+    }
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        {kept.map((k) => (
+          <text key={k.name} x={k.x} y={k.y} textAnchor="middle" style={{ fontSize: 10, fill: tokens.ink }}>
+            {k.name}
+          </text>
+        ))}
+      </g>
+    );
+  };
+
   // Hover/pin raise layer. SVG stacks by paint order, so the only way to lift
   // a pair above its neighbors is to redraw it in a layer painted after both
   // scatters. pointer-events stays off for the whole layer: the copies sit
-  // exactly on the real dots and must never steal their mouse events — and a
-  // click landing "on" the pinned card is still a click-anywhere dismissal.
+  // exactly on the real dots and must never steal their mouse events.
   const renderActiveLayer = (props: any) => {
     const xScale = (Object.values(props.xAxisMap ?? {})[0] as any)?.scale;
     const yScale = (Object.values(props.yAxisMap ?? {})[0] as any)?.scale;
     if (!xScale || !yScale) return <g />;
-    const plot = props.offset ?? { left: 40, top: 20, width: (props.width ?? 700) - 100, height: (props.height ?? 460) - 80 };
     const names = [pinnedEntity, hoverEntity].filter(
       (n, i, a): n is string => n != null && a.indexOf(n) === i
     );
@@ -368,19 +336,6 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               >
                 {name}
               </text>
-              {pinnedEntity === name && (() => {
-                // Anchor the pinned card beside the dot, flipping/clamping to
-                // stay inside the plot area.
-                const W = 260;
-                const H = 170;
-                const x = fx + 14 + W > plot.left + plot.width ? fx - 14 - W : fx + 14;
-                const y = Math.max(plot.top, Math.min(fy - 24, plot.top + plot.height - H));
-                return (
-                  <foreignObject x={x} y={y} width={W} height={H} style={{ overflow: 'visible' }}>
-                    {entityCard(focal, true)}
-                  </foreignObject>
-                );
-              })()}
             </g>
           );
         })}
@@ -390,7 +345,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
 
   return (
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
         {entityTypes && (
           <FormControl sx={{ minWidth: 200 }}>
             <InputLabel id="entity-type-select-label">Entity Types</InputLabel>
@@ -416,6 +371,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             </Select>
           </FormControl>
         )}
+        {/* Pages that wire onActiveChange render the plate in their own layout;
+            unwired uses still get one, right-aligned above the plot. */}
+        {!onActiveChange && <EntityInfoPlate info={activeInfo} sx={{ ml: 'auto', mb: 1 }} />}
       </Box>
 
       {!hasEnoughData && (
@@ -470,19 +428,6 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
           >
             <Label value="Moral Dimension" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
           </YAxis>
-          <Tooltip
-            cursor={{ strokeDasharray: '3 3' }}
-            content={({ active, payload }) => {
-              // Scatter tooltips get no category label, so the old labelFormatter
-              // never had a name to show - read it off the point payload instead.
-              const p = payload?.[0]?.payload as SentimentDataPoint | undefined;
-              if (!active || !p || !p.entity) return null;
-              // The pinned card already shows this entity — a hover box on top
-              // of it would just double the same reading.
-              if (p.entity === pinnedEntity) return null;
-              return entityCard(p);
-            }}
-          />
 
           {/* Render background quadrant labels */}
           {quadrantLabels.map((label, index) => (
@@ -512,7 +457,6 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             shape={(props: any) => {
               const { cx, cy, payload } = props;
               const entityName = payload?.entity as string;
-              const jsd = contested[entityName];
               const r = payload?.size ?? 9;
               return (
                 <g
@@ -522,18 +466,6 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                 >
                   {selectedEntity != null && entityName === selectedEntity && (
                     <circle cx={cx} cy={cy} r={r + 5} fill="none" stroke={tokens.accent} strokeWidth={2} />
-                  )}
-                  {jsd != null && (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={r + 3.5}
-                      fill="none"
-                      stroke={tokens.ink}
-                      strokeWidth={1.25}
-                      strokeDasharray="3 2"
-                      opacity={0.25 + 0.6 * (jsd / maxJsd)}
-                    />
                   )}
                   <circle
                     cx={cx}
@@ -547,17 +479,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                 </g>
               );
             }}
-          >
-            {showLabels && (
-              <LabelList
-                dataKey="entity"
-                position="top"
-                offset={10}
-                style={{ fontSize: '10px', fill: tokens.ink }}
-                formatter={(name: string) => (labeledEntities.has(name) ? name : '')}
-              />
-            )}
-          </Scatter>
+          />
 
           {/* Overlay layer: the selected sphere's reading, drift-colored. */}
           {hasOverlay && (
@@ -589,24 +511,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                   </g>
                 );
               }}
-            >
-              {/* Unmatched overlay points have no baseline twin to carry their
-                  label — label them here (matched ones stay labeled via the
-                  baseline layer, so no doubles). */}
-              {showLabels && includeUnmatchedOverlay && (
-                <LabelList
-                  dataKey="entity"
-                  position="top"
-                  offset={10}
-                  style={{ fontSize: '10px', fill: tokens.ink }}
-                  formatter={(name: string) =>
-                    labeledEntities.has(name) && !globalByName.has(name) ? name : ''
-                  }
-                />
-              )}
-            </Scatter>
+            />
           )}
 
+          <Customized component={renderPointLabels} />
           <Customized component={renderActiveLayer} />
         </ScatterChart>
       </ResponsiveContainer>

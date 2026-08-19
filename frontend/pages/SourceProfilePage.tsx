@@ -19,6 +19,7 @@ import { useData } from '../context/DataContext';
 import { entityApi, statsApi } from '../services/api';
 import { isStaticMode } from '../services/config/environment';
 import SentimentChart from '../components/SentimentChart';
+import EntityInfoPlate, { ActiveEntityInfo } from '../components/EntityInfoPlate';
 import SentimentDistributionChart, { DistributionLayer } from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import { EntitySentimentSummary, NewsSource, TrendPoint } from '../types';
@@ -57,6 +58,9 @@ const SourceProfilePage: React.FC = () => {
   const [topEntities, setTopEntities] = useState<EntitySentimentSummary[]>([]);
   const [baselinePoints, setBaselinePoints] = useState<EntitySentimentSummary[]>([]);
   const [selected, setSelected] = useState<EntitySentimentSummary | null>(null);
+  // The scatter's hovered/pinned reading, shown in the static plate above the
+  // plot instead of a popup chasing the cursor.
+  const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
   const [distLayers, setDistLayers] = useState<DistributionLayer[]>([]);
   const [historySeries, setHistorySeries] = useState<Record<string, TrendPoint[]>>({});
 
@@ -413,6 +417,10 @@ const SourceProfilePage: React.FC = () => {
                 }
               />
               <CardContent>
+                {/* Static reading plate, right-aligned with the plot edge. */}
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                  <EntityInfoPlate info={activeInfo} />
+                </Box>
                 <SentimentChart
                   data={baselineReady ? baselinePoints : []}
                   overlay={{ label: source.name, data: topEntities }}
@@ -425,6 +433,7 @@ const SourceProfilePage: React.FC = () => {
                     const row = topEntities.find((t) => t.entity === p.entity);
                     if (row) setSelected(row);
                   }}
+                  onActiveChange={setActiveInfo}
                 />
                 <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
                   A dark dot without a gray anchor means {baselineLabel} has too few scored

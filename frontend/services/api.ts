@@ -214,7 +214,10 @@ export const statsApi = {
   // Most-mentioned entities with average power/moral scores. days omitted = all time;
   // country omitted = all sources worldwide (the global baseline); sourceId set =
   // one newspaper's reading (the backend requires >=3 mentions per entity there).
-  getTrendingEntities: async (limit: number = 25, days?: number, country?: string, sourceId?: number) => {
+  // includeGlobalTop (scoped requests): also return the sphere's readings of the
+  // global top-N entities, so scatter overlays can pair every baseline dot.
+  // Snapshot country/source files are exported with the union baked in.
+  getTrendingEntities: async (limit: number = 25, days?: number, country?: string, sourceId?: number, includeGlobalTop?: number) => {
     if (isStaticMode()) return staticData.getTrendingEntities(limit, days, country, sourceId);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access entity sentiment data.');
@@ -224,6 +227,7 @@ export const statsApi = {
     if (days) params.days = days;
     if (country) params.country = country;
     if (sourceId) params.source_id = sourceId;
+    if (includeGlobalTop) params.include_global_top = includeGlobalTop;
     const response = await api.get('/stats/trending_entities', { params });
     return response.data;
   },
