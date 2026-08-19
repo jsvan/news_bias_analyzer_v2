@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer,
   ScatterChart,
@@ -49,10 +49,23 @@ interface SentimentChartProps {
   includeUnmatchedOverlay?: boolean;
   // Page-level entity selection: the named entity gets a highlight ring, and
   // clicking any point reports it up. Both optional — the chart stays a plain
-  // display when the page doesn't wire them.
+  // display when the page doesn't wire them. Independent of the chart's own
+  // hover-raise and click-to-pin behavior, which need no wiring.
   selectedEntity?: string | null;
   onEntityClick?: (entity: EntitySentimentSummary) => void;
 }
+
+// Stable pseudo-random priority per entity name (FNV-1a). Label sampling must
+// not re-roll on hover re-renders, so "random" here means hash-arbitrary: an
+// unpredictable but repeatable pick, uncorrelated with mention counts.
+const labelPriority = (name: string): number => {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+};
 
 const SentimentChart: React.FC<SentimentChartProps> = ({
   data,
@@ -69,26 +82,45 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     entityTypes ? Object.keys(entityTypes) : []
   );
+  // Hover raises a point (and its drift partner) above the crowd; a click pins
+  // that raised state plus an info card until a click anywhere dismisses it.
+  const [hoverEntity, setHoverEntity] = useState<string | null>(null);
+  const [pinnedEntity, setPinnedEntity] = useState<string | null>(null);
 
-  // Filter data based on selected entity types
-  const filteredData: SentimentDataPoint[] = data
-    .filter(item => {
-      if (!entityTypes || selectedTypes.length === 0) return true;
+  // "Click anywhere dismisses": dot clicks stopPropagation before this fires,
+  // so they re-pin instead of dismissing.
+  useEffect(() => {
+    if (!pinnedEntity) return;
+    const dismiss = () => setPinnedEntity(null);
+    document.addEventListener('click', dismiss);
+    return () => document.removeEventListener('click', dismiss);
+  }, [pinnedEntity]);
 
-      // Check if the entity belongs to any of the selected types
-      for (const type of selectedTypes) {
-        if (entityTypes[type]?.includes(item.entity)) {
-          return true;
-        }
-      }
-      return false;
-    })
-    .map(item => ({
-      ...item,
-      // Radius from log mention count: 40k-mention entities read bigger without drowning 100-mention ones
-      size: 5 + Math.log10(Math.max(item.mention_count || 1, 1)) * 2.2,
-      layer: 'baseline' as const,
-    }));
+  // Derived collections are memoized: hover state changes re-render the chart
+  // constantly now, and fresh array identities would replay scatter animations
+  // and re-run the label draw every mouse move.
+  const filteredData: SentimentDataPoint[] = useMemo(
+    () =>
+      data
+        .filter(item => {
+          if (!entityTypes || selectedTypes.length === 0) return true;
+
+          // Check if the entity belongs to any of the selected types
+          for (const type of selectedTypes) {
+            if (entityTypes[type]?.includes(item.entity)) {
+              return true;
+            }
+          }
+          return false;
+        })
+        .map(item => ({
+          ...item,
+          // Radius from log mention count: 40k-mention entities read bigger without drowning 100-mention ones
+          size: 5 + Math.log10(Math.max(item.mention_count || 1, 1)) * 2.2,
+          layer: 'baseline' as const,
+        })),
+    [data, entityTypes, selectedTypes]
+  );
 
   const hasOverlay = !!overlay && overlay.data.length > 0;
 
@@ -97,18 +129,31 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   // is itself a finding (that sphere is silent on it), noted in the tooltip.
   // includeUnmatchedOverlay inverts the orientation: the overlay is the subject
   // set, so its points render regardless of a baseline partner.
-  const globalByName = new Map(filteredData.map((d) => [d.entity, d]));
-  const overlayData: SentimentDataPoint[] = hasOverlay
-    ? overlay!.data
-        .filter((d) => includeUnmatchedOverlay || globalByName.has(d.entity))
-        .map((d) => ({
-          ...d,
-          size: 5 + Math.log10(Math.max(d.mention_count || 1, 1)) * 2.2,
-          layer: 'overlay' as const,
-        }))
-    : [];
-  const overlayByName = new Map(overlayData.map((d) => [d.entity, d]));
-  const unmatchedOverlay = overlayData.filter((d) => !globalByName.has(d.entity));
+  const globalByName = useMemo(
+    () => new Map(filteredData.map((d) => [d.entity, d])),
+    [filteredData]
+  );
+  const overlayData: SentimentDataPoint[] = useMemo(
+    () =>
+      hasOverlay
+        ? overlay!.data
+            .filter((d) => includeUnmatchedOverlay || globalByName.has(d.entity))
+            .map((d) => ({
+              ...d,
+              size: 5 + Math.log10(Math.max(d.mention_count || 1, 1)) * 2.2,
+              layer: 'overlay' as const,
+            }))
+        : [],
+    [hasOverlay, overlay, includeUnmatchedOverlay, globalByName]
+  );
+  const overlayByName = useMemo(
+    () => new Map(overlayData.map((d) => [d.entity, d])),
+    [overlayData]
+  );
+  const unmatchedOverlay = useMemo(
+    () => overlayData.filter((d) => !globalByName.has(d.entity)),
+    [overlayData, globalByName]
+  );
 
   const maxJsd = Math.max(0.001, ...Object.values(contested));
 
@@ -117,18 +162,115 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   // full while the baseline is still loading or sparse.
   const hasEnoughData = filteredData.length + unmatchedOverlay.length >= 5;
 
-  // Only the most-mentioned points get static labels; the rest are tooltip-only.
-  // 40 overlapping name labels is noise, not information.
-  const labeledEntities = new Set(
-    [...filteredData, ...unmatchedOverlay]
-      .sort((a, b) => (b.mention_count || 0) - (a.mention_count || 0))
-      .slice(0, 10)
-      .map((d) => d.entity)
-  );
+  // One label per 0.5×0.5 data-unit cell, pseudo-randomly chosen. Ranking by
+  // mentions piled every label onto the dense center while outlying regions
+  // went unnamed; per-cell sampling spreads the names across the plane.
+  const labeledEntities = useMemo(() => {
+    const bestPerCell = new Map<string, SentimentDataPoint>();
+    for (const d of [...filteredData, ...unmatchedOverlay]) {
+      const key = `${Math.floor(d.power_score / 0.5)}|${Math.floor(d.moral_score / 0.5)}`;
+      const cur = bestPerCell.get(key);
+      if (!cur || labelPriority(d.entity) > labelPriority(cur.entity)) {
+        bestPerCell.set(key, d);
+      }
+    }
+    return new Set([...bestPerCell.values()].map((d) => d.entity));
+  }, [filteredData, unmatchedOverlay]);
 
   const handleTypeChange = (event: SelectChangeEvent<string[]>) => {
     const value = event.target.value;
     setSelectedTypes(typeof value === 'string' ? value.split(',') : value);
+  };
+
+  // Drift-direction fill for an overlay point: the deltas run through the same
+  // sign logic as absolute positions, so up-right (more moral, more powerful
+  // than the baseline) = hero green. A point with no anchor has no drift to
+  // encode — neutral ink, so it can't borrow a direction it doesn't have.
+  const overlayFill = (p: SentimentDataPoint): string => {
+    const anchor = globalByName.get(p.entity);
+    return anchor
+      ? archetypeColor(p.power_score - anchor.power_score, p.moral_score - anchor.moral_score)
+      : tokens.ink;
+  };
+
+  const handleDotClick = (e: React.MouseEvent, p: SentimentDataPoint) => {
+    e.stopPropagation();
+    setPinnedEntity((cur) => (cur === p.entity ? null : p.entity));
+    onEntityClick?.(p);
+  };
+
+  const raiseHandlers = (entityName: string) => ({
+    onMouseEnter: () => setHoverEntity(entityName),
+    // Functional clear: with overlapping dots, enter-B can fire before
+    // leave-A — the guard keeps a late leave from wiping the new hover.
+    onMouseLeave: () => setHoverEntity((h) => (h === entityName ? null : h)),
+  });
+
+  // The full per-entity reading, shared verbatim between the hover tooltip and
+  // the pinned card so pinning never changes what the reader sees.
+  const entityCard = (p: SentimentDataPoint, pinned = false) => {
+    const jsd = contested[p.entity];
+    const counterpart =
+      p.layer === 'baseline' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
+    return (
+      <Box
+        sx={{
+          bgcolor: tokens.surface,
+          border: `1px solid ${tokens.border}`,
+          borderRadius: 1,
+          px: 1.5,
+          py: 1,
+          ...(pinned ? { boxShadow: 3, display: 'inline-block', maxWidth: 260 } : {}),
+        }}
+      >
+        <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
+          {p.entity}
+        </Typography>
+        <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+          {hasOverlay ? (p.layer === 'baseline' ? `${baselineLabel} · ` : `${overlay!.label} · `) : ''}
+          Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
+        </Typography>
+        {counterpart && (
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+            {p.layer === 'baseline' ? `${overlay!.label} · ` : `${baselineLabel} · `}
+            Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
+          </Typography>
+        )}
+        {counterpart && (() => {
+          // Drift is always overlay minus baseline, whichever layer is hovered —
+          // this line names the direction the dot's color encodes.
+          const o = p.layer === 'overlay' ? p : counterpart;
+          const b = p.layer === 'overlay' ? counterpart : p;
+          const dp = o.power_score - b.power_score;
+          const dm = o.moral_score - b.moral_score;
+          return (
+            <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
+              More {archetypeLabel(dp, dm)} · Power {dp >= 0 ? '+' : ''}{dp.toFixed(2)} · Moral {dm >= 0 ? '+' : ''}{dm.toFixed(2)}
+            </Typography>
+          );
+        })()}
+        {hasOverlay && p.layer === 'baseline' && !counterpart && (
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+            Not among {overlay!.label}'s most-covered entities
+          </Typography>
+        )}
+        {hasOverlay && p.layer === 'overlay' && !counterpart && (
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+            No {baselineLabel} reading to compare (too few scored mentions there)
+          </Typography>
+        )}
+        {p.mention_count != null && (
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+            {p.mention_count.toLocaleString()} mentions
+          </Typography>
+        )}
+        {jsd != null && (
+          <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+            Cross-country disagreement: JSD {jsd.toFixed(2)}
+          </Typography>
+        )}
+      </Box>
+    );
   };
 
   // Define quadrant labels
@@ -164,6 +306,82 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               strokeDasharray="2 2"
               opacity={0.7}
             />
+          );
+        })}
+      </g>
+    );
+  };
+
+  // Hover/pin raise layer. SVG stacks by paint order, so the only way to lift
+  // a pair above its neighbors is to redraw it in a layer painted after both
+  // scatters. pointer-events stays off for the whole layer: the copies sit
+  // exactly on the real dots and must never steal their mouse events — and a
+  // click landing "on" the pinned card is still a click-anywhere dismissal.
+  const renderActiveLayer = (props: any) => {
+    const xScale = (Object.values(props.xAxisMap ?? {})[0] as any)?.scale;
+    const yScale = (Object.values(props.yAxisMap ?? {})[0] as any)?.scale;
+    if (!xScale || !yScale) return <g />;
+    const plot = props.offset ?? { left: 40, top: 20, width: (props.width ?? 700) - 100, height: (props.height ?? 460) - 80 };
+    const names = [pinnedEntity, hoverEntity].filter(
+      (n, i, a): n is string => n != null && a.indexOf(n) === i
+    );
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        {names.map((name) => {
+          const base = globalByName.get(name);
+          const over = overlayByName.get(name);
+          if (!base && !over) return null;
+          const focal = over ?? base!;
+          const fx = xScale(focal.power_score);
+          const fy = yScale(focal.moral_score);
+          return (
+            <g key={name}>
+              {base && over && (
+                <line
+                  x1={xScale(base.power_score)}
+                  y1={yScale(base.moral_score)}
+                  x2={fx}
+                  y2={fy}
+                  stroke={tokens.ink}
+                  strokeWidth={1.5}
+                  strokeDasharray="2 2"
+                />
+              )}
+              {base && (
+                <circle
+                  cx={xScale(base.power_score)}
+                  cy={yScale(base.moral_score)}
+                  r={base.size}
+                  fill={hasOverlay ? tokens.inkMuted : archetypeColor(base.power_score, base.moral_score)}
+                  stroke={tokens.surface}
+                  strokeWidth={1.5}
+                />
+              )}
+              {over && (
+                <circle cx={fx} cy={fy} r={over.size} fill={overlayFill(over)} stroke={tokens.surface} strokeWidth={1.5} />
+              )}
+              <text
+                x={fx}
+                y={fy - (focal.size + 7)}
+                textAnchor="middle"
+                style={{ fontSize: 11, fontWeight: 600, fill: tokens.ink, stroke: tokens.surface, strokeWidth: 3, paintOrder: 'stroke' }}
+              >
+                {name}
+              </text>
+              {pinnedEntity === name && (() => {
+                // Anchor the pinned card beside the dot, flipping/clamping to
+                // stay inside the plot area.
+                const W = 260;
+                const H = 170;
+                const x = fx + 14 + W > plot.left + plot.width ? fx - 14 - W : fx + 14;
+                const y = Math.max(plot.top, Math.min(fy - 24, plot.top + plot.height - H));
+                return (
+                  <foreignObject x={x} y={y} width={W} height={H} style={{ overflow: 'visible' }}>
+                    {entityCard(focal, true)}
+                  </foreignObject>
+                );
+              })()}
+            </g>
           );
         })}
       </g>
@@ -259,59 +477,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               // never had a name to show - read it off the point payload instead.
               const p = payload?.[0]?.payload as SentimentDataPoint | undefined;
               if (!active || !p || !p.entity) return null;
-              const jsd = contested[p.entity];
-              const counterpart =
-                p.layer === 'baseline' ? overlayByName.get(p.entity) : globalByName.get(p.entity);
-              return (
-                <Box sx={{ bgcolor: tokens.surface, border: `1px solid ${tokens.border}`, borderRadius: 1, px: 1.5, py: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
-                    {p.entity}
-                  </Typography>
-                  <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-                    {hasOverlay ? (p.layer === 'baseline' ? `${baselineLabel} · ` : `${overlay!.label} · `) : ''}
-                    Power {p.power_score.toFixed(2)} · Moral {p.moral_score.toFixed(2)}
-                  </Typography>
-                  {counterpart && (
-                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
-                      {p.layer === 'baseline' ? `${overlay!.label} · ` : `${baselineLabel} · `}
-                      Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
-                    </Typography>
-                  )}
-                  {counterpart && (() => {
-                    // Drift is always overlay minus baseline, whichever layer is hovered —
-                    // this line names the direction the dot's color encodes.
-                    const o = p.layer === 'overlay' ? p : counterpart;
-                    const b = p.layer === 'overlay' ? counterpart : p;
-                    const dp = o.power_score - b.power_score;
-                    const dm = o.moral_score - b.moral_score;
-                    return (
-                      <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
-                        Drift · Power {dp >= 0 ? '+' : ''}{dp.toFixed(2)} · Moral {dm >= 0 ? '+' : ''}{dm.toFixed(2)} · toward {archetypeLabel(dp, dm)}
-                      </Typography>
-                    );
-                  })()}
-                  {hasOverlay && p.layer === 'baseline' && !counterpart && (
-                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-                      Not among {overlay!.label}'s most-covered entities
-                    </Typography>
-                  )}
-                  {hasOverlay && p.layer === 'overlay' && !counterpart && (
-                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-                      No {baselineLabel} reading to compare (too few scored mentions there)
-                    </Typography>
-                  )}
-                  {p.mention_count != null && (
-                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-                      {p.mention_count.toLocaleString()} mentions
-                    </Typography>
-                  )}
-                  {jsd != null && (
-                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
-                      Cross-country disagreement: JSD {jsd.toFixed(2)}
-                    </Typography>
-                  )}
-                </Box>
-              );
+              // The pinned card already shows this entity — a hover box on top
+              // of it would just double the same reading.
+              if (p.entity === pinnedEntity) return null;
+              return entityCard(p);
             }}
           />
 
@@ -347,8 +516,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               const r = payload?.size ?? 9;
               return (
                 <g
-                  onClick={onEntityClick && entityName ? () => onEntityClick(payload) : undefined}
-                  style={onEntityClick && entityName ? { cursor: 'pointer' } : undefined}
+                  onClick={entityName ? (e: React.MouseEvent) => handleDotClick(e, payload) : undefined}
+                  {...(entityName ? raiseHandlers(entityName) : {})}
+                  style={entityName ? { cursor: 'pointer' } : undefined}
                 >
                   {selectedEntity != null && entityName === selectedEntity && (
                     <circle cx={cx} cy={cy} r={r + 5} fill="none" stroke={tokens.accent} strokeWidth={2} />
@@ -389,7 +559,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             )}
           </Scatter>
 
-          {/* Overlay layer: the selected sphere's reading, archetype-colored. */}
+          {/* Overlay layer: the selected sphere's reading, drift-colored. */}
           {hasOverlay && (
             <Scatter
               name={overlay!.label}
@@ -398,22 +568,11 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               shape={(props: any) => {
                 const { cx, cy, payload } = props;
                 const entityName = payload?.entity as string;
-                // Drift direction, not landing quadrant: the deltas run through
-                // the same sign logic as absolute positions, so up-right (more
-                // moral, more powerful than the baseline) = hero green. A point
-                // with no anchor has no drift to encode — neutral ink, so it
-                // can't borrow a direction it doesn't have.
-                const anchor = globalByName.get(entityName);
-                const fill = anchor
-                  ? archetypeColor(
-                      payload.power_score - anchor.power_score,
-                      payload.moral_score - anchor.moral_score
-                    )
-                  : tokens.ink;
                 return (
                   <g
-                    onClick={onEntityClick && entityName ? () => onEntityClick(payload) : undefined}
-                    style={onEntityClick && entityName ? { cursor: 'pointer' } : undefined}
+                    onClick={entityName ? (e: React.MouseEvent) => handleDotClick(e, payload) : undefined}
+                    {...(entityName ? raiseHandlers(entityName) : {})}
+                    style={entityName ? { cursor: 'pointer' } : undefined}
                   >
                     {selectedEntity != null && entityName === selectedEntity && (
                       <circle cx={cx} cy={cy} r={(payload?.size ?? 9) + 5} fill="none" stroke={tokens.accent} strokeWidth={2} />
@@ -422,7 +581,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                       cx={cx}
                       cy={cy}
                       r={payload?.size ?? 9}
-                      fill={fill}
+                      fill={overlayFill(payload)}
                       fillOpacity={0.9}
                       stroke={tokens.surface}
                       strokeWidth={1.5}
@@ -447,6 +606,8 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               )}
             </Scatter>
           )}
+
+          <Customized component={renderActiveLayer} />
         </ScatterChart>
       </ResponsiveContainer>
       )}
