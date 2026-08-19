@@ -28,8 +28,11 @@ const EntityInfoPlate: React.FC<{ info: ActiveEntityInfo | null; sx?: object }> 
   return (
     <Box
       sx={{
-        width: 300,
-        minHeight: 118,
+        // Sized so the longest content — a name line plus two readings, the
+        // "More Wretch · Power +0.32 · Moral −0.15" drift line, mentions, JSD,
+        // and the pinned hint — fits without wrapping or growing the box.
+        width: 350,
+        minHeight: 158,
         bgcolor: tokens.surface,
         border: `1px solid ${tokens.border}`,
         borderRadius: 1,
@@ -48,12 +51,12 @@ const EntityInfoPlate: React.FC<{ info: ActiveEntityInfo | null; sx?: object }> 
             {info.entity}
           </Typography>
           {info.baseline && (
-            <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+            <Typography variant="caption" noWrap sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
               {line(info.overlayLabel ? info.baselineLabel : null, info.baseline)}
             </Typography>
           )}
           {info.overlay && info.overlayLabel && (
-            <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
+            <Typography variant="caption" noWrap sx={{ display: 'block', color: tokens.inkMuted, fontFamily: 'monospace' }}>
               {line(info.overlayLabel, info.overlay)}
             </Typography>
           )}
@@ -61,7 +64,7 @@ const EntityInfoPlate: React.FC<{ info: ActiveEntityInfo | null; sx?: object }> 
             const dp = info.overlay.power_score - info.baseline.power_score;
             const dm = info.overlay.moral_score - info.baseline.moral_score;
             return (
-              <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
+              <Typography variant="caption" noWrap sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
                 More {archetypeLabel(dp, dm)} · Power {dp >= 0 ? '+' : ''}{dp.toFixed(2)} · Moral {dm >= 0 ? '+' : ''}{dm.toFixed(2)}
               </Typography>
             );
