@@ -49,7 +49,9 @@ const CountryEntityPage: React.FC = () => {
     setLoading(true);
     setError(null);
     statsApi
-      .getCountryTopEntities(selectedCountry, { days: selectedTimeRange, limit: 10 })
+      // 20 (the API's cap) rather than 10: the entities split between the
+      // divergence and consensus panels, so each needs enough raw material.
+      .getCountryTopEntities(selectedCountry, { days: selectedTimeRange, limit: 20 })
       .then((data) => {
         if (!cancelled) setCountryData(data);
       })
@@ -86,8 +88,8 @@ const CountryEntityPage: React.FC = () => {
         {selectedCountry}'s information sphere
       </Typography>
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3, maxWidth: 720 }}>
-        Two comparisons, one country: where its own papers disagree with each other, and what it
-        is loud or silent about relative to another sphere.
+        Three comparisons, one country: where its own papers disagree with each other, where they
+        speak with one voice, and what it is loud or silent about relative to another sphere.
       </Typography>
 
       {/* Filters */}
@@ -117,9 +119,19 @@ const CountryEntityPage: React.FC = () => {
         </Grid>
       </Paper>
 
-      {/* Internal divergence: papers within this country on the same entities */}
+      {/* Internal divergence and internal consensus: the same entities split
+          between the two panels by the size of the gap between papers */}
       {countryData && countryData.entities.length > 0 ? (
-        <NewspaperSpreadPanel country={selectedCountry} entities={countryData.entities} />
+        <>
+          <NewspaperSpreadPanel country={selectedCountry} entities={countryData.entities} />
+          <Box sx={{ mt: 4 }}>
+            <NewspaperSpreadPanel
+              variant="consensus"
+              country={selectedCountry}
+              entities={countryData.entities}
+            />
+          </Box>
+        </>
       ) : countryData ? (
         <Alert severity="warning">
           No entities found with sufficient data for {selectedCountry} in the selected time period.
