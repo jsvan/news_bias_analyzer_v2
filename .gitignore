@@ -139,3 +139,7 @@ Thumbs.db
 # Database backups (local dumps, never commit)
 backups/
 deploy/.env
+
+# Vendored impeccable skill: exempt from the language-ecosystem rules above —
+# the bare `lib/` rule once silently swallowed its scripts/lib/ directory.
+!.github/skills/impeccable/**
