@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, Link as RouterLink } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -28,6 +28,7 @@ import { tokens, archetypeColor, monoNumber } from '../theme';
 
 const EntityProfilePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { entities, sources, availableCountries, getEntityById } = useData();
   const entity = getEntityById(Number(id));
 
@@ -128,9 +129,28 @@ const EntityProfilePage: React.FC = () => {
       <Paper sx={{ p: 2, mb: 4, bgcolor: tokens.surfaceSunken, border: `1px solid ${tokens.border}` }}>
         <Grid container spacing={3} alignItems="center">
           <Grid item xs={12} sm={4}>
+            <Autocomplete
+              id="entity-jump-to"
+              options={entities}
+              value={entity}
+              disableClearable
+              getOptionLabel={(e) => e.name}
+              isOptionEqualToValue={(a, b) => a.id === b.id}
+              onChange={(_, value) => value && navigate(`/portrayals/${value.id}`)}
+              // Type + mentions in the dropdown so same-named entities (e.g. two
+              // "Washington") stay distinguishable without cluttering the input.
+              renderOption={(props, e) => (
+                <li {...props} key={e.id}>
+                  {`${e.name} (${e.type}, ${(e.mention_count || 0).toLocaleString()} mentions)`}
+                </li>
+              )}
+              renderInput={(params) => <TextField {...params} label="Entity" size="small" fullWidth />}
+            />
+          </Grid>
+          <Grid item xs={12} sm={3}>
             <TimeRangeSelect value={selectedTimeRange} onChange={handleTimeRangeChange} options={[7, 30, 90, 180, 365]} />
           </Grid>
-          <Grid item xs={12} sm={8}>
+          <Grid item xs={12} sm={5}>
             <Autocomplete
               multiple
               id="country-filter"

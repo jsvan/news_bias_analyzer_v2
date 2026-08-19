@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, Link as RouterLink } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -44,6 +44,7 @@ type CompareMode = 'global' | 'country' | 'source';
 
 const SourceProfilePage: React.FC = () => {
   const { name } = useParams<{ name: string }>();
+  const navigate = useNavigate();
   const { sources, meta, availableCountries, getSourceByName } = useData();
   const source = name ? getSourceByName(decodeURIComponent(name)) : undefined;
 
@@ -99,6 +100,30 @@ const SourceProfilePage: React.FC = () => {
       );
   }, [sources, meta, source?.id]);
 
+  // Every tracked paper, for the subject picker — unlike newspaperOptions this
+  // includes the page's own paper (it's the picker's value) and skips the
+  // static-snapshot filter, matching the doorways on the sources index.
+  const paperOptions = useMemo(
+    () =>
+      sources
+        .slice()
+        .sort(
+          (a, b) =>
+            (a.country || '').localeCompare(b.country || '') || a.name.localeCompare(b.name)
+        ),
+    [sources]
+  );
+
+  // Jumping to the paper currently serving as the baseline would compare it
+  // against itself; fall back to the global baseline instead.
+  useEffect(() => {
+    if (source && compareSource && compareSource.id === source.id) {
+      setCompareSource(null);
+      setCompareMode('global');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source?.id]);
+
   const handleModeChange = (mode: CompareMode | null) => {
     if (!mode) return;
     setCompareMode(mode);
@@ -113,6 +138,9 @@ const SourceProfilePage: React.FC = () => {
     if (!source) return;
     let cancelled = false;
     setLoadingTop(true);
+    // The subject changed under the plate; a pinned reading from the previous
+    // paper would be wrong here.
+    setActiveInfo(null);
     statsApi
       .getTrendingEntities(TOP_ENTITIES, DAYS || undefined, undefined, source.id)
       .then((rows: EntitySentimentSummary[]) => {
@@ -317,9 +345,22 @@ const SourceProfilePage: React.FC = () => {
         baseline, dimension, and selected entity apply to every panel on this page.
       </Typography>
 
-      {/* Page-wide controls: baseline, dimension, entity. */}
+      {/* Page-wide controls: which paper (navigates), then baseline, dimension, entity. */}
       <Paper sx={{ p: 2, mb: 4, bgcolor: tokens.surfaceSunken, border: `1px solid ${tokens.border}` }}>
         <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} sm={6} md={3}>
+            <Autocomplete
+              size="small"
+              options={paperOptions}
+              groupBy={(s) => s.country || 'Other'}
+              getOptionLabel={(s) => s.name}
+              isOptionEqualToValue={(a, b) => a.id === b.id}
+              value={source}
+              disableClearable
+              onChange={(_, v) => v && navigate(`/coverage/newspapers/${encodeURIComponent(v.name)}`)}
+              renderInput={(params) => <TextField {...params} label="Newspaper" />}
+            />
+          </Grid>
           <Grid item xs={12} md="auto">
             <ToggleButtonGroup
               size="small"
