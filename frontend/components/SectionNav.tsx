@@ -2,7 +2,10 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { tokens } from '../theme';
 
-const SECTIONS = [
+const SECTIONS: { to: string; label: string; activeMatch?: string; end?: boolean }[] = [
+  // end: exact match only — "/" is a prefix of every route, so without it the
+  // Front Page link would read as active everywhere.
+  { to: '/', label: 'Front Page', end: true },
   { to: '/entities', label: 'Entities' },
   { to: '/sources', label: 'Sources' },
   { to: '/source-space', label: 'Source Space' },
@@ -40,6 +43,7 @@ const SectionNav: React.FC = () => (
       <NavLink
         key={section.to}
         to={section.to}
+        end={section.end}
         style={({ isActive }) =>
           linkStyle(section.activeMatch ? location.hash.includes(section.activeMatch) : isActive)
         }

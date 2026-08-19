@@ -99,7 +99,7 @@ const Masthead: React.FC<MastheadProps> = ({ onRefresh, refreshing }) => (
       mb: 3,
     }}
   >
-    <Box component={RouterLink} to="/entities" sx={{ textDecoration: 'none', color: 'inherit' }}>
+    <Box component={RouterLink} to="/" sx={{ textDecoration: 'none', color: 'inherit' }}>
       <Typography
         variant="h4"
         component="h1"

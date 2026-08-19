@@ -3,12 +3,11 @@ import { Outlet } from 'react-router-dom';
 import { Box, Container, CircularProgress, Typography, Button } from '@mui/material';
 import { useData } from '../context/DataContext';
 import Masthead from './Masthead';
-import FrontDoorHero from './FrontDoorHero';
 import SectionNav from './SectionNav';
 import StalenessBanner from './StalenessBanner';
 
 const Layout: React.FC = () => {
-  const { entities, sources, availableCountries, loading, refreshing, error, refresh } = useData();
+  const { loading, refreshing, error, refresh } = useData();
 
   if (loading) {
     return (
@@ -36,11 +35,6 @@ const Layout: React.FC = () => {
       <Box sx={{ py: 4 }}>
         <Masthead onRefresh={refresh} refreshing={refreshing} />
         <StalenessBanner />
-        <FrontDoorHero
-          entityCount={entities.length}
-          sourceCount={sources.length}
-          countryCount={availableCountries.length || 10}
-        />
         <SectionNav />
         <Outlet />
       </Box>

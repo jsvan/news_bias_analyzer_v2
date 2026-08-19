@@ -2,6 +2,7 @@ import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DataProvider } from './context/DataContext';
 import Layout from './components/Layout';
+import WelcomePage from './pages/WelcomePage';
 import EntityAnalysisPage from './pages/EntityAnalysisPage';
 import EntityProfilePage from './pages/EntityProfilePage';
 import SourcesIndexPage from './pages/SourcesIndexPage';
@@ -21,7 +22,7 @@ const App: React.FC = () => (
     <HashRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Navigate to="/entities" replace />} />
+          <Route index element={<WelcomePage />} />
           <Route path="/entities" element={<EntityAnalysisPage />} />
           <Route path="/entities/:id" element={<EntityProfilePage />} />
           <Route path="/sources" element={<SourcesIndexPage />} />
@@ -36,7 +37,7 @@ const App: React.FC = () => (
           <Route path="/search" element={<SearchPage />} />
           <Route path="/methodology" element={<MethodologyPage />} />
           <Route path="/infrastructure" element={<InfrastructurePage />} />
-          <Route path="*" element={<Navigate to="/entities" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </HashRouter>
