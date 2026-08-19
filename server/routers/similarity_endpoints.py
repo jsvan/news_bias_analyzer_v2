@@ -76,8 +76,8 @@ async def get_similarity_matrix(session: Session = Depends(get_session)):
     (analyzer/source_similarity.py kernels, computed weekly by
     clustering/source_similarity.py). Pairs below the 10-common-entities
     floor are absent - unknown, not zero. Sources close in correlation-space
-    see the world alike; /narrative/source-map is the same thesis in
-    SVD-space.
+    see the world alike; /narrative/source-map is these same correlations
+    drawn in 2D (weighted MDS).
     """
     latest = session.execute(text(
         "SELECT MAX(time_window_end) FROM source_similarity_matrix"

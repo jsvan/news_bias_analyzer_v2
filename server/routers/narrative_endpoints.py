@@ -5,8 +5,8 @@ into real queries against the live database.
 
 contested_ranking/archetype need raw per-mention score arrays (for histograms/quadrant
 placement), so they query entity_mentions directly rather than the pre-aggregated
-mv_source_entity_week (database/run_migration_015.py) - that view is for the
-svd_source_map's source x entity mean matrix, which is exactly aggregate-shaped.
+mv_source_entity_week (database/run_migration_015.py) - that view backs the
+aggregate-shaped consumers (source map, global agenda, weekly similarity).
 
 "Sphere" = country of the source, the same country-as-information-sphere proxy the rest
 of the dashboard already uses (CountryEntityPage, get_country_top_entities).
@@ -24,8 +24,9 @@ from pydantic import BaseModel
 from server.deps import get_db as get_session  # per-request session, closed after each request
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
-    contested_ranking, archetype, trajectory, svd_source_map, salience_asymmetry, shrunk_means,
+    contested_ranking, archetype, trajectory, salience_asymmetry,
 )
+from clustering.source_similarity import compute_source_map, compute_global_agenda
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -196,78 +197,63 @@ class SourceMapPoint(BaseModel):
 
 
 class SourceMapResponse(BaseModel):
-    weeks: int
-    explained_variance: List[float]
+    window_start: Optional[str]
+    window_end: Optional[str]
+    dimension: str
+    min_country_breadth: int
+    stress: float
     sources: List[SourceMapPoint]
 
 
 @router.get("/narrative/source-map", response_model=SourceMapResponse)
 async def get_source_map(
-    weeks: int = Query(12, ge=3, le=52),
+    weeks: int = Query(4, ge=2, le=52),
     dimension: str = Query("moral", regex="^(power|moral)$"),
-    min_entities: int = Query(20, ge=5, description="entities a source must cover to be included"),
     session: Session = Depends(get_session),
 ):
-    """Empirical "beyond left-right" source map: SVD of the source x entity mean-sentiment
-    matrix (analyzer/narrative_metrics.py::svd_source_map). Sources close together score
-    similarly across the same entities - the *data's* axes, not an asserted spectrum.
+    """Empirical "beyond left-right" source map: weighted MDS on the pairwise-complete
+    Pearson matrix (clustering/source_similarity.py::compute_source_map) - the
+    constellations' own correlations drawn in 2D, restricted to the internationally
+    shared agenda. A source is placed only by entities others also scored, so narrow
+    or local coverage never distorts its position.
     """
-    col = "mean_moral" if dimension == "moral" else "mean_power"
-    cutoff = (most_recent_activity(session) - timedelta(weeks=weeks)).date()
-    rows = session.execute(text(f"""
-        SELECT source_id, entity_id, AVG({col}) AS score, SUM(n) AS total_n
-        FROM mv_source_entity_week
-        WHERE week_start >= :cutoff
-        GROUP BY source_id, entity_id
-    """), {"cutoff": cutoff}).fetchall()
+    return SourceMapResponse(**compute_source_map(session, weeks=weeks,
+                                                  dimension=dimension))
 
-    if not rows:
-        return SourceMapResponse(weeks=weeks, explained_variance=[], sources=[])
 
-    # Shrink each (source, entity) cell toward the grand mean, weighted by its total mention
-    # count (analyzer/narrative_metrics.py::shrunk_means) - most cells here are thin (single
-    # digits of mentions over the whole window), and an unshrunk mean lets one or two extreme
-    # single-mention cells swing a source's whole SVD position (confirmed: The Guardian showed
-    # as a wild outlier before this fix, driven by 63% of its cells having exactly 1 mention).
-    shrunk_scores = shrunk_means(
-        [float(r.score) * float(r.total_n) for r in rows],
-        [float(r.total_n) for r in rows],
-    )
+class AgendaEntity(BaseModel):
+    entity_id: int
+    name: str
+    type: Optional[str]
+    countries: int
+    sources: int
+    mentions: int
+    mean_moral: float
+    mean_power: float
 
-    entity_ids = sorted({r.entity_id for r in rows})
-    source_ids = sorted({r.source_id for r in rows})
-    # Keep only entities enough sources cover, so the matrix isn't dominated by NaN holes.
-    entity_coverage = {eid: 0 for eid in entity_ids}
-    for r in rows:
-        entity_coverage[r.entity_id] += 1
-    kept_entities = [eid for eid, n in entity_coverage.items() if n >= 3]
-    kept_sources = [sid for sid in source_ids
-                     if sum(1 for r in rows if r.source_id == sid and r.entity_id in kept_entities) >= min_entities]
-    if len(kept_sources) < 3 or len(kept_entities) < 3:
-        return SourceMapResponse(weeks=weeks, explained_variance=[], sources=[])
 
-    entity_index = {eid: i for i, eid in enumerate(kept_entities)}
-    source_index = {sid: i for i, sid in enumerate(kept_sources)}
-    import numpy as np
-    matrix = np.full((len(kept_sources), len(kept_entities)), np.nan)
-    for r, shrunk_score in zip(rows, shrunk_scores):
-        if r.source_id in source_index and r.entity_id in entity_index:
-            matrix[source_index[r.source_id], entity_index[r.entity_id]] = float(shrunk_score)
+class GlobalAgendaResponse(BaseModel):
+    window_start: Optional[str]
+    window_end: Optional[str]
+    weeks: int
+    total_entities: int
+    international_entities: int
+    entities: List[AgendaEntity]
 
-    coords, _loadings, evr = svd_source_map(matrix)
 
-    sources = session.query(NewsSource).filter(NewsSource.id.in_(kept_sources)).all()
-    source_by_id = {s.id: s for s in sources}
-    points = [
-        SourceMapPoint(
-            source_id=sid, source_name=source_by_id[sid].name if sid in source_by_id else str(sid),
-            country=source_by_id[sid].country if sid in source_by_id else None,
-            x=round(float(coords[source_index[sid], 0]), 4),
-            y=round(float(coords[source_index[sid], 1]), 4) if coords.shape[1] > 1 else 0.0,
-        )
-        for sid in kept_sources
-    ]
-    return SourceMapResponse(weeks=weeks, explained_variance=[round(float(v), 4) for v in evr], sources=points)
+@router.get("/narrative/global-agenda", response_model=GlobalAgendaResponse)
+async def get_global_agenda(
+    weeks: int = Query(4, ge=2, le=52),
+    limit: int = Query(100, ge=1, le=500),
+    session: Session = Depends(get_session),
+):
+    """The internationally shared agenda: entities ranked by how many countries' sources
+    covered them in the window (clustering/source_similarity.py::compute_global_agenda).
+    The global-topic layer the source map is built on; everything below the breadth
+    floor is some country's local conversation.
+    """
+    return GlobalAgendaResponse(**compute_global_agenda(session, weeks=weeks,
+                                                        limit=limit))
 
 
 class SalienceEntry(BaseModel):

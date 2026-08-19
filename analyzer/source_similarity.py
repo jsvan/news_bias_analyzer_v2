@@ -92,6 +92,101 @@ def cluster_by_correlation(corr, threshold: float = 0.5):
     return np.array([remap[l] for l in labels], dtype=int)
 
 
+def significance_weight(common, full: int = 50):
+    """Confidence weight in [0, 1] for correlations estimated over shared entities.
+
+    A correlation over 12 shared entities and one over 300 are not equally
+    trustworthy, but past the min_common floor they'd otherwise carry equal
+    weight. Standard recommender-system significance weighting: linear ramp
+    reaching 1 at `full` shared entities. Used to damp thin-overlap pairs in
+    clustering and in the MDS map's weights - the stored/displayed r stays raw
+    (it's always shown alongside its shared-entity count).
+    """
+    return np.clip(np.asarray(common, float) / full, 0.0, 1.0)
+
+
+def weighted_mds(dist, weights, n_dims: int = 2, n_iter: int = 500, tol: float = 1e-9):
+    """Weighted MDS (SMACOF): embed points so pairwise distances match `dist`.
+
+    This is the exclusion-tolerant replacement for factoring the source x entity
+    matrix directly (narrative_metrics.svd_source_map): it consumes only the
+    pairwise distances, so a source's coverage of entities nobody else touched
+    never enters - no NaN filling, no shrink-to-origin artifact for sources
+    with narrow shared coverage.
+
+    Args:
+        dist: n x n symmetric target distances; NaN = unknown pair.
+        weights: n x n nonnegative confidence per pair (e.g.
+            significance_weight of common-entity counts). Unknown pairs are
+            forced to weight 0 regardless. Every point should have at least
+            one positive weight or its position is arbitrary - callers drop
+            such points first.
+        n_dims: embedding dimensions.
+
+    Deterministic: initialized from classical (Torgerson) MDS with unknown
+    distances filled by the mean known distance, then Guttman-transform
+    iterations. Output is centered, rotated to principal axes, and
+    sign-canonicalized (the largest-|coordinate| point on each axis is
+    positive), so identical input yields identical output.
+
+    Returns (coords [n x n_dims], stress1, axis_variance_share) where stress1
+    is Kruskal's stress-1 over the known pairs (0 = distances reproduced
+    exactly; < ~0.15 is conventionally a good fit) and axis_variance_share is
+    each axis's share of the embedding's variance (how elongated the map is).
+    """
+    d = np.asarray(dist, float).copy()
+    n = d.shape[0]
+    w = np.where(np.isfinite(d), np.asarray(weights, float), 0.0)
+    np.fill_diagonal(w, 0.0)
+    d = np.where(w > 0, d, 0.0)  # zero-weight cells are never consulted
+    if n < 3:
+        return np.zeros((n, n_dims)), 0.0, np.zeros(n_dims)
+
+    # Deterministic init: Torgerson double-centering on the filled matrix.
+    fill = d[w > 0].mean() if (w > 0).any() else 1.0
+    dfull = np.where(w > 0, d, fill)
+    np.fill_diagonal(dfull, 0.0)
+    dfull = (dfull + dfull.T) / 2.0
+    centerer = np.eye(n) - np.ones((n, n)) / n
+    gram = -0.5 * centerer @ (dfull ** 2) @ centerer
+    evals, evecs = np.linalg.eigh(gram)
+    top = np.argsort(evals)[::-1][:n_dims]
+    coords = evecs[:, top] * np.sqrt(np.clip(evals[top], 0.0, None))
+
+    # SMACOF: repeat the Guttman transform until stress stops improving.
+    v_pinv = np.linalg.pinv(np.diag(w.sum(axis=1)) - w)
+    prev_stress = None
+    for _ in range(n_iter):
+        delta = coords[:, None, :] - coords[None, :, :]
+        embedded = np.sqrt((delta ** 2).sum(axis=-1))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(embedded > 0, d / embedded, 0.0)
+        b = -w * ratio
+        np.fill_diagonal(b, 0.0)
+        np.fill_diagonal(b, -b.sum(axis=1))
+        coords = v_pinv @ (b @ coords)
+        stress = float((w * (embedded - d) ** 2).sum())
+        if prev_stress is not None and abs(prev_stress - stress) < tol * max(prev_stress, 1e-12):
+            break
+        prev_stress = stress
+
+    delta = coords[:, None, :] - coords[None, :, :]
+    embedded = np.sqrt((delta ** 2).sum(axis=-1))
+    denom = float((w * d ** 2).sum())
+    stress1 = float(np.sqrt((w * (embedded - d) ** 2).sum() / denom)) if denom > 0 else 0.0
+
+    # Canonical orientation: center, principal axes, deterministic signs.
+    coords = coords - coords.mean(axis=0)
+    u, s, _vt = np.linalg.svd(coords, full_matrices=False)
+    coords = u * s
+    for k in range(coords.shape[1]):
+        if coords[int(np.argmax(np.abs(coords[:, k]))), k] < 0:
+            coords[:, k] = -coords[:, k]
+    var = coords.var(axis=0)
+    share = var / var.sum() if var.sum() else var
+    return coords, stress1, share
+
+
 def neighbor_ranking(corr_row, self_index: int):
     """Indices of a source's neighbors sorted nearest-first, NaN pairs dropped.
 
@@ -150,6 +245,46 @@ def self_test():
     ranked = neighbor_ranking(corr5[0], 0)
     assert ranked[0][0] == 1 and ranked[-1][0] in (2, 3), ranked
     assert all(i != 4 for i, _ in ranked), ranked
+
+    # 7. Significance weight ramps linearly and saturates at `full`.
+    w = significance_weight([0, 25, 50, 500], full=50)
+    assert np.allclose(w, [0.0, 0.5, 1.0, 1.0]), w
+
+    # 8. Weighted MDS reproduces a genuinely planar configuration (stress ~ 0)
+    #    and is deterministic.
+    pts = rng.normal(0, 1, (8, 2))
+    d8 = np.sqrt(((pts[:, None, :] - pts[None, :, :]) ** 2).sum(-1))
+    x1, stress1, share = weighted_mds(d8, np.ones((8, 8)))
+    x2, _, _ = weighted_mds(d8, np.ones((8, 8)))
+    assert stress1 < 0.01, stress1
+    assert np.allclose(x1, x2), "weighted_mds must be deterministic"
+    assert np.isclose(share.sum(), 1.0) and share[0] >= share[1], share
+    e8 = np.sqrt(((x1[:, None, :] - x1[None, :, :]) ** 2).sum(-1))
+    assert np.allclose(e8, d8, atol=0.05), np.abs(e8 - d8).max()
+
+    # 9. The exclusion property, end to end: A covers a superset of what B and
+    #    C cover, but scores the shared entities identically - A must embed on
+    #    top of B/C, and far from the inverted source D. (The old SVD map
+    #    shrank A toward the origin for its unshared coverage.)
+    shared = rng.normal(0, 1, 60)
+    extra = rng.normal(0, 1, 40)
+    a_full = np.concatenate([shared, extra])
+    b_sub = np.concatenate([shared, np.full(40, np.nan)])
+    d_inv = np.concatenate([-shared, np.full(40, np.nan)])
+    m9 = np.vstack([a_full, b_sub, b_sub, d_inv])
+    corr9, common9 = pairwise_pearson(m9, min_common=10)
+    dist9 = 1.0 - corr9
+    w9 = significance_weight(common9)
+    x9, _, _ = weighted_mds(dist9, w9)
+    d_ab = np.linalg.norm(x9[0] - x9[1])
+    d_ad = np.linalg.norm(x9[0] - x9[3])
+    assert d_ab < 0.1 * d_ad, (d_ab, d_ad)
+
+    # 10. An unknown pair (weight 0) neither crashes nor produces NaN coords.
+    dist10 = dist9.copy()
+    dist10[0, 3] = dist10[3, 0] = np.nan
+    x10, s10, _ = weighted_mds(dist10, w9)
+    assert np.isfinite(x10).all() and np.isfinite(s10)
 
     print("source_similarity self-test: all assertions passed")
 

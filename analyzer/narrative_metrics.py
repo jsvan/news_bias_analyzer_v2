@@ -148,6 +148,14 @@ def synchrony_score(change_matrix) -> float:
 def svd_source_map(matrix, n_dims: int = 2):
     """Empirical ideological axes from a source × entity sentiment matrix.
 
+    SUPERSEDED as the dashboard's source map (2026-08-19) by weighted MDS on
+    the pairwise correlation matrix (analyzer/source_similarity.py::weighted_mds
+    via clustering/source_similarity.py::compute_source_map): the mean-fill
+    below makes missing coverage shrink a source toward the origin, where it
+    falsely reads as "average". Still used by analyzer/entity_embeddings.py as
+    a plain factorization kernel (dense-enough matrices, shrink-to-origin is
+    acceptable there).
+
     NaN cells (source never covered entity) are filled with the entity's column
     mean after centering — i.e., they carry no signal. Returns
     (source_coords [n_sources × n_dims], entity_loadings [n_entities × n_dims],

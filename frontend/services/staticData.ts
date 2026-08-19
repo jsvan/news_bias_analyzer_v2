@@ -33,6 +33,10 @@
  *   Days are ignored (all-time-ish: the snapshot's own window).
  * - getSourceEntityHistory serves the paper bundle's base_days series; papers
  *   without a bundle return [].
+ * - getSourceMap / getGlobalAgenda serve one fixed 4-week moral-dimension
+ *   snapshot regardless of params (the only shapes the panels request).
+ * - getSourceNeighbors is derived client-side from the snapshotted matrix
+ *   pairs — same math as the live endpoint, just precomputed data.
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -186,6 +190,48 @@ export const staticData = {
   getContestedRanking: async (params: any = {}) => {
     const data = await load('stats/contested.json');
     return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 20) };
+  },
+
+  // Source Space page: the stored weekly similarity matrix (constellations),
+  // the MDS source map, and the shared international agenda.
+  getSimilarityMatrix: async () => load('stats/similarity_matrix.json'),
+
+  getSourceMap: async () => load('stats/source_map.json'),
+
+  getGlobalAgenda: async (params: any = {}) => {
+    const data = await load('stats/global_agenda.json');
+    return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 100) };
+  },
+
+  // Mirrors similarity_endpoints.get_source_neighbors on the snapshotted pairs:
+  // rows sorted nearest-first; farthest only when there are more rows than the
+  // limit (same guard as the live endpoint).
+  getSourceNeighbors: async (sourceId: number, limit: number = 5) => {
+    const m = await load('stats/similarity_matrix.json');
+    const bySource = new Map<number, any>(
+      (m.sources ?? []).map((s: any) => [s.source_id, s]));
+    const rows = (m.pairs ?? [])
+      .filter((p: any) => p.source_id_1 === sourceId || p.source_id_2 === sourceId)
+      .map((p: any) => {
+        const otherId = p.source_id_1 === sourceId ? p.source_id_2 : p.source_id_1;
+        const other = bySource.get(otherId);
+        return {
+          source_id: otherId,
+          name: other?.name ?? String(otherId),
+          country: other?.country ?? null,
+          score: p.score,
+          common_entities: p.common_entities,
+        };
+      })
+      .sort((a: any, b: any) => b.score - a.score);
+    return {
+      source_id: sourceId,
+      source_name: bySource.get(sourceId)?.name ?? String(sourceId),
+      window_start: m.window_start ?? null,
+      window_end: m.window_end ?? null,
+      nearest: rows.slice(0, limit),
+      farthest: rows.length > limit ? rows.slice(-limit).reverse() : [],
+    };
   },
 
   // Assembles the live endpoint's layered shape from bundle pieces: global from

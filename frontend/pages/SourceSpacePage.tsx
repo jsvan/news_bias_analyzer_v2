@@ -14,12 +14,15 @@ import {
 import { tokens, categoricalColor, monoNumber } from '../theme';
 import { similarityApi } from '../services/api';
 import SourceMapPanel from '../components/SourceMapPanel';
+import GlobalAgendaPanel from '../components/GlobalAgendaPanel';
 
 // "Source space" - which sources see the world alike, from the data alone.
 // Backed by the weekly Pearson matrix over common entities
 // (analyzer/source_similarity.py kernels via /similarity/matrix). A pair below
 // the 10-common-entities floor is absent - unknown, not zero - so a missing
-// link means "not enough shared coverage to say", never "dissimilar".
+// link means "not enough shared coverage to say", never "dissimilar". The map
+// is these same correlations embedded in 2D (weighted MDS), and the agenda
+// panel shows the internationally shared entity slice the map stands on.
 
 interface MatrixSource {
   source_id: number;
@@ -294,12 +297,19 @@ const SourceSpacePage: React.FC = () => {
         <SourceMapPanel />
       </Box>
 
+      <Box sx={{ mt: 3 }}>
+        <GlobalAgendaPanel />
+      </Box>
+
       <Typography variant="caption" sx={{ display: 'block', mt: 3, color: tokens.inkMuted }}>
-        Two geometries, one thesis. Constellations and neighbors above use pairwise correlation
-        on shared entities (unknown pairs stay unknown); the map uses an SVD of the full
-        source × entity score matrix. Method: Pearson correlation of per-entity mean moral
-        scores over entities both sources covered (minimum 10 shared); average-linkage
-        clustering on 1 − r.
+        One geometry throughout. Method: Pearson correlation of per-entity mean moral scores
+        over entities both sources covered (minimum 10 shared; unknown pairs stay unknown,
+        never "dissimilar"). Constellations: average-linkage clustering on 1 − r, with r
+        confidence-weighted by shared-entity count so thin overlaps can't bridge groups.
+        The map: weighted MDS on the same 1 − r distances, computed over the internationally
+        shared agenda only (entities covered by 3+ countries) — so covering local topics
+        nobody else covers never moves a source, and narrow overlap positions it weakly
+        rather than wrongly.
       </Typography>
     </Box>
   );

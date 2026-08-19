@@ -132,7 +132,7 @@ const TOC_ITEMS: { id: string; label: string }[] = [
   { id: 'embeddings', label: 'Entity relatedness' },
   { id: 'drift', label: 'Drift & changepoint detection' },
   { id: 'archetype', label: 'Archetype & trajectory' },
-  { id: 'source-map', label: 'Source map (SVD)' },
+  { id: 'source-map', label: 'Source map (MDS)' },
   { id: 'salience', label: 'Salience asymmetry' },
   { id: 'lagged-correlation', label: 'Lead-lag correlation' },
   { id: 'synchrony', label: 'Synchrony score' },
@@ -312,34 +312,39 @@ trajectory (12 weekly waypoints), e.g.:
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section id="source-map" title="Source map (SVD)" status="live">
+      <Section id="source-map" title="Source map (weighted MDS)" status="live">
         <Bullets
           items={[
-            'Empirical axes instead of an asserted left-right spectrum — sources close together score similarly across the same entities.',
-            <>Matrix: source × entity mean sentiment, shrunk toward the grand mean by mention count (<Kernel>shrunk_means</Kernel>) — a single-mention cell no longer swings a source\'s position.</>,
-            'NaN cells filled with 0 after column-centering (no signal); plain SVD; top-2 components = coordinates.',
+            'Empirical axes instead of an asserted left-right spectrum — sources close together scored the same entities alike.',
+            <>The constellations' own pairwise correlations drawn in 2D: distances approximate <code>1 − r</code> (pairwise-complete Pearson over shared entities, min 10), embedded with weighted SMACOF (<Kernel>weighted_mds</Kernel>).</>,
+            'Exclusion-tolerant by construction: a source is compared only on entities the other source also scored, so local-only coverage never moves it. (The previous SVD factored the full source × entity matrix and had to fill missing cells, which shrank narrow-coverage sources toward the origin — where they falsely read as "moderate".)',
+            <>Entities restricted to the internationally shared agenda (covered by sources from ≥ 3 countries — see the "shared agenda" panel; ~3.2k of ~56k entities in a typical month), so same-country pairs aren't placed partly by local coverage no one else can see.</>,
+            <>Pair weights: <Kernel>significance_weight</Kernel> = min(shared, 50)/50 — a correlation over 12 shared entities positions a source weakly, not wrongly. Unknown pairs get weight 0.</>,
           ]}
         />
-        <Formula>{`shrunk = (Σx + k·mean_global) / (n + k),  k = 10 pseudo-mentions
-SVD(matrix) → top-2 singular vectors × singular values = source coordinates`}
+        <Formula>{`dist(i,j) = 1 − r_ij  over entities both covered (min 10 shared)
+minimize  Σ w_ij (‖x_i − x_j‖ − dist_ij)²,   w_ij = min(common_ij, 50)/50
+stress-1 = √( Σ w (d̂ − d)² / Σ w d² )   (0 = distances drawn exactly)`}
         </Formula>
-        <Example caption="GET /narrative/source-map?weeks=12&dimension=moral — live, 2026-07-18">
-{`explained_variance: [0.0956, 0.0583]   (dims 1+2 explain ~15% of total variance)
+        <Example caption="GET /narrative/source-map?weeks=4&dimension=moral — live, 2026-08-19">
+{`stress: 0.33   (64 sources placed; 3,162 of 56,356 entities cleared the 3-country floor)
 
-Fox News (USA)              x= 0.49  y=-1.94
-The New York Times (USA)    x=-2.53  y=-2.44
-The Guardian (UK)           x=-7.65  y= 4.61
-RT (Russia)                 x= 1.53  y= 1.69
-TASS (Russia)                x= 2.16  y= 2.34`}
+RT (Russia)                 x=-0.62  y=-0.05
+TASS (Russia)               x=-0.61  y=-0.37
+Fox News (USA)              x=+0.33  y=-0.38
+NPR (USA)                   x=+0.42  y=-0.05
+The Guardian (UK)           x=-0.18  y=+0.08`}
         </Example>
         <Bullets
           items={[
-            'Read honestly: RT/TASS cluster, NYT/Fox land far apart — but 2 dims explain only ~15% of variance here, so treat placements as suggestive, not precise.',
+            'Read honestly: RT/TASS embed together and opposite Fox/NPR — but stress 0.33 means the plane only roughly preserves the correlation distances, so treat placements as suggestive, not precise.',
           ]}
         />
         <Meta>
-          <Kernel>svd_source_map</Kernel> + <Kernel>shrunk_means</Kernel> · <Kernel>narrative_endpoints.py::get_source_map</Kernel> →{' '}
-          <Kernel>GET /narrative/source-map</Kernel> · rendered on the Source Space page (<Kernel>SourceMapPanel</Kernel>)
+          <Kernel>pairwise_pearson</Kernel> + <Kernel>significance_weight</Kernel> + <Kernel>weighted_mds</Kernel> ·{' '}
+          <Kernel>clustering/source_similarity.py::compute_source_map</Kernel> · <Kernel>narrative_endpoints.py::get_source_map</Kernel> →{' '}
+          <Kernel>GET /narrative/source-map</Kernel> · rendered on the Source Space page (<Kernel>SourceMapPanel</Kernel>), alongside{' '}
+          <Kernel>GET /narrative/global-agenda</Kernel> (<Kernel>GlobalAgendaPanel</Kernel>)
         </Meta>
       </Section>
 

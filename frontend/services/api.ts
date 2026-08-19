@@ -333,8 +333,8 @@ export const statsApi = {
 
 // Narrative statistics (server/routers/narrative_endpoints.py) - wires
 // analyzer/narrative_metrics.py's kernels into real cross-source queries. The contested
-// ranking is part of the static-snapshot export (server/export_snapshots.py); the rest
-// is live-API only for now.
+// ranking, source map, and global agenda are part of the static-snapshot export
+// (server/export_snapshots.py); the rest is live-API only for now.
 export const narrativeApi = {
   getContestedRanking: async (params: { days?: number; dimension?: 'power' | 'moral'; limit?: number } = {}) => {
     if (isStaticMode()) return staticData.getContestedRanking(params);
@@ -352,10 +352,21 @@ export const narrativeApi = {
     return response.data;
   },
   getSourceMap: async (params: { weeks?: number; dimension?: 'power' | 'moral' } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getSourceMap();
+    if (isApiUnavailable()) {
       throw new Error('The source map requires a live backend and is not available in this demo.');
     }
     const response = await api.get('/narrative/source-map', { params });
+    return response.data;
+  },
+  // Entities ranked by how many countries' sources covered them — the shared
+  // international agenda the source map is built on.
+  getGlobalAgenda: async (params: { weeks?: number; limit?: number } = {}) => {
+    if (isStaticMode()) return staticData.getGlobalAgenda(params);
+    if (isApiUnavailable()) {
+      throw new Error('The global agenda requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/global-agenda', { params });
     return response.data;
   },
   getSalienceAsymmetry: async (params: { country_a: string; country_b: string; days?: number; limit?: number }) => {
@@ -406,18 +417,21 @@ export const driftApi = {
 // Source similarity (server/routers/similarity_endpoints.py) - the weekly Pearson
 // matrix over common entities (analyzer/source_similarity.py kernels, computed by
 // clustering/source_similarity.py) plus cluster assignments and per-source
-// nearest/farthest neighbors. Correlation-space counterpart of the SVD source map -
-// same thesis, different geometry. Live-API only for now.
+// nearest/farthest neighbors. The MDS source map draws these same correlations in
+// 2D. Snapshotted for static mode; neighbors are derived from the matrix pairs
+// client-side there.
 export const similarityApi = {
   getMatrix: async () => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getSimilarityMatrix();
+    if (isApiUnavailable()) {
       throw new Error('The source-similarity matrix requires a live backend and is not available in this demo.');
     }
     const response = await api.get('/similarity/matrix');
     return response.data;
   },
   getSourceNeighbors: async (sourceId: number, params: { limit?: number } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getSourceNeighbors(sourceId, params.limit ?? 5);
+    if (isApiUnavailable()) {
       throw new Error('Source neighbors require a live backend and are not available in this demo.');
     }
     const response = await api.get(`/similarity/sources/${sourceId}/neighbors`, { params });

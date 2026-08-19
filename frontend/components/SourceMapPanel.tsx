@@ -13,11 +13,15 @@ import { Card, CardHeader, CardContent, Box, Typography, Chip } from '@mui/mater
 import { tokens, categoricalColor, monoNumber, fontSans } from '../theme';
 import { narrativeApi } from '../services/api';
 
-// The SVD source map (server/routers/narrative_endpoints.py::get_source_map,
-// kernel analyzer/narrative_metrics.py::svd_source_map): sources as points in
-// the plane the DATA defines - the two directions of greatest disagreement in
-// how sources score the same entities. "Beyond left-right" made literal: the
-// axes are empirical, unnamed, and re-derived from the corpus every load.
+// The MDS source map (server/routers/narrative_endpoints.py::get_source_map,
+// kernels analyzer/source_similarity.py::pairwise_pearson + weighted_mds via
+// clustering/source_similarity.py::compute_source_map): the constellations'
+// pairwise correlations drawn in 2D. Distances approximate 1 - r over shared
+// entities, restricted to the internationally shared agenda (entities covered
+// by >= 3 countries), with thin overlaps down-weighted - so a source is placed
+// only by how it scored what others also scored, and local-only coverage never
+// drags it anywhere. "Beyond left-right" made literal: the axes are empirical,
+// unnamed, and re-derived from the corpus.
 //
 // ECharts rather than recharts: similar sources land in clusters by design, so
 // the map needs collision-aware labels (labelLayout.hideOverlap) and zoom/pan
@@ -42,8 +46,11 @@ interface SourceMapPoint {
 }
 
 interface SourceMapResponse {
-  weeks: number;
-  explained_variance: number[];
+  window_start: string | null;
+  window_end: string | null;
+  dimension: string;
+  min_country_breadth: number;
+  stress: number;
   sources: SourceMapPoint[];
 }
 
@@ -55,7 +62,7 @@ const SourceMapPanel: React.FC = () => {
 
   useEffect(() => {
     narrativeApi
-      .getSourceMap({ weeks: 12 })
+      .getSourceMap()
       .then((d: SourceMapResponse) => {
         setData(d);
         // Dev StrictMode double-mounts: a timed-out first fetch must not leave
@@ -209,7 +216,9 @@ const SourceMapPanel: React.FC = () => {
     <Card>
       <CardHeader
         title="The source map"
-        subheader="Every source placed by the two directions of greatest disagreement the data itself contains (last 12 weeks)"
+        subheader={`The constellations' correlations drawn as a map — sources that scored the shared agenda alike sit close together${
+          data?.window_start ? ` (${data.window_start} to ${data.window_end})` : ''
+        }`}
       />
       <CardContent sx={{ pt: 0 }}>
         {error && (
@@ -243,14 +252,17 @@ const SourceMapPanel: React.FC = () => {
                 ))}
               </Box>
               <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted }}>
-                axes explain {data!.explained_variance.map((v) => `${Math.round(v * 100)}%`).join(' + ')} of variance
+                stress {data!.stress.toFixed(2)} — 0 would mean distances drawn exactly
               </Typography>
             </Box>
             <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.inkMuted }}>
-              The axes have no assigned meaning — they are the strongest patterns of disagreement
-              in the scores themselves. Sources that land close score the same entities alike.
-              Scroll to zoom, drag to pan, double-click to reset; hidden labels appear on hover
-              and as clusters spread.
+              Built only from entities covered by sources in {data!.min_country_breadth}+
+              countries — the shared world, not anyone's local politics — and only from
+              pairwise agreement on entities both sources actually scored, so covering
+              topics nobody else does never moves a source. The axes have no assigned
+              meaning; they are the strongest patterns of disagreement the correlations
+              contain. Scroll to zoom, drag to pan, double-click to reset; hidden labels
+              appear on hover and as clusters spread.
             </Typography>
           </>
         )}

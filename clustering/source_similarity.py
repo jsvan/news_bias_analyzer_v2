@@ -26,7 +26,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .base import BaseAnalyzer, log_timing
-from analyzer.source_similarity import pairwise_pearson, cluster_by_correlation
+from analyzer.source_similarity import (
+    pairwise_pearson, cluster_by_correlation, significance_weight, weighted_mds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,61 @@ MIN_CELL_MENTIONS = 1
 # Cluster members must correlate at least this much on average (average
 # linkage cut at distance 1 - threshold).
 CLUSTER_THRESHOLD = 0.5
+# The map is built only on entities covered by sources from at least this many
+# countries - the internationally shared agenda. Without it, three same-country
+# papers qualify a local politician and same-country pairs are compared partly
+# on local coverage no one else can see.
+MIN_MAP_COUNTRY_BREADTH = 3
+# A source needs at least this many known correlations to be placeable; with
+# fewer, MDS would park it wherever the init happened to put it.
+MIN_MAP_KNOWN_PAIRS = 3
+
+
+def latest_week(session: Session) -> Optional[date]:
+    """Most recent mv_source_entity_week week (None if the view is empty)."""
+    return session.execute(text(
+        "SELECT MAX(week_start) FROM mv_source_entity_week"
+    )).scalar()
+
+
+def window_cells(session: Session, week_start: date, weeks: int, dimension: str):
+    """Per-(source, entity) mention-weighted mean scores over a trailing window.
+
+    The shared cell query behind the weekly matrix, the MDS map, and the global
+    agenda: mv_source_entity_week (canonical entity ids) aggregated over the
+    `weeks`-week window ending at `week_start`, one row per cell with its score
+    and total mention count n.
+    """
+    first_week = week_start - timedelta(weeks=weeks - 1)
+    col = "mean_moral" if dimension == "moral" else "mean_power"
+    return session.execute(text(f"""
+        SELECT source_id, entity_id,
+               SUM({col} * n) / SUM(n) AS score,
+               SUM(n) AS n
+        FROM mv_source_entity_week
+        WHERE week_start BETWEEN :first_week AND :week
+        GROUP BY source_id, entity_id
+        HAVING SUM(n) >= :min_cell
+    """), {"first_week": first_week, "week": week_start,
+           "min_cell": MIN_CELL_MENTIONS}).fetchall()
+
+
+def _cell_matrix(rows):
+    """(source_ids, entity_ids, matrix) from window_cells rows; NaN = no cell."""
+    source_ids = sorted({r.source_id for r in rows})
+    entity_ids = sorted({r.entity_id for r in rows})
+    s_index = {sid: i for i, sid in enumerate(source_ids)}
+    e_index = {eid: i for i, eid in enumerate(entity_ids)}
+    matrix = np.full((len(source_ids), len(entity_ids)), np.nan)
+    for r in rows:
+        matrix[s_index[r.source_id], e_index[r.entity_id]] = float(r.score)
+    return source_ids, entity_ids, matrix
+
+
+def _window_dates(week_start: date, weeks: int):
+    """ISO (start, end) date strings for a trailing window of ISO weeks."""
+    first_week = week_start - timedelta(weeks=weeks - 1)
+    return first_week.isoformat(), (week_start + timedelta(days=6)).isoformat()
 
 
 class SourceSimilarityComputer(BaseAnalyzer):
@@ -72,28 +129,14 @@ class SourceSimilarityComputer(BaseAnalyzer):
         self._refresh_matview()
 
         if week_start is None:
-            week_start = self.session.execute(text(
-                "SELECT MAX(week_start) FROM mv_source_entity_week"
-            )).scalar()
+            week_start = latest_week(self.session)
             if week_start is None:
                 logger.warning("mv_source_entity_week is empty - nothing to compute")
                 return {"week_start": None, "sources": 0, "pairs_stored": 0, "clusters": 0}
 
         first_week = week_start - timedelta(weeks=weeks - 1)
-        col = "mean_moral" if dimension == "moral" else "mean_power"
-        # Mention-weighted mean over the window's weeks, canonical entities.
-        rows = self.session.execute(text(f"""
-            SELECT source_id, entity_id,
-                   SUM({col} * n) / SUM(n) AS score
-            FROM mv_source_entity_week
-            WHERE week_start BETWEEN :first_week AND :week
-            GROUP BY source_id, entity_id
-            HAVING SUM(n) >= :min_cell
-        """), {"first_week": first_week, "week": week_start,
-               "min_cell": MIN_CELL_MENTIONS}).fetchall()
-
-        source_ids = sorted({r.source_id for r in rows})
-        entity_ids = sorted({r.entity_id for r in rows})
+        rows = window_cells(self.session, week_start, weeks, dimension)
+        source_ids, entity_ids, matrix = _cell_matrix(rows)
         logger.info(f"Week {week_start}: {len(source_ids)} sources x "
                     f"{len(entity_ids)} entities ({len(rows)} cells)")
         if len(source_ids) < 2:
@@ -101,16 +144,15 @@ class SourceSimilarityComputer(BaseAnalyzer):
             return {"week_start": str(week_start), "sources": len(source_ids),
                     "pairs_stored": 0, "clusters": 0}
 
-        s_index = {sid: i for i, sid in enumerate(source_ids)}
-        e_index = {eid: i for i, eid in enumerate(entity_ids)}
-        matrix = np.full((len(source_ids), len(entity_ids)), np.nan)
-        for r in rows:
-            matrix[s_index[r.source_id], e_index[r.entity_id]] = float(r.score)
-
         corr, common = pairwise_pearson(matrix, min_common=MIN_COMMON_ENTITIES)
         pairs_stored = self._store_matrix(source_ids, corr, common, first_week, week_start)
 
-        labels = cluster_by_correlation(corr, threshold=CLUSTER_THRESHOLD)
+        # Cluster on significance-weighted r: a pair sharing 12 entities is a
+        # noisier estimate than one sharing 300, and unweighted it can bridge
+        # two clusters on a fluke. Stored/displayed r stays raw - it is always
+        # shown with its shared-entity count.
+        labels = cluster_by_correlation(corr * significance_weight(common),
+                                        threshold=CLUSTER_THRESHOLD)
         n_clusters = self._store_clusters(source_ids, corr, labels, week_start, dimension)
 
         summary = {"week_start": str(week_start), "sources": len(source_ids),
@@ -204,6 +246,145 @@ class SourceSimilarityComputer(BaseAnalyzer):
         self.session.commit()
         logger.info(f"Stored {n_clusters} clusters for week {week_start}")
         return n_clusters
+
+
+def compute_source_map(session: Session, weeks: int = 4,
+                       dimension: str = "moral") -> dict:
+    """The source map: weighted MDS on the pairwise correlation matrix.
+
+    One geometry with the constellations, not a second one: distances are
+    1 - r from the same pairwise-complete Pearson kernel, over the same
+    trailing window, so a source is placed only by how it scored entities
+    others also scored. Two deliberate differences from the stored matrix:
+
+    - Entities are restricted to the internationally shared agenda (covered by
+      sources from >= MIN_MAP_COUNTRY_BREADTH countries), so same-country
+      pairs aren't placed partly by local coverage no one else can see.
+    - Pair weights are significance_weight(common): thin overlaps position a
+      source weakly instead of equally.
+
+    Sources with fewer than MIN_MAP_KNOWN_PAIRS known correlations are dropped
+    (MDS would place them arbitrarily). Returns a JSON-ready dict; empty
+    "sources" when there's too little overlapping coverage to place anyone.
+    """
+    empty = {"window_start": None, "window_end": None, "dimension": dimension,
+             "min_country_breadth": MIN_MAP_COUNTRY_BREADTH, "stress": 0.0,
+             "sources": []}
+    week_start = latest_week(session)
+    if week_start is None:
+        return empty
+    rows = window_cells(session, week_start, weeks, dimension)
+
+    info = {r.id: r for r in session.execute(text(
+        "SELECT id, name, country FROM news_sources"))}
+    breadth: dict = {}
+    for r in rows:
+        country = info[r.source_id].country if r.source_id in info else None
+        if country:
+            breadth.setdefault(r.entity_id, set()).add(country)
+    international = {eid for eid, cs in breadth.items()
+                     if len(cs) >= MIN_MAP_COUNTRY_BREADTH}
+    rows = [r for r in rows if r.entity_id in international]
+    if not rows:
+        return empty
+
+    source_ids, entity_ids, matrix = _cell_matrix(rows)
+    # Sources below the pair floor's own coverage can't clear it with anyone.
+    keep = (~np.isnan(matrix)).sum(axis=1) >= MIN_COMMON_ENTITIES
+    source_ids = [sid for sid, k in zip(source_ids, keep) if k]
+    matrix = matrix[keep]
+    if len(source_ids) < 3:
+        return empty
+
+    corr, common = pairwise_pearson(matrix, min_common=MIN_COMMON_ENTITIES)
+    # Iteratively drop under-connected sources; each drop can orphan another.
+    while True:
+        known = np.isfinite(corr).sum(axis=1) - 1  # minus the diagonal
+        keep = known >= MIN_MAP_KNOWN_PAIRS
+        if keep.sum() < 3:
+            return empty
+        if keep.all():
+            break
+        source_ids = [sid for sid, k in zip(source_ids, keep) if k]
+        corr, common = corr[np.ix_(keep, keep)], common[np.ix_(keep, keep)]
+
+    coords, stress, _share = weighted_mds(1.0 - corr, significance_weight(common))
+    window_start, window_end = _window_dates(week_start, weeks)
+    logger.info(f"Source map: {len(source_ids)} sources on "
+                f"{len(international)} international entities, stress {stress:.3f}")
+    return {
+        "window_start": window_start, "window_end": window_end,
+        "dimension": dimension,
+        "min_country_breadth": MIN_MAP_COUNTRY_BREADTH,
+        "stress": round(float(stress), 4),
+        "sources": [
+            {"source_id": sid,
+             "source_name": info[sid].name if sid in info else str(sid),
+             "country": info[sid].country if sid in info else None,
+             "x": round(float(coords[i, 0]), 4),
+             "y": round(float(coords[i, 1]), 4)}
+            for i, sid in enumerate(source_ids)
+        ],
+    }
+
+
+def compute_global_agenda(session: Session, weeks: int = 4,
+                          limit: int = 100) -> dict:
+    """The internationally shared agenda: entities ranked by country breadth.
+
+    Which entities does the world talk about together? Per entity over the
+    trailing window: how many countries' sources covered it, how many papers,
+    total mentions, and the mention-weighted mean scores. Ranked by breadth
+    then volume - presidents and countries at the top, the local long tail at
+    the bottom. The map's entity floor (MIN_MAP_COUNTRY_BREADTH) cuts this
+    same list.
+    """
+    empty = {"window_start": None, "window_end": None, "weeks": weeks,
+             "total_entities": 0, "international_entities": 0, "entities": []}
+    week_start = latest_week(session)
+    if week_start is None:
+        return empty
+    first_week = week_start - timedelta(weeks=weeks - 1)
+    params = {"first_week": first_week, "week": week_start,
+              "breadth": MIN_MAP_COUNTRY_BREADTH, "limit": limit}
+    agg = """
+        SELECT m.entity_id,
+               COUNT(DISTINCT ns.country) AS countries,
+               COUNT(DISTINCT m.source_id) AS sources,
+               SUM(m.n) AS mentions,
+               SUM(m.mean_moral * m.n) / SUM(m.n) AS mean_moral,
+               SUM(m.mean_power * m.n) / SUM(m.n) AS mean_power
+        FROM mv_source_entity_week m
+        JOIN news_sources ns ON ns.id = m.source_id AND ns.country IS NOT NULL
+        WHERE m.week_start BETWEEN :first_week AND :week
+        GROUP BY m.entity_id
+    """
+    totals = session.execute(text(f"""
+        SELECT COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE countries >= :breadth) AS international
+        FROM ({agg}) a
+    """), params).one()
+    rows = session.execute(text(f"""
+        SELECT a.*, e.name, e.entity_type AS type
+        FROM ({agg}) a JOIN entities e ON e.id = a.entity_id
+        ORDER BY a.countries DESC, a.mentions DESC
+        LIMIT :limit
+    """), params).fetchall()
+
+    window_start, window_end = _window_dates(week_start, weeks)
+    return {
+        "window_start": window_start, "window_end": window_end, "weeks": weeks,
+        "total_entities": int(totals.total),
+        "international_entities": int(totals.international),
+        "entities": [
+            {"entity_id": r.entity_id, "name": r.name, "type": r.type,
+             "countries": int(r.countries), "sources": int(r.sources),
+             "mentions": int(r.mentions),
+             "mean_moral": round(float(r.mean_moral), 4),
+             "mean_power": round(float(r.mean_power), 4)}
+            for r in rows
+        ],
+    }
 
 
 if __name__ == "__main__":
