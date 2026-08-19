@@ -39,6 +39,17 @@ interface SentimentChartProps {
   // consensus or a fought-over average, and without this channel the two are
   // indistinguishable.
   contested?: Record<string, number>;
+  // By default the baseline defines the entity set and overlay points without a
+  // baseline partner are dropped (the entity-page comparison). The source
+  // profile page inverts that: the overlay (the paper's top entities) IS the
+  // subject, so unmatched overlay points must still render — their missing
+  // anchor is the finding (the baseline sphere is silent on them).
+  includeUnmatchedOverlay?: boolean;
+  // Page-level entity selection: the named entity gets a highlight ring, and
+  // clicking any point reports it up. Both optional — the chart stays a plain
+  // display when the page doesn't wire them.
+  selectedEntity?: string | null;
+  onEntityClick?: (entity: EntitySentimentSummary) => void;
 }
 
 const SentimentChart: React.FC<SentimentChartProps> = ({
@@ -48,7 +59,10 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   showLabels = true,
   overlay = null,
   baselineLabel = 'Global',
-  contested = {}
+  contested = {},
+  includeUnmatchedOverlay = false,
+  selectedEntity = null,
+  onEntityClick
 }) => {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     entityTypes ? Object.keys(entityTypes) : []
@@ -79,10 +93,12 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
   // Overlay points are only drawn for entities present in the baseline set —
   // this keeps the chart a comparison. A baseline entity with NO overlay point
   // is itself a finding (that sphere is silent on it), noted in the tooltip.
+  // includeUnmatchedOverlay inverts the orientation: the overlay is the subject
+  // set, so its points render regardless of a baseline partner.
   const globalByName = new Map(filteredData.map((d) => [d.entity, d]));
   const overlayData: SentimentDataPoint[] = hasOverlay
     ? overlay!.data
-        .filter((d) => globalByName.has(d.entity))
+        .filter((d) => includeUnmatchedOverlay || globalByName.has(d.entity))
         .map((d) => ({
           ...d,
           size: 5 + Math.log10(Math.max(d.mention_count || 1, 1)) * 2.2,
@@ -90,16 +106,19 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
         }))
     : [];
   const overlayByName = new Map(overlayData.map((d) => [d.entity, d]));
+  const unmatchedOverlay = overlayData.filter((d) => !globalByName.has(d.entity));
 
   const maxJsd = Math.max(0.001, ...Object.values(contested));
 
-  // Check if we have enough data for a meaningful scatter plot
-  const hasEnoughData = filteredData.length >= 5; // Minimum number of entities needed for comparison
+  // Check if we have enough data for a meaningful scatter plot. Unmatched
+  // overlay points count — with an inverted orientation the subject set can be
+  // full while the baseline is still loading or sparse.
+  const hasEnoughData = filteredData.length + unmatchedOverlay.length >= 5;
 
   // Only the most-mentioned points get static labels; the rest are tooltip-only.
   // 40 overlapping name labels is noise, not information.
   const labeledEntities = new Set(
-    [...filteredData]
+    [...filteredData, ...unmatchedOverlay]
       .sort((a, b) => (b.mention_count || 0) - (a.mention_count || 0))
       .slice(0, 10)
       .map((d) => d.entity)
@@ -261,6 +280,11 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                       Not among {overlay!.label}'s most-covered entities
                     </Typography>
                   )}
+                  {hasOverlay && p.layer === 'overlay' && !counterpart && (
+                    <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
+                      No {baselineLabel} reading to compare (too few scored mentions there)
+                    </Typography>
+                  )}
                   {p.mention_count != null && (
                     <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
                       {p.mention_count.toLocaleString()} mentions
@@ -307,7 +331,13 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               const jsd = contested[entityName];
               const r = payload?.size ?? 9;
               return (
-                <g>
+                <g
+                  onClick={onEntityClick && entityName ? () => onEntityClick(payload) : undefined}
+                  style={onEntityClick && entityName ? { cursor: 'pointer' } : undefined}
+                >
+                  {selectedEntity != null && entityName === selectedEntity && (
+                    <circle cx={cx} cy={cy} r={r + 5} fill="none" stroke={tokens.accent} strokeWidth={2} />
+                  )}
                   {jsd != null && (
                     <circle
                       cx={cx}
@@ -352,19 +382,43 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               isAnimationActive={false}
               shape={(props: any) => {
                 const { cx, cy, payload } = props;
+                const entityName = payload?.entity as string;
                 return (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={payload?.size ?? 9}
-                    fill={archetypeColor(payload.power_score, payload.moral_score)}
-                    fillOpacity={0.9}
-                    stroke={tokens.surface}
-                    strokeWidth={1.5}
-                  />
+                  <g
+                    onClick={onEntityClick && entityName ? () => onEntityClick(payload) : undefined}
+                    style={onEntityClick && entityName ? { cursor: 'pointer' } : undefined}
+                  >
+                    {selectedEntity != null && entityName === selectedEntity && (
+                      <circle cx={cx} cy={cy} r={(payload?.size ?? 9) + 5} fill="none" stroke={tokens.accent} strokeWidth={2} />
+                    )}
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={payload?.size ?? 9}
+                      fill={archetypeColor(payload.power_score, payload.moral_score)}
+                      fillOpacity={0.9}
+                      stroke={tokens.surface}
+                      strokeWidth={1.5}
+                    />
+                  </g>
                 );
               }}
-            />
+            >
+              {/* Unmatched overlay points have no baseline twin to carry their
+                  label — label them here (matched ones stay labeled via the
+                  baseline layer, so no doubles). */}
+              {showLabels && includeUnmatchedOverlay && (
+                <LabelList
+                  dataKey="entity"
+                  position="top"
+                  offset={10}
+                  style={{ fontSize: '10px', fill: tokens.ink }}
+                  formatter={(name: string) =>
+                    labeledEntities.has(name) && !globalByName.has(name) ? name : ''
+                  }
+                />
+              )}
+            </Scatter>
           )}
         </ScatterChart>
       </ResponsiveContainer>

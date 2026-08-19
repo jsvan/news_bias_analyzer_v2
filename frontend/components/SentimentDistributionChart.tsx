@@ -15,134 +15,98 @@ import { Box, Typography, ToggleButtonGroup, ToggleButton, Chip } from '@mui/mat
 import { Distribution, SentimentDistributions } from '../types';
 import { tokens, monoNumber } from '../theme';
 
-// Fixed 3-way comparison (global baseline / national / source) — not a rotating
-// first-appearance palette, since these three roles are always the same slots.
+// Fixed 3-way palette for the classic global/national/source comparison — not a
+// rotating first-appearance palette, since those three roles are stable slots.
 const GLOBAL_COLOR = tokens.accent;
 const NATIONAL_COLOR = tokens.categorical[1];
 const SOURCE_COLOR = tokens.categorical[2];
 
-interface SentimentDistributionChartProps {
-  title?: string;
-  distributions: SentimentDistributions;
-  entityName: string;
-  height?: number;
-  showGlobal?: boolean;
-  showNational?: boolean;
-  showSource?: boolean;
+// One overlay-able curve. The chart itself no longer knows about global /
+// national / source roles — any page can stack any comparison (e.g. two
+// newspapers) by passing its own layers. All backend PDFs share one fixed
+// x-grid, so overlaid curves are directly comparable by construction.
+export interface DistributionLayer {
+  key: string;
+  label: string;
+  color: string;
+  power?: Distribution;
+  moral?: Distribution;
 }
 
-interface DistributionDataPoint {
-  x: number;
-  global?: number;
-  national?: number;
-  source?: number;
+// Adapter for the live API's fixed global/national/source response shape —
+// keeps existing callers (the entity profile page) one function call away from
+// the generic layer API.
+export function layersFromDistributions(d: SentimentDistributions | null | undefined): DistributionLayer[] {
+  const layers: DistributionLayer[] = [];
+  if (!d) return layers;
+  if (d.global) layers.push({ key: 'global', label: 'Global', color: GLOBAL_COLOR, power: d.global.power, moral: d.global.moral });
+  if (d.national) layers.push({ key: 'national', label: d.national.country, color: NATIONAL_COLOR, power: d.national.power, moral: d.national.moral });
+  if (d.source) layers.push({ key: 'source', label: d.source.source_name, color: SOURCE_COLOR, power: d.source.power, moral: d.source.moral });
+  return layers;
+}
+
+interface SentimentDistributionChartProps {
+  title?: string;
+  entityName: string;
+  layers: DistributionLayer[];
+  height?: number;
+  // Controlled mode: the page owns the power/moral toggle (page-wide toggles)
+  // and no internal toggle is rendered. Omit for the self-contained behavior.
+  dimension?: 'power' | 'moral';
+  // Layer keys hidden until their chip is clicked. Initial-only — remount with
+  // a key when the comparison context changes.
+  initiallyHidden?: string[];
 }
 
 const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
   title = 'Sentiment Distribution',
-  distributions,
   entityName,
+  layers,
   height = 400,
-  showGlobal = true,
-  showNational = true,
-  showSource = true
+  dimension: controlledDimension,
+  initiallyHidden = []
 }) => {
-  const [dimension, setDimension] = useState<'power' | 'moral'>('power');
-  // Layer visibility is real state: the chips are working toggles, initialized from props.
-  const [visible, setVisible] = useState({ global: showGlobal, national: showNational, source: showSource });
-  const toggleLayer = (layer: 'global' | 'national' | 'source') =>
-    setVisible((v) => ({ ...v, [layer]: !v[layer] }));
+  const [internalDimension, setInternalDimension] = useState<'power' | 'moral'>('power');
+  const dimension = controlledDimension ?? internalDimension;
 
-  // Get the selected distribution data
-  const getDistributionData = (): DistributionDataPoint[] => {
-    // Check which distributions are available
-    const hasGlobal = distributions.global?.[dimension]?.pdf?.x && distributions.global?.[dimension]?.pdf?.y;
-    const hasNational = distributions.national?.[dimension]?.pdf?.x && distributions.national?.[dimension]?.pdf?.y;
-    const hasSource = distributions.source?.[dimension]?.pdf?.x && distributions.source?.[dimension]?.pdf?.y;
-    
-    if (!hasGlobal && !hasNational && !hasSource) {
-      return []; // No distribution data available
-    }
-    
-    // Get the pdf data for the selected dimension
-    const globalPdf = distributions.global?.[dimension]?.pdf || { x: [], y: [] };
-    const nationalPdf = distributions.national?.[dimension]?.pdf || { x: [], y: [] };
-    const sourcePdf = distributions.source?.[dimension]?.pdf || { x: [], y: [] };
-    
-    // Create data points for chart
-    return globalPdf.x.map((value, index) => {
-      const point: DistributionDataPoint = { x: value };
-      
-      if (hasGlobal && visible.global) {
-        point.global = globalPdf.y[index];
-      }
-      
-      if (hasNational && visible.national) {
-        // Find the closest x value in national data
-        const nationalIndex = nationalPdf.x.findIndex(x => x >= value);
-        if (nationalIndex >= 0) {
-          point.national = nationalPdf.y[nationalIndex];
-        }
-      }
-      
-      if (hasSource && visible.source) {
-        // Find the closest x value in source data
-        const sourceIndex = sourcePdf.x.findIndex(x => x >= value);
-        if (sourceIndex >= 0) {
-          point.source = sourcePdf.y[sourceIndex];
-        }
-      }
-      
-      return point;
+  // Layer visibility is real state: the chips are working toggles.
+  const [hidden, setHidden] = useState<Set<string>>(new Set(initiallyHidden));
+  const toggleLayer = (key: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
     });
-  };
-  
-  // Handle dimension toggle
-  const handleDimensionChange = (
-    event: React.MouseEvent<HTMLElement>,
-    newDimension: 'power' | 'moral' | null
-  ) => {
-    if (newDimension !== null) {
-      setDimension(newDimension);
-    }
-  };
-  
-  // Get the means for reference lines
-  const getMeans = () => {
-    const means = {
-      global: dimension === 'power' 
-        ? distributions.global?.power.mean 
-        : distributions.global?.moral.mean,
-      national: dimension === 'power' 
-        ? distributions.national?.power.mean 
-        : distributions.national?.moral.mean,
-      source: dimension === 'power' 
-        ? distributions.source?.power.mean 
-        : distributions.source?.moral.mean
-    };
-    
-    return means;
-  };
-  
-  // Get the data points for the chart
-  const distributionData = getDistributionData();
-  const means = getMeans();
 
-  // Check if we have enough data for meaningful visualization
-  const hasEnoughData = distributionData.length >= 20; // Minimum data points for statistical relevance
-  
-  // Per-layer legend names with real sample sizes (n from the selected dimension)
-  const layerName = (layer: 'global' | 'national' | 'source'): string => {
-    const dist = distributions[layer];
-    if (!dist) return layer;
-    const count = dimension === 'power' ? dist.power.count : dist.moral.count;
-    const label = layer === 'global' ? 'Global' : layer === 'national' ? distributions.national!.country : distributions.source!.source_name;
-    return `${label} (n=${count})`;
+  const layersWithData = layers.filter((l) => (l[dimension]?.pdf?.x?.length ?? 0) > 0);
+  const visibleLayers = layersWithData.filter((l) => !hidden.has(l.key));
+
+  // Merge all visible curves onto a shared x-axis. The backend emits every
+  // layer on one fixed grid, so this is index alignment in practice; a map by
+  // x-value keeps mixed-grid inputs rendering instead of mispairing.
+  const pointsByX = new Map<number, Record<string, number>>();
+  visibleLayers.forEach((l) => {
+    const pdf = l[dimension]!.pdf!;
+    pdf.x.forEach((x, i) => {
+      const point = pointsByX.get(x) ?? { x };
+      point[l.key] = pdf.y[i];
+      pointsByX.set(x, point);
+    });
+  });
+  const distributionData = [...pointsByX.values()].sort((a, b) => a.x - b.x);
+
+  // Enough data = some layer has a real curve for this dimension (visibility
+  // doesn't count against it — hiding every chip shouldn't flip the empty state).
+  const hasEnoughData = layersWithData.some((l) => (l[dimension]!.pdf!.x.length ?? 0) >= 20);
+
+  const layerName = (l: DistributionLayer): string => {
+    const count = l[dimension]?.count;
+    return count != null ? `${l.label} (n=${count})` : l.label;
   };
 
   return (
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <Box>
           <Typography variant="h6" sx={{ color: tokens.ink }}>
             {title}: {entityName}
@@ -150,72 +114,47 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
           <Typography variant="subtitle2" sx={{ color: tokens.inkMuted }}>
             {dimension === 'power' ? 'Power Dimension' : 'Moral Dimension'} Distribution
           </Typography>
-          {!hasEnoughData && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.villain }}>
-              Insufficient data for reliable statistical analysis. More data points needed.
-            </Typography>
-          )}
         </Box>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {/* Toggle which distributions to show */}
+          {/* Toggle which curves to show */}
           <Box>
-            {distributions.global && (
+            {layers.map((l) => (
               <Chip
-                label="Global"
+                key={l.key}
+                label={l.label}
                 sx={{
                   mx: 0.5,
-                  bgcolor: visible.global ? GLOBAL_COLOR : 'transparent',
-                  color: visible.global ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${visible.global ? GLOBAL_COLOR : tokens.border}`,
+                  bgcolor: !hidden.has(l.key) ? l.color : 'transparent',
+                  color: !hidden.has(l.key) ? '#FFFFFF' : tokens.inkMuted,
+                  border: `1px solid ${!hidden.has(l.key) ? l.color : tokens.border}`,
                 }}
-                onClick={() => toggleLayer('global')}
+                onClick={() => toggleLayer(l.key)}
               />
-            )}
-            {distributions.national && (
-              <Chip
-                label={distributions.national.country}
-                sx={{
-                  mx: 0.5,
-                  bgcolor: visible.national ? NATIONAL_COLOR : 'transparent',
-                  color: visible.national ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${visible.national ? NATIONAL_COLOR : tokens.border}`,
-                }}
-                onClick={() => toggleLayer('national')}
-              />
-            )}
-            {distributions.source && (
-              <Chip
-                label={distributions.source.source_name}
-                sx={{
-                  mx: 0.5,
-                  bgcolor: visible.source ? SOURCE_COLOR : 'transparent',
-                  color: visible.source ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${visible.source ? SOURCE_COLOR : tokens.border}`,
-                }}
-                onClick={() => toggleLayer('source')}
-              />
-            )}
+            ))}
           </Box>
-          
-          {/* Dimension toggle */}
-          <ToggleButtonGroup
-            value={dimension}
-            exclusive
-            onChange={handleDimensionChange}
-            aria-label="sentiment dimension"
-            size="small"
-          >
-            <ToggleButton value="power" aria-label="power dimension">
-              Power
-            </ToggleButton>
-            <ToggleButton value="moral" aria-label="moral dimension">
-              Moral
-            </ToggleButton>
-          </ToggleButtonGroup>
+
+          {/* Dimension toggle — only in uncontrolled mode; pages with a
+              page-wide dimension control pass `dimension` instead. */}
+          {controlledDimension == null && (
+            <ToggleButtonGroup
+              value={dimension}
+              exclusive
+              onChange={(_, v: 'power' | 'moral' | null) => v != null && setInternalDimension(v)}
+              aria-label="sentiment dimension"
+              size="small"
+            >
+              <ToggleButton value="power" aria-label="power dimension">
+                Power
+              </ToggleButton>
+              <ToggleButton value="moral" aria-label="moral dimension">
+                Moral
+              </ToggleButton>
+            </ToggleButtonGroup>
+          )}
         </Box>
       </Box>
-      
+
       {!hasEnoughData && (
         <Box sx={{
           display: 'flex',
@@ -279,67 +218,31 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
             label={{ value: 'neutral', position: 'insideTopLeft', fill: tokens.inkMuted, fontSize: 11 }}
           />
 
-          {/* Reference lines for means */}
-          {visible.global && means.global !== undefined && (
-            <ReferenceLine
-              x={means.global}
-              stroke={GLOBAL_COLOR}
-              strokeDasharray="3 3"
-              label={{ value: 'Global Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
-            />
+          {/* Mean marker per visible curve */}
+          {visibleLayers.map((l) =>
+            l[dimension]?.mean !== undefined ? (
+              <ReferenceLine
+                key={`mean-${l.key}`}
+                x={l[dimension]!.mean}
+                stroke={l.color}
+                strokeDasharray="3 3"
+                label={{ value: `${l.label} mean`, position: 'top', fill: tokens.inkMuted, fontSize: 11 }}
+              />
+            ) : null
           )}
 
-          {visible.national && means.national !== undefined && (
-            <ReferenceLine
-              x={means.national}
-              stroke={NATIONAL_COLOR}
-              strokeDasharray="3 3"
-              label={{ value: 'National Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
-            />
-          )}
-
-          {visible.source && means.source !== undefined && (
-            <ReferenceLine
-              x={means.source}
-              stroke={SOURCE_COLOR}
-              strokeDasharray="3 3"
-              label={{ value: 'Source Mean', position: 'top', fill: tokens.inkMuted, fontSize: 12 }}
-            />
-          )}
-
-          {/* Distribution areas */}
-          {visible.global && distributions.global && (
+          {/* The curves themselves, overlaid translucently */}
+          {visibleLayers.map((l) => (
             <Area
+              key={l.key}
               type="monotone"
-              dataKey="global"
-              name={layerName('global')}
-              fill={GLOBAL_COLOR}
-              stroke={GLOBAL_COLOR}
+              dataKey={l.key}
+              name={layerName(l)}
+              fill={l.color}
+              stroke={l.color}
               fillOpacity={0.3}
             />
-          )}
-
-          {visible.national && distributions.national && (
-            <Area
-              type="monotone"
-              dataKey="national"
-              name={layerName('national')}
-              fill={NATIONAL_COLOR}
-              stroke={NATIONAL_COLOR}
-              fillOpacity={0.3}
-            />
-          )}
-
-          {visible.source && distributions.source && (
-            <Area
-              type="monotone"
-              dataKey="source"
-              name={layerName('source')}
-              fill={SOURCE_COLOR}
-              stroke={SOURCE_COLOR}
-              fillOpacity={0.3}
-            />
-          )}
+          ))}
         </AreaChart>
       </ResponsiveContainer>
       )}

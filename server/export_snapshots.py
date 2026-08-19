@@ -19,6 +19,16 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   responses; the frontend (staticData.ts) slices shorter
                                   windows from the timestamped daily rows client-side.
                                   (Format 1 stored a full copy per window — 5x bloat.)
+                                  Bundles may also carry national_distributions:
+                                  {country: national-layer} for snapshotted countries
+                                  with >= MIN_NATIONAL_MENTIONS scored mentions — the
+                                  source page's country-baseline distribution overlay.
+    source/{id}.json             per-newspaper bundle for the source profile page:
+                                  {format: 1, source, base_days, entities} where each
+                                  entity row is the paper's trending row plus its
+                                  sentiment PDFs (distribution) and daily series
+                                  (daily) from this paper's mentions only. Written for
+                                  exactly the meta.trending_sources set.
     country/{Country}_{days}.json  top-entities page data. Still one file per window:
                                   unlike the entity series, these are top-10 rankings
                                   *within* each window, so the windows genuinely differ.
@@ -59,6 +69,11 @@ TRENDING_LIMIT = 100
 # A newspaper overlay with fewer entities than this can't say anything about
 # divergence — skip the file and keep the paper out of the static-mode picker.
 MIN_SOURCE_TRENDING = 5
+# The source profile page's grid shows a paper's top 20; the bundle bakes
+# distributions + daily series for exactly that set.
+SOURCE_BUNDLE_ENTITIES = 20
+# A national KDE over fewer mentions than this is shape-noise — prune the layer.
+MIN_NATIONAL_MENTIONS = 5
 # ContestedEntitiesPanel shows 8; same headroom reasoning.
 CONTESTED_LIMIT = 20
 
@@ -87,12 +102,17 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     fetchers: entities(limit), sources(), distribution(id), historical(id, days),
               source_historical(id, days), country_top(country, days),
               trending(limit, country), trending_source(source_id), contested(),
+              national_distribution(id, country) -> national layer or None,
+              source_distribution(id, source_id) -> source layer or None,
+              source_historical_country(id, days, country) -> the per-source
+              response for that country (the countries=[C] endpoint branch),
               most_recent_article_date() —
               each returns a JSON-serializable value or raises to skip
               (most_recent_article_date raising just omits the field).
     """
     counts = {"entities": 0, "entity_files": 0, "country_files": 0,
               "trending_files": 0, "source_trending_files": 0,
+              "source_bundles": 0, "national_layers": 0,
               "contested_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
@@ -115,6 +135,21 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             print(f"  skip entity {eid} ({e.get('name')}): {ex}")
             counts["skipped"] += 1
             continue
+        # Per-country sentiment PDFs (the source page's country-baseline curve).
+        # Thin or absent coverage is expected for most entity x country pairs —
+        # prune those silently; counts["national_layers"] in the summary line is
+        # the tell if the fetcher is broken outright (it would read 0).
+        national = {}
+        for country in COUNTRIES:
+            try:
+                layer = fetchers["national_distribution"](eid, country)
+            except Exception:
+                continue
+            if layer and layer.get("power", {}).get("count", 0) >= MIN_NATIONAL_MENTIONS:
+                national[country] = layer
+                counts["national_layers"] += 1
+        if national:
+            bundle["national_distributions"] = national
         write_json(out_dir, f"entity/{eid}.json", bundle)
         counts["entity_files"] += 1
 
@@ -135,6 +170,9 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     # source of truth for which those are. Thin sources are expected, not
     # errors, so they aren't counted as skips (a fetcher raising still is).
     trending_source_ids = []
+    # (entity_id, country) -> per-source historical response. Papers from the
+    # same country covering the same entity share one query, not one each.
+    source_hist_cache: dict = {}
     for s in sources:
         sid = s["id"]
         try:
@@ -148,6 +186,36 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         write_json(out_dir, f"stats/trending_source_{sid}.json", rows)
         trending_source_ids.append(sid)
         counts["source_trending_files"] += 1
+
+        # Source bundle: this paper's top entities with its own sentiment PDFs
+        # and daily series (the source profile page's distribution overlay and
+        # history line). Missing pieces degrade per entity, never the bundle.
+        hist_key = f"{s['name']} ({s['country']})"
+        bundle_entities = []
+        for row in rows[:SOURCE_BUNDLE_ENTITIES]:
+            ent = dict(row)
+            try:
+                dist = fetchers["source_distribution"](row["id"], sid)
+                if dist:
+                    ent["distribution"] = dist
+            except Exception as ex:
+                print(f"  source {sid}: no distribution for entity {row['id']}: {ex}")
+            cache_key = (row["id"], s["country"])
+            if cache_key not in source_hist_cache:
+                try:
+                    source_hist_cache[cache_key] = fetchers["source_historical_country"](
+                        row["id"], base_days, s["country"])
+                except Exception:
+                    source_hist_cache[cache_key] = None
+            hist = source_hist_cache[cache_key]
+            daily = (((hist or {}).get("sources") or {}).get(hist_key) or {}).get("daily_data")
+            if daily:
+                ent["daily"] = daily
+            bundle_entities.append(ent)
+        write_json(out_dir, f"source/{sid}.json",
+                   {"format": 1, "source": s, "base_days": base_days,
+                    "entities": bundle_entities})
+        counts["source_bundles"] += 1
 
     try:
         write_json(out_dir, "stats/contested.json", fetchers["contested"]())
@@ -213,9 +281,10 @@ def live_fetchers(session):
             get_entities(entity_type=None, search=None, limit=limit, db=session)),
         "sources": lambda: jsonable_encoder(get_sources(db=session)),
         "distribution": lambda eid: run(
-            # days=None explicitly: called as a plain function, the FastAPI
-            # Query default object would otherwise be passed through (truthy).
-            get_entity_distribution(eid, country=None, source_id=None, days=None, db=session)),
+            # days/layers=None explicitly: called as a plain function, the FastAPI
+            # Query default objects would otherwise be passed through (truthy).
+            get_entity_distribution(eid, country=None, source_id=None, days=None,
+                                    layers=None, db=session)),
         "historical": lambda eid, days: run(
             get_historical_sentiment(eid, days=days, db=session)),
         "source_historical": lambda eid, days: run(
@@ -229,6 +298,20 @@ def live_fetchers(session):
         "trending_source": lambda sid: run(
             get_trending_entities(limit=TRENDING_LIMIT, days=None, country=None,
                                   source_id=sid, db=session)),
+        # layers= restricts the SQL fetch to the one subset asked for — without it
+        # every call below would pull all of an entity's mentions and KDE a global
+        # layer nobody uses.
+        "national_distribution": lambda eid, country: run(
+            get_entity_distribution(eid, country=country, source_id=None, days=None,
+                                    layers="national", db=session)
+            ).get("distributions", {}).get("national"),
+        "source_distribution": lambda eid, sid: run(
+            get_entity_distribution(eid, country=None, source_id=sid, days=None,
+                                    layers="source", db=session)
+            ).get("distributions", {}).get("source"),
+        "source_historical_country": lambda eid, days, country: run(
+            get_source_historical_sentiment(eid, days=days, countries=[country],
+                                            db=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -293,6 +376,20 @@ def self_test():
         "contested": lambda: {"days": 30, "dimension": "moral",
                               "entities": [{"entity_name": "Ada",
                                             "divergence": 0.55555555}]},
+        # USA clears MIN_NATIONAL_MENTIONS, UK is thin (pruned), the rest raise
+        # (swallowed — thin coverage is expected, not an export error).
+        "national_distribution": lambda eid, country:
+            {"country": country,
+             "power": {"count": 9 if country == "USA" else 2, "mean": 0.1},
+             "moral": {"count": 9 if country == "USA" else 2, "mean": 0.2}}
+            if country in ("USA", "UK") else (_ for _ in ()).throw(ValueError("thin")),
+        "source_distribution": lambda eid, sid:
+            {"source_id": sid, "source_name": "Src",
+             "power": {"count": 3, "mean": 0.5}, "moral": {"count": 3, "mean": -0.5}},
+        "source_historical_country": lambda eid, days, country:
+            {"sources": {"Src (USA)": {"daily_data": [
+                {"date": "2026-01-01", "power_score": 0.5,
+                 "moral_score": -0.5, "mention_count": 3}]}}},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
@@ -307,11 +404,15 @@ def self_test():
 
         with open(os.path.join(out, "entity", "1.json")) as f:
             bundle = json.load(f)
-        assert set(bundle) == {"format", "entity", "base_days",
-                               "distribution", "historical", "source_historical"}
+        assert set(bundle) == {"format", "entity", "base_days", "distribution",
+                               "historical", "source_historical",
+                               "national_distributions"}
         assert bundle["format"] == 2 and bundle["base_days"] == max(HIST_DAYS)
         assert bundle["historical"]["days"] == max(HIST_DAYS)
         assert bundle["historical"]["daily_data"][0]["power_score"] == 1.2346  # rounded
+        # USA written, UK pruned (below MIN_NATIONAL_MENTIONS), the rest raised.
+        assert set(bundle["national_distributions"]) == {"USA"}
+        assert counts["national_layers"] == 1
 
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30
@@ -325,6 +426,18 @@ def self_test():
         assert os.path.exists(os.path.join(out, "stats", "trending_source_5.json"))
         assert not os.path.exists(os.path.join(out, "stats", "trending_source_6.json"))
         assert not os.path.exists(os.path.join(out, "stats", "trending_source_7.json"))
+
+        # Source bundles track the trending_source set exactly.
+        assert counts["source_bundles"] == 1
+        with open(os.path.join(out, "source", "5.json")) as f:
+            sb = json.load(f)
+        assert sb["format"] == 1 and sb["base_days"] == max(HIST_DAYS)
+        assert sb["source"]["id"] == 5
+        assert len(sb["entities"]) == MIN_SOURCE_TRENDING  # all 5 rows, under the 20 cap
+        assert sb["entities"][0]["distribution"]["source_name"] == "Src"
+        assert sb["entities"][0]["daily"][0]["mention_count"] == 3
+        assert not os.path.exists(os.path.join(out, "source", "6.json"))
+        assert not os.path.exists(os.path.join(out, "source", "7.json"))
 
         assert counts["contested_files"] == 1
         with open(os.path.join(out, "stats", "contested.json")) as f:

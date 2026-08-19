@@ -16,7 +16,7 @@ import {
 import { useData } from '../context/DataContext';
 import { entityApi, statsApi } from '../services/api';
 import EntityTrendChart from '../components/EntityTrendChart';
-import SentimentDistributionChart from '../components/SentimentDistributionChart';
+import SentimentDistributionChart, { layersFromDistributions } from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
@@ -188,7 +188,11 @@ const EntityProfilePage: React.FC = () => {
                   </Grid>
                 </Grid>
                 {distribution ? (
-                  <SentimentDistributionChart distributions={distribution} entityName={entity.name} height={330} />
+                  <SentimentDistributionChart
+                    layers={layersFromDistributions(distribution)}
+                    entityName={entity.name}
+                    height={330}
+                  />
                 ) : (
                   <Box sx={{ height: 330, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <Typography variant="body2" sx={{ color: tokens.inkMuted }}>

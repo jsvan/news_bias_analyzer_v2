@@ -35,6 +35,12 @@ interface MultiSourceTrendChartProps {
   sourcesTrends: Record<string, TrendPoint[]>;
   height?: number;
   dimension?: 'power' | 'moral' | 'both';
+  // Controlled mode: a page-wide toggle owns the dimension; the internal
+  // toggle is not rendered. `dimension` alone stays the uncontrolled default.
+  controlledDimension?: 'power' | 'moral' | 'both';
+  // Explicit per-series colors (e.g. subject = accent, baseline = gray).
+  // Series without an entry keep the country-categorical assignment.
+  colors?: Record<string, string>;
 }
 
 // Line style patterns: Power lines are always dashed, Moral lines are always solid
@@ -43,9 +49,12 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
   entityName,
   sourcesTrends,
   height = 400,
-  dimension = 'moral'
+  dimension = 'moral',
+  controlledDimension,
+  colors
 }) => {
-  const [selectedDimension, setSelectedDimension] = useState<'both' | 'power' | 'moral'>(dimension);
+  const [internalDimension, setInternalDimension] = useState<'both' | 'power' | 'moral'>(dimension);
+  const selectedDimension = controlledDimension ?? internalDimension;
   // Sources hidden via their legend chip. The legend is the control, not a
   // separate static block restating it.
   const [hiddenSources, setHiddenSources] = useState<Set<string>>(new Set());
@@ -230,7 +239,7 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
     newDimension: 'both' | 'power' | 'moral' | null
   ) => {
     if (newDimension !== null) {
-      setSelectedDimension(newDimension);
+      setInternalDimension(newDimension);
     }
   };
 
@@ -264,8 +273,10 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
 
   // Same categorical hue per country, stepping opacity per source within it.
   // Computed (not a fixed 4-entry list) so the 5th source in a country doesn't
-  // silently recycle the 1st source's exact color.
+  // silently recycle the 1st source's exact color. An explicit `colors` entry
+  // wins outright — comparison pages assign roles, not countries.
   const getSourceColor = (sourceName: string) => {
+    if (colors?.[sourceName]) return colors[sourceName];
     const country = getCountryFromSource(sourceName);
     const baseColor = categoricalColor(country, countryOrder);
     const sourceIndexInCountry = sourcesByCountry[country].indexOf(sourceName);
@@ -286,23 +297,25 @@ const MultiSourceTrendChart: React.FC<MultiSourceTrendChartProps> = ({
             <InfoIcon fontSize="small" color="action" />
           </MuiTooltip>
         </Box>
-        <ToggleButtonGroup
-          size="small"
-          value={selectedDimension}
-          exclusive
-          onChange={handleDimensionChange}
-          aria-label="dimension selector"
-        >
-          <ToggleButton value="both" aria-label="both dimensions">
-            Both
-          </ToggleButton>
-          <ToggleButton value="power" aria-label="power dimension">
-            Power
-          </ToggleButton>
-          <ToggleButton value="moral" aria-label="moral dimension">
-            Moral
-          </ToggleButton>
-        </ToggleButtonGroup>
+        {controlledDimension == null && (
+          <ToggleButtonGroup
+            size="small"
+            value={selectedDimension}
+            exclusive
+            onChange={handleDimensionChange}
+            aria-label="dimension selector"
+          >
+            <ToggleButton value="both" aria-label="both dimensions">
+              Both
+            </ToggleButton>
+            <ToggleButton value="power" aria-label="power dimension">
+              Power
+            </ToggleButton>
+            <ToggleButton value="moral" aria-label="moral dimension">
+              Moral
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
       </Box>
 
       {/* The legend IS the control: one chip per source, colored like its line,

@@ -1200,13 +1200,27 @@ async def get_entity_distribution(
     country: Optional[str] = Query(None),
     source_id: Optional[int] = Query(None),
     days: Optional[int] = Query(None, ge=1, le=3650),
+    layers: Optional[str] = Query(None, description="Comma-separated subset of global,national,source; omit for all applicable"),
     db: Session = Depends(get_db)
 ):
     """Get sentiment distribution data for a specific entity. Omit days for all-time.
 
     Mentions are gathered across the whole merged group (Entity.canonical_id) and
-    the canonical row is reported as the entity, so alias ids fold into one view."""
+    the canonical row is reported as the entity, so alias ids fold into one view.
+
+    `layers` restricts which layers are computed AND fetched: asking for only the
+    national or source layer filters at the SQL level instead of pulling every
+    mention of the entity to compute a global KDE nobody asked for. The snapshot
+    exporter and per-layer gap-fill calls depend on this being cheap."""
     try:
+        # isinstance guard: direct (non-HTTP) callers that omit layers pass the
+        # FastAPI Query default object through, which is truthy but not a str.
+        wanted = ({s.strip() for s in layers.split(",") if s.strip()}
+                  if isinstance(layers, str) and layers else {"global", "national", "source"})
+        unknown = wanted - {"global", "national", "source"}
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown layers: {sorted(unknown)}")
+
         entity, group_ids = resolve_entity_group(db, entity_id)
         if not entity:
             raise HTTPException(status_code=404, detail=f"Entity with ID {entity_id} not found")
@@ -1231,11 +1245,18 @@ async def get_entity_distribution(
             EntityMention.power_score.isnot(None),
             EntityMention.moral_score.isnot(None)
         )
-        
-        # No filters here: global is always ALL mentions, and national/source are
-        # computed below as true subsets. (Previously a country/source filter was
-        # applied to this base query, which silently turned "global" into the
+
+        # No filters by default: global is always ALL mentions, and national/source
+        # are computed below as true subsets. (Previously a country/source filter
+        # was applied to this base query, which silently turned "global" into the
         # subset, and "national" was returned as a reference to the same object.)
+        # Exception: when the caller wants exactly one scoped layer and no global,
+        # the subset IS the whole result set, so filter in SQL and skip the rest.
+        scoped_only = "global" not in wanted and wanted in ({"national"}, {"source"})
+        if scoped_only and wanted == {"national"} and country:
+            query = query.filter(NewsSource.country == country)
+        elif scoped_only and wanted == {"source"} and source_id:
+            query = query.filter(NewsArticle.source_id == source_id)
         mentions = query.all()
 
         if not mentions:
@@ -1296,22 +1317,25 @@ async def get_entity_distribution(
                 "name": entity.name,
                 "type": entity.entity_type
             },
-            "distributions": {
-                "global": layer_stats(mentions)
-            }
+            "distributions": {}
         }
 
-        if country:
+        # The subset comprehensions are correct in the scoped_only case too —
+        # every fetched mention already matches, so they're identity filters.
+        if "global" in wanted:
+            result["distributions"]["global"] = layer_stats(mentions)
+
+        if "national" in wanted and country:
             national = [m for m in mentions if m.country == country]
             if national:
                 result["distributions"]["national"] = {"country": country, **layer_stats(national)}
 
-        if source_id:
+        if "source" in wanted and source_id:
             source = db.query(NewsSource).filter(NewsSource.id == source_id).first()
             if source:
                 subset = [m for m in mentions if m.source_name == source.name]
                 if subset:
-                    result["distributions"]["source"] = {"source_name": source.name, **layer_stats(subset)}
+                    result["distributions"]["source"] = {"source_id": source.id, "source_name": source.name, **layer_stats(subset)}
 
         return result
         

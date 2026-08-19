@@ -27,6 +27,12 @@
  *   file (meta.trending_sources clamps that picker).
  * - getContestedRanking serves one fixed 30-day moral-dimension snapshot
  *   regardless of days/dimension params; limit slices client-side.
+ * - getEntityDistribution assembles national/source layers from baked pieces,
+ *   so they exist only where snapshotted: countries with enough scored
+ *   mentions, and a paper's own top entities (its source/{id}.json bundle).
+ *   Days are ignored (all-time-ish: the snapshot's own window).
+ * - getSourceEntityHistory serves the paper bundle's base_days series; papers
+ *   without a bundle return [].
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -56,6 +62,10 @@ function load(relPath: string): Promise<any> {
 }
 
 const entityBundle = (id: number) => load(`entity/${id}.json`);
+
+// Per-newspaper bundle (source/{id}.json): the paper's top entities with its own
+// sentiment PDFs and daily series. Exists for exactly meta.trending_sources.
+const sourceBundle = (id: number) => load(`source/${id}.json`);
 
 // Search matches the canonical name OR any merged alias spelling
 // (entities.json carries `aliases` for merged groups — e.g. "Zelenskyy"
@@ -178,8 +188,40 @@ export const staticData = {
     return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 20) };
   },
 
-  getEntityDistribution: async (id: number) =>
-    (await entityBundle(id)).distribution,
+  // Assembles the live endpoint's layered shape from bundle pieces: global from
+  // the entity bundle, national from its baked per-country layers, source from
+  // that paper's own bundle. A layer that wasn't snapshotted (thin country
+  // coverage, entity outside the paper's top set) is simply absent — the same
+  // contract as the live endpoint returning no layer for no data.
+  getEntityDistribution: async (id: number, country?: string, sourceId?: number) => {
+    const bundle = await entityBundle(id);
+    const base = bundle.distribution;
+    const distributions: any = { ...(base?.distributions ?? {}) };
+    if (country && bundle.national_distributions?.[country]) {
+      distributions.national = bundle.national_distributions[country];
+    }
+    if (sourceId) {
+      try {
+        const sb = await sourceBundle(sourceId);
+        const ent = (sb.entities ?? []).find((e: any) => e.id === id);
+        if (ent?.distribution) distributions.source = ent.distribution;
+      } catch {
+        // paper not snapshotted — no source layer
+      }
+    }
+    return { ...base, distributions };
+  },
+
+  // One paper's daily series for one entity, from its bundle. [] when the paper
+  // isn't snapshotted or the entity isn't among its baked top entities.
+  getSourceEntityHistory: async (sourceId: number, entityId: number) => {
+    try {
+      const sb = await sourceBundle(sourceId);
+      return sb.entities?.find((e: any) => e.id === entityId)?.daily ?? [];
+    } catch {
+      return [];
+    }
+  },
 
   getHistoricalSentiment: async (entityId: number, params: any = {}) => {
     const bundle = await entityBundle(entityId);

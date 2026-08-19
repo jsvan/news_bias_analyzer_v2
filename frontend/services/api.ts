@@ -107,9 +107,12 @@ export const entityApi = {
     return response.data;
   },
   
-  // Get entity sentiment distribution
-  getEntityDistribution: async (id: number, country?: string, sourceId?: number, days?: number) => {
-    if (isStaticMode()) return staticData.getEntityDistribution(id);
+  // Get entity sentiment distribution. `layers` (comma subset of
+  // global,national,source) restricts what the backend computes — a
+  // single-layer request skips the global KDE entirely, which matters for
+  // per-entity gap-fill fan-outs. Static mode assembles layers from bundles.
+  getEntityDistribution: async (id: number, country?: string, sourceId?: number, days?: number, layers?: string) => {
+    if (isStaticMode()) return staticData.getEntityDistribution(id, country, sourceId);
     if (isApiUnavailable()) {
       throw new Error('API unavailable: Please run the backend server to access real distribution data.');
     }
@@ -120,7 +123,8 @@ export const entityApi = {
     if (country) params.country = country;
     if (sourceId) params.source_id = sourceId;
     if (days) params.days = days; // ALL_TIME sentinel (0) omitted = all-time
-    
+    if (layers) params.layers = layers;
+
     const response = await api.get(url, { params });
     return response.data;
   },
@@ -283,6 +287,26 @@ export const statsApi = {
     
     const response = await api.get(url);
     return response.data;
+  },
+
+  // One paper's daily sentiment series for one entity. Live: the per-source
+  // branch of source_historical_sentiment (countries=[paper's country]) keyed
+  // "Name (Country)"; static: the paper's baked bundle. Returns TrendPoint[].
+  getSourceEntityHistory: async (
+    source: { id: number; name: string; country: string },
+    entityId: number,
+    params: { days?: number } = {}
+  ) => {
+    if (isStaticMode()) return staticData.getSourceEntityHistory(source.id, entityId);
+    if (isApiUnavailable()) {
+      throw new Error('API unavailable: Please run the backend server to access real source historical sentiment data.');
+    }
+
+    let url = `/stats/source_historical_sentiment?entity_id=${entityId}`;
+    if (params.days) url += `&days=${params.days}`; // ALL_TIME sentinel (0) omitted
+    url += `&countries=${encodeURIComponent(source.country)}`;
+    const response = await api.get(url);
+    return response.data?.sources?.[`${source.name} (${source.country})`]?.daily_data ?? [];
   },
 
   // Get top entities for a specific newspaper
