@@ -348,6 +348,17 @@ export const narrativeApi = {
     const response = await api.get('/narrative/contested', { params });
     return response.data;
   },
+  // Every source's reading of one entity (current window + the previous one,
+  // for per-paper drift) — the single-entity scatter. Static mode serves the
+  // bundle's one baked 4-week response; weeks is ignored there.
+  getEntitySourceScatter: async (entityId: number, params: { weeks?: number } = {}) => {
+    if (isStaticMode()) return staticData.getEntitySourceScatter(entityId);
+    if (isApiUnavailable()) {
+      throw new Error('The per-source scatter requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get(`/narrative/entity/${entityId}/source-scatter`, { params });
+    return response.data;
+  },
   getArchetype: async (entityId: number, params: { weeks?: number; country?: string } = {}) => {
     if (isStaticMode() || isApiUnavailable()) {
       throw new Error('The archetype trajectory requires a live backend and is not available in this demo.');

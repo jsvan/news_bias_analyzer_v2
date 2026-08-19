@@ -26,7 +26,9 @@ from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
     contested_ranking, archetype, trajectory, salience_asymmetry,
 )
-from clustering.source_similarity import compute_source_map, compute_global_agenda
+from clustering.source_similarity import (
+    compute_source_map, compute_global_agenda, latest_week,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -185,6 +187,99 @@ async def get_entity_archetype(
         moral=round(current_moral, 3),
         trajectory=[ArchetypePoint(window_index=i, power=round(p, 3), moral=round(m, 3))
                     for i, p, m in path] if path else None,
+    )
+
+
+class SourceScatterPoint(BaseModel):
+    source_id: int
+    source_name: str
+    country: Optional[str]
+    power_score: float
+    moral_score: float
+    mention_count: int
+
+
+class SourceScatterWindow(BaseModel):
+    start: Optional[str]
+    end: Optional[str]
+    sources: List[SourceScatterPoint]
+
+
+class EntitySourceScatterResponse(BaseModel):
+    entity_id: int
+    entity_name: str
+    weeks: int
+    current: SourceScatterWindow
+    previous: SourceScatterWindow
+
+
+# Matches get_trending_entities' per-source floor AND the EntityInfoPlate copy
+# ("fewer than 3 scored mentions") — change all three together or the UI lies.
+MIN_SOURCE_SCATTER_MENTIONS = 3
+
+
+@router.get("/narrative/entity/{entity_id}/source-scatter",
+            response_model=EntitySourceScatterResponse)
+async def get_entity_source_scatter(
+    entity_id: int,
+    weeks: int = Query(4, ge=1, le=26),
+    session: Session = Depends(get_session),
+):
+    """Every source's reading of ONE entity: mention-weighted mean power/moral per
+    source over the trailing `weeks`-week window (`current`), plus the adjacent
+    window before it (`previous`) so the frontend can draw each paper's drift
+    against its own month-ago position — the transpose of /similarity/pair
+    (two sources x many entities -> many sources x one entity), on the same
+    mv_source_entity_week cells (canonical entity ids, publish-date weeks).
+    """
+    def window(start, end, points):
+        return SourceScatterWindow(
+            start=start.isoformat() if start else None,
+            end=end.isoformat() if end else None,
+            sources=points,
+        )
+
+    entity = session.query(Entity).filter(Entity.id == entity_id).first()
+    week = latest_week(session) if entity else None
+    if not entity or week is None:
+        return EntitySourceScatterResponse(
+            entity_id=entity_id, entity_name=entity.name if entity else "unknown",
+            weeks=weeks, current=window(None, None, []), previous=window(None, None, []),
+        )
+
+    cur_first = week - timedelta(weeks=weeks - 1)
+    prev_first = cur_first - timedelta(weeks=weeks)
+    rows = session.execute(text("""
+        SELECT m.source_id, s.name AS source_name, s.country,
+               (m.week_start >= :cur_first) AS is_current,
+               SUM(m.mean_power * m.n) / SUM(m.n) AS power_score,
+               SUM(m.mean_moral * m.n) / SUM(m.n) AS moral_score,
+               SUM(m.n) AS mention_count
+        FROM mv_source_entity_week m
+        JOIN news_sources s ON s.id = m.source_id
+        WHERE m.entity_id = :entity_id
+          AND m.week_start BETWEEN :prev_first AND :week
+        GROUP BY m.source_id, s.name, s.country, (m.week_start >= :cur_first)
+        HAVING SUM(m.n) >= :min_mentions
+        ORDER BY SUM(m.n) DESC
+    """), {"entity_id": entity.canonical_id or entity.id, "week": week,
+           "cur_first": cur_first, "prev_first": prev_first,
+           "min_mentions": MIN_SOURCE_SCATTER_MENTIONS}).fetchall()
+
+    buckets = {True: [], False: []}
+    for r in rows:
+        if r.power_score is None or r.moral_score is None:
+            continue  # a week whose mentions all lacked one dimension's score
+        buckets[r.is_current].append(SourceScatterPoint(
+            source_id=r.source_id, source_name=r.source_name, country=r.country,
+            power_score=round(float(r.power_score), 3),
+            moral_score=round(float(r.moral_score), 3),
+            mention_count=int(r.mention_count),
+        ))
+    return EntitySourceScatterResponse(
+        entity_id=entity_id, entity_name=entity.name, weeks=weeks,
+        current=window(cur_first, week + timedelta(days=6), buckets[True]),
+        previous=window(prev_first, cur_first - timedelta(days=1), buckets[False]),
     )
 
 

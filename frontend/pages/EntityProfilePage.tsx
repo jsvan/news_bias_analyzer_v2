@@ -18,6 +18,7 @@ import { entityApi, statsApi } from '../services/api';
 import EntityTrendChart from '../components/EntityTrendChart';
 import SentimentDistributionChart, { layersFromDistributions } from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
+import EntitySourceScatterPanel from '../components/EntitySourceScatterPanel';
 import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
@@ -235,6 +236,10 @@ const EntityProfilePage: React.FC = () => {
                 )}
               </CardContent>
             </Card>
+          </Grid>
+
+          <Grid item xs={12}>
+            <EntitySourceScatterPanel entityId={entity.id} entityName={entity.name} />
           </Grid>
 
           <Grid item xs={12} md={6}>

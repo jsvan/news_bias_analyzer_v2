@@ -22,7 +22,11 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   Bundles may also carry national_distributions:
                                   {country: national-layer} for snapshotted countries
                                   with >= MIN_NATIONAL_MENTIONS scored mentions — the
-                                  source page's country-baseline distribution overlay.
+                                  source page's country-baseline distribution overlay —
+                                  and source_scatter: the fixed 4-week per-source
+                                  scatter response (every source's reading of this
+                                  entity, current + previous window) for the entity
+                                  page's per-source drift scatter.
     source/{id}.json             per-newspaper bundle for the source profile page:
                                   {format: 1, source, base_days, entities} where each
                                   entity row is the paper's trending row plus its
@@ -115,13 +119,14 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
               source_distribution(id, source_id) -> source layer or None,
               source_historical_country(id, days, country) -> the per-source
               response for that country (the countries=[C] endpoint branch),
+              source_scatter(id) -> the per-source scatter response,
               most_recent_article_date() —
               each returns a JSON-serializable value or raises to skip
               (most_recent_article_date raising just omits the field).
     """
     counts = {"entities": 0, "entity_files": 0, "country_files": 0,
               "trending_files": 0, "source_trending_files": 0,
-              "source_bundles": 0, "national_layers": 0,
+              "source_bundles": 0, "national_layers": 0, "source_scatters": 0,
               "contested_files": 0, "source_space_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
@@ -159,6 +164,15 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
                 counts["national_layers"] += 1
         if national:
             bundle["national_distributions"] = national
+        # Per-source scatter (fixed 4-week + previous window). Degrades to an
+        # absent key — the frontend panel shows its empty state, the bundle's
+        # other pieces still ship. counts["source_scatters"] reading 0 in the
+        # summary line is the tell if the fetcher is broken outright.
+        try:
+            bundle["source_scatter"] = fetchers["source_scatter"](eid)
+            counts["source_scatters"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no source_scatter: {ex}")
         write_json(out_dir, f"entity/{eid}.json", bundle)
         counts["entity_files"] += 1
 
@@ -293,6 +307,7 @@ def live_fetchers(session):
     from server.routers.statistical_endpoints import get_country_top_entities
     from server.routers.narrative_endpoints import (
         get_contested_ranking, get_source_map, get_global_agenda,
+        get_entity_source_scatter,
     )
     from server.routers.similarity_endpoints import (
         get_similarity_matrix, get_dividing_lines,
@@ -350,6 +365,10 @@ def live_fetchers(session):
         "source_historical_country": lambda eid, days, country: run(
             get_source_historical_sentiment(eid, days=days, countries=[country],
                                             db=session)),
+        # weeks explicit — the same FastAPI Query-default trap as above. 4 weeks
+        # matches the frontend panel's only request shape.
+        "source_scatter": lambda eid: run(
+            get_entity_source_scatter(eid, weeks=4, session=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -466,6 +485,15 @@ def self_test():
             {"sources": {"Src (USA)": {"daily_data": [
                 {"date": "2026-01-01", "power_score": 0.5,
                  "moral_score": -0.5, "mention_count": 3}]}}},
+        "source_scatter": lambda eid: {
+            "entity_id": eid, "entity_name": "Ada", "weeks": 4,
+            "current": {"start": "2026-01-05", "end": "2026-02-01",
+                        "sources": [{"source_id": 5, "source_name": "Src",
+                                     "country": "USA",
+                                     "power_score": 0.12345678,
+                                     "moral_score": -0.5, "mention_count": 7}]},
+            "previous": {"start": "2025-12-08", "end": "2026-01-04",
+                         "sources": []}},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
@@ -483,13 +511,17 @@ def self_test():
             bundle = json.load(f)
         assert set(bundle) == {"format", "entity", "base_days", "distribution",
                                "historical", "source_historical",
-                               "national_distributions"}
+                               "national_distributions", "source_scatter"}
         assert bundle["format"] == 2 and bundle["base_days"] == max(HIST_DAYS)
         assert bundle["historical"]["days"] == max(HIST_DAYS)
         assert bundle["historical"]["daily_data"][0]["power_score"] == 1.2346  # rounded
         # USA written, UK pruned (below MIN_NATIONAL_MENTIONS), the rest raised.
         assert set(bundle["national_distributions"]) == {"USA"}
         assert counts["national_layers"] == 1
+        assert counts["source_scatters"] == 1  # entity 1 only; entity 2's bundle skipped
+        scatter = bundle["source_scatter"]
+        assert scatter["current"]["sources"][0]["power_score"] == 0.1235  # rounded
+        assert scatter["previous"]["sources"] == []
 
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30

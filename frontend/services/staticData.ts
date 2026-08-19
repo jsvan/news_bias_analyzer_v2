@@ -35,6 +35,9 @@
  *   without a bundle return [].
  * - getSourceMap / getGlobalAgenda serve one fixed 4-week moral-dimension
  *   snapshot regardless of params (the only shapes the panels request).
+ * - getEntitySourceScatter serves the bundle's one baked 4-week response
+ *   (weeks param ignored); bundles from before the field existed throw, and
+ *   the panel degrades to its empty state.
  * - getSourceNeighbors is derived client-side from the snapshotted matrix
  *   pairs — same math as the live endpoint, just precomputed data.
  * - getSimilarityPair intersects the snapshotted per-source vectors
@@ -336,6 +339,17 @@ export const staticData = {
     } catch {
       return [];
     }
+  },
+
+  // The single-entity per-source scatter: the bundle's baked 4-week window
+  // (plus the previous window's anchors). Throws on pre-scatter bundles so the
+  // panel shows its empty state instead of a broken chart.
+  getEntitySourceScatter: async (entityId: number) => {
+    const bundle = await entityBundle(entityId);
+    if (!bundle.source_scatter) {
+      throw new Error('Snapshot predates source_scatter — re-run server/export_snapshots.py.');
+    }
+    return bundle.source_scatter;
   },
 
   getHistoricalSentiment: async (entityId: number, params: any = {}) => {

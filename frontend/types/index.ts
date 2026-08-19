@@ -127,6 +127,32 @@ export interface EntitySentimentSummary {
   mention_count?: number;
 }
 
+// GET /narrative/entity/{id}/source-scatter — every source's reading of one
+// entity over a trailing window, plus the adjacent previous window (the
+// month-ago anchors the per-entity scatter draws drift from).
+export interface EntitySourceScatterPoint {
+  source_id: number;
+  source_name: string;
+  country?: string | null;
+  power_score: number;
+  moral_score: number;
+  mention_count: number;
+}
+
+export interface EntitySourceScatterWindow {
+  start: string | null;
+  end: string | null;
+  sources: EntitySourceScatterPoint[];
+}
+
+export interface EntitySourceScatter {
+  entity_id: number;
+  entity_name: string;
+  weeks: number;
+  current: EntitySourceScatterWindow;
+  previous: EntitySourceScatterWindow;
+}
+
 // Trend Types
 export interface TrendPoint {
   date: string;
