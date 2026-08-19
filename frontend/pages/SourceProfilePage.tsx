@@ -408,7 +408,7 @@ const SourceProfilePage: React.FC = () => {
                 title={`Top ${topEntities.length} entities — drift from ${baselineLabel}`}
                 subheader={
                   baselineReady
-                    ? `Colored: ${source.name}'s reading. Gray: ${baselineLabel}. The dashed line between a pair is the drift; click a dot to focus that entity below.`
+                    ? `Colored: ${source.name}'s reading, hued by drift direction — green toward Hero, red toward Villain, purple Victim, orange Wretch. Gray: ${baselineLabel}. The dashed line between a pair is the drift; click a dot to focus that entity below.`
                     : `Pick a ${compareMode === 'country' ? 'country' : 'newspaper'} above to anchor the comparison.`
                 }
               />
@@ -427,8 +427,8 @@ const SourceProfilePage: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
-                  A colored dot without a gray anchor means {baselineLabel} has too few scored
-                  mentions of that entity to compare.
+                  A dark dot without a gray anchor means {baselineLabel} has too few scored
+                  mentions of that entity to compare — no drift to color.
                 </Typography>
               </CardContent>
             </Card>

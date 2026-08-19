@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import { Box, Typography, Chip, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent, Alert } from '@mui/material';
 import { EntitySentimentSummary } from '../types';
-import { tokens, archetypeColor } from '../theme';
+import { tokens, archetypeColor, archetypeLabel } from '../theme';
 
 interface SentimentDataPoint extends EntitySentimentSummary {
   size: number;
@@ -28,8 +28,10 @@ interface SentimentChartProps {
   showLabels?: boolean;
   // One sphere's reading of the same entities (a country, or a single
   // newspaper), drawn against the baseline. When set, baseline points recede
-  // to gray anchors and the overlay's points carry the archetype color — the
-  // same baseline-vs-reading idiom as the My Bubble divergence glyphs.
+  // to gray anchors and each overlay point is colored by the DIRECTION of its
+  // drift from its anchor (more moral + more powerful than the baseline =
+  // toward Hero, etc.) — the overlay answers "which way does this sphere
+  // pull?", not "which quadrant did it land in".
   overlay?: { label: string; data: EntitySentimentSummary[] } | null;
   // What `data` represents in tooltips: 'Global' unless the baseline is itself
   // a country (the newspaper-vs-its-country comparison).
@@ -275,6 +277,19 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                       Power {counterpart.power_score.toFixed(2)} · Moral {counterpart.moral_score.toFixed(2)}
                     </Typography>
                   )}
+                  {counterpart && (() => {
+                    // Drift is always overlay minus baseline, whichever layer is hovered —
+                    // this line names the direction the dot's color encodes.
+                    const o = p.layer === 'overlay' ? p : counterpart;
+                    const b = p.layer === 'overlay' ? counterpart : p;
+                    const dp = o.power_score - b.power_score;
+                    const dm = o.moral_score - b.moral_score;
+                    return (
+                      <Typography variant="caption" sx={{ display: 'block', fontFamily: 'monospace', fontWeight: 600, color: archetypeColor(dp, dm) }}>
+                        Drift · Power {dp >= 0 ? '+' : ''}{dp.toFixed(2)} · Moral {dm >= 0 ? '+' : ''}{dm.toFixed(2)} · toward {archetypeLabel(dp, dm)}
+                      </Typography>
+                    );
+                  })()}
                   {hasOverlay && p.layer === 'baseline' && !counterpart && (
                     <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted }}>
                       Not among {overlay!.label}'s most-covered entities
@@ -383,6 +398,18 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
               shape={(props: any) => {
                 const { cx, cy, payload } = props;
                 const entityName = payload?.entity as string;
+                // Drift direction, not landing quadrant: the deltas run through
+                // the same sign logic as absolute positions, so up-right (more
+                // moral, more powerful than the baseline) = hero green. A point
+                // with no anchor has no drift to encode — neutral ink, so it
+                // can't borrow a direction it doesn't have.
+                const anchor = globalByName.get(entityName);
+                const fill = anchor
+                  ? archetypeColor(
+                      payload.power_score - anchor.power_score,
+                      payload.moral_score - anchor.moral_score
+                    )
+                  : tokens.ink;
                 return (
                   <g
                     onClick={onEntityClick && entityName ? () => onEntityClick(payload) : undefined}
@@ -395,7 +422,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                       cx={cx}
                       cy={cy}
                       r={payload?.size ?? 9}
-                      fill={archetypeColor(payload.power_score, payload.moral_score)}
+                      fill={fill}
                       fillOpacity={0.9}
                       stroke={tokens.surface}
                       strokeWidth={1.5}

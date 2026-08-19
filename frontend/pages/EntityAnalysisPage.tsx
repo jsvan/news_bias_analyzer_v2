@@ -290,11 +290,11 @@ const EntityAnalysisPage: React.FC = () => {
                 Dashed ring = contested across countries (stronger ring, sharper disagreement).
                 {scatterTab === 0
                   ? overlayCountry
-                    ? ' Dashed line = the gap between the global baseline and this country’s reading; a gray dot with no partner is an entity this country’s press is largely silent on.'
+                    ? ' Dashed line = the gap between the global baseline and this country’s reading; dot color = drift direction (green toward Hero, red toward Villain, purple Victim, orange Wretch). A gray dot with no partner is an entity this country’s press is largely silent on.'
                     : ' Averages hide contestation — overlay a country to see who disagrees.'
                   : selectedSource
                     ? sourceEntities.length > 0
-                      ? ' Dashed line = the gap between the baseline and this paper’s reading; a gray dot with no partner is an entity this paper has barely covered (fewer than 3 scored mentions).'
+                      ? ' Dashed line = the gap between the baseline and this paper’s reading; dot color = drift direction (green toward Hero, red toward Villain, purple Victim, orange Wretch). A gray dot with no partner is an entity this paper has barely covered (fewer than 3 scored mentions).'
                       : ` Not enough scored coverage from ${selectedSource.name} yet to draw its reading.`
                     : ' National averages hide the outliers — pick a paper to see how far one newsroom strays from its sphere.'}
               </Typography>
