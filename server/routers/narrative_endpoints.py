@@ -222,7 +222,7 @@ MIN_SOURCE_SCATTER_MENTIONS = 3
             response_model=EntitySourceScatterResponse)
 async def get_entity_source_scatter(
     entity_id: int,
-    weeks: int = Query(4, ge=1, le=26),
+    weeks: int = Query(4, ge=0, le=26),
     session: Session = Depends(get_session),
 ):
     """Every source's reading of ONE entity: mention-weighted mean power/moral per
@@ -231,6 +231,9 @@ async def get_entity_source_scatter(
     against its own month-ago position — the transpose of /similarity/pair
     (two sources x many entities -> many sources x one entity), on the same
     mv_source_entity_week cells (canonical entity ids, publish-date weeks).
+    weeks=0 means all time: `current` spans every scored week and `previous`
+    stays empty (no adjacent window to drift from) — the frontend's default
+    averages-only view.
     """
     def window(start, end, points):
         return SourceScatterWindow(
@@ -247,8 +250,18 @@ async def get_entity_source_scatter(
             weeks=weeks, current=window(None, None, []), previous=window(None, None, []),
         )
 
-    cur_first = week - timedelta(weeks=weeks - 1)
-    prev_first = cur_first - timedelta(weeks=weeks)
+    if weeks == 0:
+        # All time: window from the entity's first scored week. prev_first ==
+        # cur_first keeps the query below valid and puts every row in the
+        # is_current bucket (week_start >= cur_first is always true).
+        cur_first = session.execute(
+            text("SELECT MIN(week_start) FROM mv_source_entity_week WHERE entity_id = :entity_id"),
+            {"entity_id": entity.canonical_id or entity.id},
+        ).scalar() or week
+        prev_first = cur_first
+    else:
+        cur_first = week - timedelta(weeks=weeks - 1)
+        prev_first = cur_first - timedelta(weeks=weeks)
     rows = session.execute(text("""
         SELECT m.source_id, s.name AS source_name, s.country,
                (m.week_start >= :cur_first) AS is_current,
@@ -279,7 +292,8 @@ async def get_entity_source_scatter(
     return EntitySourceScatterResponse(
         entity_id=entity_id, entity_name=entity.name, weeks=weeks,
         current=window(cur_first, week + timedelta(days=6), buckets[True]),
-        previous=window(prev_first, cur_first - timedelta(days=1), buckets[False]),
+        previous=(window(prev_first, cur_first - timedelta(days=1), buckets[False])
+                  if weeks else window(None, None, [])),
     )
 
 

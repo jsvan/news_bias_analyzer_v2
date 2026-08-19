@@ -349,7 +349,8 @@ export const narrativeApi = {
     return response.data;
   },
   // Every source's reading of one entity (current window + the previous one,
-  // for per-paper drift) — the single-entity scatter. Static mode serves the
+  // for per-paper drift) — the single-entity scatter. weeks=0 = all-time
+  // averages with an empty previous window (no drift). Static mode serves the
   // bundle's one baked 4-week response; weeks is ignored there.
   getEntitySourceScatter: async (entityId: number, params: { weeks?: number } = {}) => {
     if (isStaticMode()) return staticData.getEntitySourceScatter(entityId);

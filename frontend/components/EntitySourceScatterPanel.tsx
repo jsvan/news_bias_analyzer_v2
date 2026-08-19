@@ -4,17 +4,22 @@ import { narrativeApi } from '../services/api';
 import { isStaticMode } from '../services/config/environment';
 import SentimentChart from './SentimentChart';
 import EntityInfoPlate, { ActiveEntityInfo } from './EntityInfoPlate';
-import TimeRangeSelect from './TimeRangeSelect';
+import TimeRangeSelect, { ALL_TIME } from './TimeRangeSelect';
 import { EntitySentimentSummary, EntitySourceScatter, EntitySourceScatterPoint } from '../types';
 import { tokens } from '../theme';
 
 // The single-entity transpose of the global entity scatter: same chart, but
-// each dot is one SOURCE's reading of this entity. The drift comparison is
-// temporal, not spatial — baseline = the same source's previous window of the
-// selected length, so the dashed connector shows which way each newsroom moved.
+// each dot is one SOURCE's reading of this entity. Default view is averages
+// only — each paper's all-time mean placement, no comparison. Picking a window
+// from the dropdown turns on the drift comparison, which is temporal, not
+// spatial: baseline = the same source's previous window of the selected
+// length, so the dashed connector shows which way each newsroom moved.
 
 const WINDOW_OPTIONS = [7, 14, 30, 60, 90];
-const DEFAULT_WINDOW = 30;
+// Static snapshots bake exactly one drift window (4 weeks) — static mode stays
+// clamped there with the picker disabled, the same honesty pattern as the
+// static-mode country pickers. Only live mode gets the averages default.
+const STATIC_WINDOW = 30;
 
 // Short window names for the info plate and copy: "Last month · Power …",
 // "No Previous month reading to compare" — LABELS in TimeRangeSelect are
@@ -28,7 +33,9 @@ const WINDOW_NOUN: Record<number, string> = {
 };
 
 // mv_source_entity_week aggregates by ISO week — the API takes whole weeks.
-const daysToWeeks = (days: number) => Math.max(1, Math.round(days / 7));
+// ALL_TIME (0) passes through as weeks=0, the endpoint's all-time sentinel.
+const daysToWeeks = (days: number) =>
+  days === ALL_TIME ? 0 : Math.max(1, Math.round(days / 7));
 
 // SentimentChart joins baseline/overlay pairs on the `entity` name string, so
 // a source's two windows pair up by carrying its name in that field.
@@ -45,13 +52,13 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
   entityId,
   entityName,
 }) => {
-  // Static snapshots bake exactly one window (the 4-week default) — clamp the
-  // picker there, the same honesty pattern as the static-mode country pickers.
   const staticMode = isStaticMode();
-  const [days, setDays] = useState(DEFAULT_WINDOW);
+  const [days, setDays] = useState(staticMode ? STATIC_WINDOW : ALL_TIME);
   const [scatter, setScatter] = useState<EntitySourceScatter | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
+
+  const drift = days !== ALL_TIME;
 
   useEffect(() => {
     let cancelled = false;
@@ -82,27 +89,35 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
     () => (scatter?.current.sources ?? []).map(toSummary),
     [scatter]
   );
+  // Averages mode plots the (all-time) current window as the baseline itself —
+  // SentimentChart with no overlay draws plain archetype-colored dots.
+  const chartData = drift ? previous : current;
   const overlay = useMemo(
-    () => ({ label: `Last ${noun}`, data: current }),
-    [noun, current]
+    () => (drift ? { label: `Last ${noun}`, data: current } : null),
+    [drift, noun, current]
   );
 
   // Mirrors SentimentChart's own >=5-dot floor (baseline + unmatched overlay)
   // so the thin case gets source-worded copy instead of the chart's
   // entity-worded empty state.
   const drawableDots = useMemo(() => {
+    if (!drift) return current.length;
     const prevNames = new Set(previous.map((p) => p.entity));
     return previous.length + current.filter((c) => !prevNames.has(c.entity)).length;
-  }, [previous, current]);
+  }, [drift, previous, current]);
 
   return (
     <Card>
       <CardHeader
         title={`Where Each Source Places ${entityName}`}
         subheader={
-          scatter?.current.start
-            ? `Each dot is one newspaper's average reading over ${scatter.current.start} to ${scatter.current.end}; its gray anchor is the same paper over ${scatter.previous.start} to ${scatter.previous.end}.`
-            : `Each dot is one newspaper's average reading over the last ${noun}; its gray anchor is the same paper one ${noun}-window earlier.`
+          !drift
+            ? scatter?.current.start
+              ? `Each dot is one newspaper's average reading across all scored coverage (${scatter.current.start} to ${scatter.current.end}).`
+              : `Each dot is one newspaper's average reading across all scored coverage.`
+            : scatter?.current.start
+              ? `Each dot is one newspaper's average reading over ${scatter.current.start} to ${scatter.current.end}; its gray anchor is the same paper over ${scatter.previous.start} to ${scatter.previous.end}.`
+              : `Each dot is one newspaper's average reading over the last ${noun}; its gray anchor is the same paper one ${noun}-window earlier.`
         }
       />
       <CardContent>
@@ -113,8 +128,9 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
             <TimeRangeSelect
               value={days}
               onChange={setDays}
-              options={staticMode ? [DEFAULT_WINDOW] : WINDOW_OPTIONS}
-              allowAllTime={false}
+              options={staticMode ? [STATIC_WINDOW] : WINDOW_OPTIONS}
+              allowAllTime={!staticMode}
+              allTimeLabel="Average (all time)"
               disabled={staticMode}
               label="Compare window"
             />
@@ -136,29 +152,40 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
             }}
           >
             <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
-              Too few sources with enough scored mentions of {entityName} in the last{' '}
-              {noun} to draw a meaningful spread (at least 5 needed, each with 3+ scored
-              mentions). Try a wider window.
+              Too few sources with enough scored mentions of {entityName}
+              {drift ? ` in the last ${noun}` : ''} to draw a meaningful spread (at
+              least 5 needed, each with 3+ scored mentions).
+              {drift ? ' Try a wider window.' : ''}
             </Typography>
           </Box>
         ) : (
           <>
             <SentimentChart
-              data={previous}
+              data={chartData}
               overlay={overlay}
               includeUnmatchedOverlay
-              baselineLabel={`Previous ${noun}`}
+              baselineLabel={drift ? `Previous ${noun}` : 'All time'}
               height={520}
               showLabels
               onActiveChange={setActiveInfo}
             />
             <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
               Hover a dot to read that newspaper's scoring in the plate above; click to pin,
-              click anywhere to release. Dot color = drift direction since the previous{' '}
-              {noun}-window (green toward Hero, red toward Villain, purple Victim, orange
-              Wretch). A dark dot without a gray anchor is a paper with too few scored
-              mentions back then to compare; a lone gray dot is a paper that has since gone
-              quiet on {entityName}.
+              click anywhere to release.{' '}
+              {drift ? (
+                <>
+                  Dot color = drift direction since the previous {noun}-window (green toward
+                  Hero, red toward Villain, purple Victim, orange Wretch). A dark dot without
+                  a gray anchor is a paper with too few scored mentions back then to compare;
+                  a lone gray dot is a paper that has since gone quiet on {entityName}.
+                </>
+              ) : (
+                <>
+                  Dot color = the quadrant that paper places {entityName} in (green Hero,
+                  red Villain, purple Victim, orange Wretch). Pick a compare window above to
+                  see which way each paper has drifted recently.
+                </>
+              )}
             </Typography>
           </>
         )}

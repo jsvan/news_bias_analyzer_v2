@@ -23,15 +23,18 @@ interface TimeRangeSelectProps {
   onChange: (days: number) => void;
   options: number[]; // day counts, e.g. [7, 30, 90]
   label?: string;
-  // "All Time" only makes sense where the range bounds a single window of
-  // data; window-vs-previous-window comparisons (the per-entity source
-  // scatter) have no "previous all time" to drift from.
+  // "All Time" bounds a single window of data. Window-vs-previous-window
+  // comparisons (the per-entity source scatter) have no "previous all time"
+  // to drift from, so there it doubles as the comparison-off default —
+  // relabeled via allTimeLabel to say so.
   allowAllTime?: boolean;
+  allTimeLabel?: string;
   disabled?: boolean;
 }
 
 const TimeRangeSelect: React.FC<TimeRangeSelectProps> = ({
-  value, onChange, options, label = 'Time Range', allowAllTime = true, disabled = false,
+  value, onChange, options, label = 'Time Range', allowAllTime = true,
+  allTimeLabel = 'All Time', disabled = false,
 }) => (
   <FormControl fullWidth size="small" disabled={disabled}>
     <InputLabel id="time-range-label">{label}</InputLabel>
@@ -41,7 +44,7 @@ const TimeRangeSelect: React.FC<TimeRangeSelectProps> = ({
       label={label}
       onChange={(e) => onChange(e.target.value as number)}
     >
-      {allowAllTime && <MenuItem value={ALL_TIME}>All Time</MenuItem>}
+      {allowAllTime && <MenuItem value={ALL_TIME}>{allTimeLabel}</MenuItem>}
       {options.map((days) => (
         <MenuItem key={days} value={days}>
           {LABELS[days] || `Last ${days} days`}
