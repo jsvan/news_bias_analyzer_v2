@@ -45,6 +45,19 @@ interface SourceMapPoint {
   y: number;
 }
 
+interface AxisCorrelate {
+  entity_id: number;
+  name: string;
+  r: number;
+  sources: number;
+}
+
+interface MapAxis {
+  axis: number;
+  positive: AxisCorrelate[];
+  negative: AxisCorrelate[];
+}
+
 interface SourceMapResponse {
   window_start: string | null;
   window_end: string | null;
@@ -52,6 +65,7 @@ interface SourceMapResponse {
   min_country_breadth: number;
   stress: number;
   sources: SourceMapPoint[];
+  axes?: MapAxis[];
 }
 
 const SourceMapPanel: React.FC = () => {
@@ -255,14 +269,47 @@ const SourceMapPanel: React.FC = () => {
                 stress {data!.stress.toFixed(2)} — 0 would mean distances drawn exactly
               </Typography>
             </Box>
+            {(data!.axes ?? []).some((ax) => ax.positive.length || ax.negative.length) && (
+              <Box sx={{ mt: 1.5, p: 1.5, bgcolor: tokens.surfaceSunken, borderRadius: 1.5 }}>
+                <Typography variant="caption" sx={{ color: tokens.inkMuted, fontWeight: 600, letterSpacing: '0.02em', textTransform: 'uppercase', display: 'block', mb: 0.5 }}>
+                  What the axes track
+                </Typography>
+                {data!.axes!.map((ax) => {
+                  const dir = ax.axis === 1 ? ['the right', 'the left'] : ['the top', 'the bottom'];
+                  const pole = (entries: AxisCorrelate[], where: string) =>
+                    entries.length > 0 && (
+                      <>scored higher toward {where}: {entries.map((e, i) => (
+                        <React.Fragment key={e.entity_id}>
+                          {i > 0 && ', '}
+                          <Box component="span" sx={{ color: tokens.ink }}>{e.name}</Box>
+                          <Box component="span" sx={{ ...monoNumber, fontSize: 11 }}> {Math.abs(e.r).toFixed(2)}</Box>
+                        </React.Fragment>
+                      ))}</>
+                    );
+                  return (
+                    <Typography key={ax.axis} variant="caption" sx={{ display: 'block', color: tokens.inkMuted, mb: 0.5 }}>
+                      <Box component="span" sx={{ color: tokens.ink, fontWeight: 600 }}>Axis {ax.axis}</Box>
+                      {' — '}
+                      {pole(ax.positive, dir[0])}
+                      {ax.positive.length > 0 && ax.negative.length > 0 && ' · '}
+                      {pole(ax.negative, dir[1])}
+                    </Typography>
+                  );
+                })}
+              </Box>
+            )}
             <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.inkMuted }}>
               Built only from entities covered by sources in {data!.min_country_breadth}+
               countries — the shared world, not anyone's local politics — and only from
               pairwise agreement on entities both sources actually scored, so covering
-              topics nobody else does never moves a source. The axes have no assigned
-              meaning; they are the strongest patterns of disagreement the correlations
-              contain. Scroll to zoom, drag to pan, double-click to reset; hidden labels
-              appear on hover and as clusters spread.
+              topics nobody else does never moves a source. The axes are derived unnamed —
+              the strongest patterns of disagreement the correlations contain; the lists
+              above are their post-hoc correlates (the number is |r| between an entity's
+              scores and position along the axis, over the papers that scored it), read
+              empirically after the fact and never fed in. Several entities share an axis
+              by design: an axis is a shared pattern, and related entities move together.
+              Scroll to zoom, drag to pan, double-click to reset; hidden labels appear on
+              hover and as clusters spread.
             </Typography>
           </>
         )}

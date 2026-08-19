@@ -245,6 +245,55 @@ def dividing_entities(matrix, labels, min_group_sources: int = 2,
     return out
 
 
+def axis_correlates(matrix, coords, min_support: int = 10):
+    """Post-hoc axis interpretation for an embedding (property fitting).
+
+    The axes come out of MDS unnamed, but not unknowable: for each embedding
+    axis, correlate every entity's scores-across-sources with the sources'
+    coordinates along that axis. A high |r| entity is one the axis visibly
+    sorts sources by - "sources to the right score Israel higher". Classic
+    ordination property fitting; the fits are descriptive correlates of the
+    axis, never its definition.
+
+    Expect bundles, not a single winner: an axis is the strongest SHARED
+    pattern of disagreement, so thematically linked entities (whose sentiment
+    co-varies across sources to begin with) load on it together with similar
+    |r|. Callers should present a top-k per direction, not argmax.
+
+    Args:
+        matrix: sources x entities (row-aligned with coords), NaN = no cell.
+        coords: sources x n_dims embedding coordinates.
+        min_support: minimum sources scoring an entity for a stable r.
+
+    Returns one list per axis: [(entity_col, r, support)] sorted by the
+    Fisher z-statistic |atanh(r)|*sqrt(n-3) descending - NOT raw |r|, which
+    small samples inflate (measured 2026-08-19: n=10 novelties like Flock
+    Safety at r=0.86 outranked Reform UK's r=-0.71 over n=34). Entities below
+    the support floor or without variance (in either the scores or the
+    covering sources' coordinates) are omitted.
+    """
+    m = np.asarray(matrix, float)
+    x = np.asarray(coords, float)
+    axes = []
+    for ax in range(x.shape[1]):
+        ranked = []
+        for col in range(m.shape[1]):
+            covered = ~np.isnan(m[:, col])
+            n = int(covered.sum())
+            if n < min_support:
+                continue
+            scores = m[covered, col]
+            pos = x[covered, ax]
+            if scores.std() == 0 or pos.std() == 0:
+                continue
+            r = float(np.corrcoef(pos, scores)[0, 1])
+            z = abs(np.arctanh(np.clip(r, -0.999, 0.999))) * np.sqrt(n - 3)
+            ranked.append((col, r, n, float(z)))
+        ranked.sort(key=lambda t: -t[3])
+        axes.append([(col, r, n) for col, r, n, _z in ranked])
+    return axes
+
+
 def seriation(corr, common, full: int = 50):
     """Leaf order + merge tree for the similarity heatmap and dendrogram.
 
@@ -414,6 +463,27 @@ def self_test():
     assert [t[0] for t in ranked13] == [0, 1], ranked13
     assert ranked13[0][2] > ranked13[1][2], "wide split must outrank tiny gap"
     assert ranked13[1][1] > ranked13[0][1], "the tiny unanimous gap has the larger F"
+
+    # 14. Axis correlates: the aligned entity tops axis 1 with r ~ +1, the
+    #     inverted one with r ~ -1, noise ranks behind both, thin coverage is
+    #     excluded, and a variance-free axis yields no correlates.
+    n14 = 14
+    ax1 = np.linspace(-1, 1, n14)
+    coords14 = np.column_stack([ax1, np.zeros(n14)])
+    aligned = ax1.copy()
+    inverted = -ax1 + rng.normal(0, 0.05, n14)
+    noise = rng.normal(0, 1, n14)
+    thin = np.full(n14, np.nan)
+    thin[:5] = ax1[:5]
+    m14 = np.column_stack([aligned, inverted, noise, thin])
+    axes14 = axis_correlates(m14, coords14, min_support=10)
+    assert len(axes14) == 2
+    top_cols = [t[0] for t in axes14[0][:2]]
+    assert set(top_cols) == {0, 1}, axes14[0]
+    by_col = {t[0]: t[1] for t in axes14[0]}
+    assert by_col[0] > 0.99 and by_col[1] < -0.9, by_col
+    assert 3 not in by_col, "thin coverage must be excluded"
+    assert axes14[1] == [], "a variance-free axis has no correlates"
 
     print("source_similarity self-test: all assertions passed")
 

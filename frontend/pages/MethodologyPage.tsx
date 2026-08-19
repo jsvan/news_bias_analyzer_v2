@@ -320,6 +320,7 @@ trajectory (12 weekly waypoints), e.g.:
             'Exclusion-tolerant by construction: a source is compared only on entities the other source also scored, so local-only coverage never moves it. (The previous SVD factored the full source × entity matrix and had to fill missing cells, which shrank narrow-coverage sources toward the origin — where they falsely read as "moderate".)',
             <>Entities restricted to the internationally shared agenda (covered by sources from ≥ 3 countries — see the "shared agenda" panel; ~3.2k of ~56k entities in a typical month), so same-country pairs aren't placed partly by local coverage no one else can see.</>,
             <>Pair weights: <Kernel>significance_weight</Kernel> = min(shared, 50)/50 — a correlation over 12 shared entities positions a source weakly, not wrongly. Unknown pairs get weight 0.</>,
+            <>Axis anatomy (<Kernel>axis_correlates</Kernel>): post-hoc property fitting — each entity's scores-across-sources correlated with position along each axis, ranked by Fisher z (|atanh r|·√(n−3), not raw |r|, which small samples inflate). Descriptive correlates read off after the fact, never fed in; expect thematic bundles per pole, since an axis is a shared pattern and related entities co-vary.</>,
           ]}
         />
         <Formula>{`dist(i,j) = 1 − r_ij  over entities both covered (min 10 shared)

@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from .base import BaseAnalyzer, log_timing
 from analyzer.source_similarity import (
     pairwise_pearson, cluster_by_correlation, significance_weight, weighted_mds,
-    dividing_entities,
+    dividing_entities, axis_correlates,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,14 @@ MIN_MAP_COUNTRY_BREADTH = 3
 # A source needs at least this many known correlations to be placeable; with
 # fewer, MDS would park it wherever the init happened to put it.
 MIN_MAP_KNOWN_PAIRS = 3
+# Axis-anatomy floors: an entity needs this many covering sources for a stable
+# axis correlation, and correlates below the |r| floor are noise, not anatomy.
+# Expect several entities per pole with similar |r| - an axis is the strongest
+# SHARED pattern of disagreement, so thematically linked entities load on it
+# together (see analyzer/source_similarity.py::axis_correlates).
+MIN_AXIS_SUPPORT = 15
+MIN_AXIS_R = 0.3
+AXIS_TOP = 5
 # Dividing-lines entities must be covered by this many of the grouped sources:
 # without the floor, a celebrity two sources scored at opposite extremes
 # outranks the divides the whole press actually shares (measured 2026-08-19:
@@ -275,7 +283,7 @@ def compute_source_map(session: Session, weeks: int = 4,
     """
     empty = {"window_start": None, "window_end": None, "dimension": dimension,
              "min_country_breadth": MIN_MAP_COUNTRY_BREADTH, "stress": 0.0,
-             "sources": []}
+             "sources": [], "axes": []}
     week_start = latest_week(session)
     if week_start is None:
         return empty
@@ -313,8 +321,31 @@ def compute_source_map(session: Session, weeks: int = 4,
             break
         source_ids = [sid for sid, k in zip(source_ids, keep) if k]
         corr, common = corr[np.ix_(keep, keep)], common[np.ix_(keep, keep)]
+        matrix = matrix[keep]  # keep rows aligned with coords for axis anatomy
 
     coords, stress, _share = weighted_mds(1.0 - corr, significance_weight(common))
+
+    # Axis anatomy: post-hoc correlates per axis and pole (property fitting).
+    per_axis = axis_correlates(matrix, coords, min_support=MIN_AXIS_SUPPORT)
+    poles = [(ranked, sign) for ranked in per_axis for sign in (+1, -1)]
+    picks = [[t for t in ranked if sign * t[1] >= MIN_AXIS_R][:AXIS_TOP]
+             for ranked, sign in poles]
+    picked_ids = {entity_ids[c] for pick in picks for c, _r, _n in pick}
+    correlate_names = dict(session.execute(text(
+        "SELECT id, name FROM entities WHERE id = ANY(:ids)"
+    ), {"ids": list(picked_ids)}).fetchall()) if picked_ids else {}
+
+    def pole_entries(pick):
+        return [{"entity_id": entity_ids[c],
+                 "name": correlate_names.get(entity_ids[c], str(entity_ids[c])),
+                 "r": round(r, 3), "sources": n}
+                for c, r, n in pick]
+
+    axes = [{"axis": ax + 1,
+             "positive": pole_entries(picks[2 * ax]),
+             "negative": pole_entries(picks[2 * ax + 1])}
+            for ax in range(len(per_axis))]
+
     window_start, window_end = _window_dates(week_start, weeks)
     logger.info(f"Source map: {len(source_ids)} sources on "
                 f"{len(international)} international entities, stress {stress:.3f}")
@@ -331,6 +362,7 @@ def compute_source_map(session: Session, weeks: int = 4,
              "y": round(float(coords[i, 1]), 4)}
             for i, sid in enumerate(source_ids)
         ],
+        "axes": axes,
     }
 
 

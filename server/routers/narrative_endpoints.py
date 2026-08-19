@@ -196,6 +196,19 @@ class SourceMapPoint(BaseModel):
     y: float
 
 
+class AxisCorrelate(BaseModel):
+    entity_id: int
+    name: str
+    r: float
+    sources: int
+
+
+class MapAxis(BaseModel):
+    axis: int
+    positive: List[AxisCorrelate]
+    negative: List[AxisCorrelate]
+
+
 class SourceMapResponse(BaseModel):
     window_start: Optional[str]
     window_end: Optional[str]
@@ -203,6 +216,9 @@ class SourceMapResponse(BaseModel):
     min_country_breadth: int
     stress: float
     sources: List[SourceMapPoint]
+    # Post-hoc axis anatomy (property fitting): entities whose scores move
+    # with position along each axis - descriptive correlates, not labels.
+    axes: List[MapAxis] = []
 
 
 @router.get("/narrative/source-map", response_model=SourceMapResponse)
