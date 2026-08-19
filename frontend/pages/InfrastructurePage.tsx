@@ -360,7 +360,7 @@ const CurrentDiagram: React.FC = () => (
       detail="176 RSS feeds from outlets in 42 countries"
       path="scrapers/news_sources.py"
     />
-    <Arrow label="scheduled fetch · every 30 min" />
+    <Arrow label="scheduled fetch · daily at 05:00" />
     <FlowNode
       kind="process"
       title="Parallel scraper"
@@ -369,7 +369,7 @@ const CurrentDiagram: React.FC = () => (
     />
     <Arrow label="raw articles" />
     <FlowNode kind="store" title="PostgreSQL · articles" detail="full text, source, country, publish date" />
-    <Arrow label="unanalyzed articles · batches of 100 · ≤ 5 batches in flight" />
+    <Arrow label="unanalyzed articles · batches of 50 · ≤ 4 batches in flight" />
     <Box
       sx={{
         display: 'grid',
@@ -427,7 +427,7 @@ const CurrentDiagram: React.FC = () => (
           detail="calls the live API handlers directly and dumps their JSON, so snapshots always match the API shapes"
           path="server/export_snapshots.py"
         />
-        <Arrow label="git commit · Pages build" minHeight={40} />
+        <Arrow label="daily 09:00 cron · git commit · Pages build" minHeight={40} />
         <FlowNode kind="terminal" title="Dashboard on GitHub Pages" detail="static mode — no server" />
       </Box>
     </Box>
@@ -543,7 +543,7 @@ const InfrastructurePage: React.FC = () => {
         {view === 'current' ? (
           <>
             <Typography variant="body2" sx={{ color: tokens.inkMuted, maxWidth: 720 }}>
-              176 feeds in 42 countries are scraped every half hour. OpenAI's Batch API scores every entity
+              176 feeds in 42 countries are scraped once a day. OpenAI's Batch API scores every entity
               mention on two axes — power and moral, each in [-2, +2] — and everything downstream reads
               from one PostgreSQL database.
             </Typography>
