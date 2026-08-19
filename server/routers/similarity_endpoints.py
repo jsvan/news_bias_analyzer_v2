@@ -7,12 +7,15 @@ for the browser extension.
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Dict, Any, Optional
+from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 import logging
 import sys
 from pathlib import Path
+
+import numpy as np
 
 # Add parent directories to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -22,6 +25,8 @@ from server.deps import get_db as get_session  # per-request session, closed aft
 from database.models import NewsArticle, Entity, EntityMention, NewsSource
 # Import clustering module
 from clustering.similarity_api import SimilarityAPI
+from clustering.source_similarity import latest_week
+from analyzer.source_similarity import seriation
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,6 +54,11 @@ class SimilarityMatrixResponse(BaseModel):
     window_end: Optional[str] = None
     sources: List[MatrixSource]
     pairs: List[MatrixPair]
+    # Seriation for the heatmap: source_ids in optimal dendrogram-leaf order.
+    order: Optional[List[int]] = None
+    # Nested dendrogram: leaves {source_id, name, country}, internal nodes
+    # {r, children} where r is the significance-weighted correlation at merge.
+    tree: Optional[Any] = None
 
 
 class NeighborEntry(BaseModel):
@@ -101,9 +111,40 @@ async def get_similarity_matrix(session: Session = Depends(get_session)):
     """)).fetchall()}
     names = {s.id: s for s in session.query(NewsSource).filter(NewsSource.id.in_(source_ids)).all()}
 
+    # Seriation over the stored pairs: rebuild the corr/common matrices and
+    # derive the heatmap leaf order + dendrogram (analyzer/source_similarity.py
+    # ::seriation - the same weighted-average-linkage geometry the stored
+    # clusters were cut from).
+    order_ids = None
+    tree = None
+    if len(source_ids) >= 2:
+        index = {sid: i for i, sid in enumerate(source_ids)}
+        n = len(source_ids)
+        corr = np.full((n, n), np.nan)
+        np.fill_diagonal(corr, 1.0)
+        common = np.zeros((n, n), dtype=int)
+        for r in pairs:
+            i, j = index[r.source_id_1], index[r.source_id_2]
+            corr[i, j] = corr[j, i] = float(r.similarity_score)
+            common[i, j] = common[j, i] = int(r.common_entities)
+        order, merges = seriation(corr, common)
+        order_ids = [source_ids[i] for i in order]
+        nodes: List[Any] = [
+            {"source_id": sid,
+             "name": names[sid].name if sid in names else str(sid),
+             "country": names[sid].country if sid in names else None}
+            for sid in source_ids
+        ]
+        for a, b, dist in merges:
+            nodes.append({"r": round(1.0 - dist, 4),
+                          "children": [nodes[a], nodes[b]]})
+        tree = nodes[-1]
+
     return SimilarityMatrixResponse(
         window_start=window_start.date().isoformat() if window_start else None,
         window_end=latest.date().isoformat(),
+        order=order_ids,
+        tree=tree,
         sources=[MatrixSource(
             source_id=sid,
             name=names[sid].name if sid in names else str(sid),
@@ -165,6 +206,100 @@ async def get_source_neighbors(
         nearest=[entry(r) for r in rows[:limit]],
         farthest=[entry(r) for r in rows[-limit:]][::-1] if len(rows) > limit else [],
     )
+
+class PairSource(BaseModel):
+    source_id: int
+    name: str
+    country: Optional[str] = None
+
+
+class PairEntity(BaseModel):
+    entity_id: int
+    name: str
+    type: Optional[str] = None
+    score_a: float
+    score_b: float
+    n_a: int
+    n_b: int
+
+
+class SimilarityPairResponse(BaseModel):
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    dimension: str
+    source_a: PairSource
+    source_b: PairSource
+    r: Optional[float] = None
+    common: int
+    entities: List[PairEntity]
+
+
+@router.get("/pair", response_model=SimilarityPairResponse)
+async def get_similarity_pair(
+    source_a: int,
+    source_b: int,
+    weeks: int = Query(4, ge=2, le=52),
+    dimension: str = Query("moral", regex="^(power|moral)$"),
+    session: Session = Depends(get_session),
+):
+    """Why two sources correlate: their shared entities with each side's mean score.
+
+    The pair-scatter drill-down behind a similarity number - each row is one
+    entity both sources scored in the window (same trailing-weeks window and
+    mention-weighted cell means as the weekly matrix), so the returned r is
+    pairwise_pearson's r recomputed over exactly these rows.
+    """
+    src = {s.id: s for s in session.query(NewsSource)
+           .filter(NewsSource.id.in_([source_a, source_b])).all()}
+    if source_a not in src or source_b not in src:
+        raise HTTPException(status_code=404, detail="source not found")
+
+    def pair_source(sid: int) -> PairSource:
+        return PairSource(source_id=sid, name=src[sid].name, country=src[sid].country)
+
+    week = latest_week(session)
+    if week is None:
+        return SimilarityPairResponse(dimension=dimension, source_a=pair_source(source_a),
+                                      source_b=pair_source(source_b), common=0, entities=[])
+    first_week = week - timedelta(weeks=weeks - 1)
+    col = "mean_moral" if dimension == "moral" else "mean_power"
+    rows = session.execute(text(f"""
+        WITH a AS (SELECT entity_id, SUM({col} * n) / SUM(n) AS score, SUM(n) AS n
+                   FROM mv_source_entity_week
+                   WHERE source_id = :a AND week_start BETWEEN :first AND :week
+                   GROUP BY entity_id),
+             b AS (SELECT entity_id, SUM({col} * n) / SUM(n) AS score, SUM(n) AS n
+                   FROM mv_source_entity_week
+                   WHERE source_id = :b AND week_start BETWEEN :first AND :week
+                   GROUP BY entity_id)
+        SELECT a.entity_id, e.name, e.entity_type AS type,
+               a.score AS score_a, a.n AS n_a, b.score AS score_b, b.n AS n_b
+        FROM a JOIN b USING (entity_id) JOIN entities e ON e.id = a.entity_id
+        ORDER BY LEAST(a.n, b.n) DESC, a.entity_id
+    """), {"a": source_a, "b": source_b, "first": first_week, "week": week}).fetchall()
+
+    r = None
+    if len(rows) >= 10:
+        sa = np.array([float(x.score_a) for x in rows])
+        sb = np.array([float(x.score_b) for x in rows])
+        if sa.std() > 0 and sb.std() > 0:
+            r = round(float(np.corrcoef(sa, sb)[0, 1]), 4)
+
+    return SimilarityPairResponse(
+        window_start=first_week.isoformat(),
+        window_end=(week + timedelta(days=6)).isoformat(),
+        dimension=dimension,
+        source_a=pair_source(source_a),
+        source_b=pair_source(source_b),
+        r=r,
+        common=len(rows),
+        entities=[PairEntity(entity_id=x.entity_id, name=x.name, type=x.type,
+                             score_a=round(float(x.score_a), 3),
+                             score_b=round(float(x.score_b), 3),
+                             n_a=int(x.n_a), n_b=int(x.n_b))
+                  for x in rows],
+    )
+
 
 @router.get("/articles/similar", response_model=List[Dict[str, Any]])
 async def get_similar_articles(

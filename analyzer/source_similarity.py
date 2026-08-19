@@ -187,6 +187,36 @@ def weighted_mds(dist, weights, n_dims: int = 2, n_iter: int = 500, tol: float =
     return coords, stress1, share
 
 
+def seriation(corr, common, full: int = 50):
+    """Leaf order + merge tree for the similarity heatmap and dendrogram.
+
+    Average-linkage on 1 - significance-weighted r — the identical geometry
+    cluster_by_correlation cuts into flat clusters — refined with scipy's
+    optimal leaf ordering so the heatmap's diagonal runs along the smoothest
+    similarity gradient and cluster blocks come out contiguous.
+
+    Returns (order, merges): order is a list of leaf indices (row order for
+    the seriated heatmap); merges is the linkage in scipy convention - the
+    i-th entry (left, right, distance) merges nodes where an index < n is a
+    leaf and index n+j refers to merges[j] - enough to rebuild the dendrogram.
+    """
+    from scipy.cluster.hierarchy import linkage, optimal_leaf_ordering, leaves_list
+    from scipy.spatial.distance import squareform
+
+    c = np.asarray(corr, float) * significance_weight(common, full=full)
+    n = c.shape[0]
+    if n < 2:
+        return list(range(n)), []
+    dist = 1.0 - c
+    dist[np.isnan(dist)] = 2.0
+    np.fill_diagonal(dist, 0.0)
+    dist = (dist + dist.T) / 2.0  # exact symmetry for squareform
+    condensed = squareform(dist, checks=False)
+    z = optimal_leaf_ordering(linkage(condensed, method="average"), condensed)
+    return ([int(i) for i in leaves_list(z)],
+            [(int(a), int(b), float(d)) for a, b, d, _ in z])
+
+
 def neighbor_ranking(corr_row, self_index: int):
     """Indices of a source's neighbors sorted nearest-first, NaN pairs dropped.
 
@@ -285,6 +315,17 @@ def self_test():
     dist10[0, 3] = dist10[3, 0] = np.nan
     x10, s10, _ = weighted_mds(dist10, w9)
     assert np.isfinite(x10).all() and np.isfinite(s10)
+
+    # 11. Seriation makes correlation blocks contiguous and returns a full
+    #     merge tree. m5 = [base, blockA, -base, blockB, sparse]: rows {0,1}
+    #     and {2,3} must be adjacent in the order; the unknown row floats free.
+    corr11, common11 = pairwise_pearson(m5, min_common=10)
+    order, merges = seriation(corr11, common11)
+    assert sorted(order) == [0, 1, 2, 3, 4], order
+    pos = {leaf: i for i, leaf in enumerate(order)}
+    assert abs(pos[0] - pos[1]) == 1, order
+    assert abs(pos[2] - pos[3]) == 1, order
+    assert len(merges) == 4 and all(len(m) == 3 for m in merges), merges
 
     print("source_similarity self-test: all assertions passed")
 

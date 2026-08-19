@@ -387,6 +387,50 @@ def compute_global_agenda(session: Session, weeks: int = 4,
     }
 
 
+def compute_source_vectors(session: Session, weeks: int = 4,
+                           dimension: str = "moral") -> dict:
+    """Compact per-source entity score vectors for the static pair scatter.
+
+    One file instead of n² pair files: every (source, entity) cell over the
+    window for entities covered by >= 2 sources — exactly the cells that can
+    ever appear in some pair's shared set (a single-source entity has no pair
+    to be shared with). The client intersects two sources' vectors to draw
+    any pair scatter offline. Scores rounded to 2dp (display precision).
+
+    Shape: {window_start, window_end, dimension,
+            entities: {id: name}, sources: {id: {entity_id: [score, n]}}}
+    """
+    empty = {"window_start": None, "window_end": None, "dimension": dimension,
+             "entities": {}, "sources": {}}
+    week_start = latest_week(session)
+    if week_start is None:
+        return empty
+    rows = window_cells(session, week_start, weeks, dimension)
+
+    cover: dict = {}
+    for r in rows:
+        cover[r.entity_id] = cover.get(r.entity_id, 0) + 1
+    shared = {eid for eid, n in cover.items() if n >= 2}
+    if not shared:
+        return empty
+
+    names = dict(session.execute(text(
+        "SELECT id, name FROM entities WHERE id = ANY(:ids)"
+    ), {"ids": list(shared)}).fetchall())
+
+    vectors: dict = {}
+    for r in rows:
+        if r.entity_id in shared:
+            vectors.setdefault(r.source_id, {})[r.entity_id] = [
+                round(float(r.score), 2), int(r.n)]
+
+    window_start, window_end = _window_dates(week_start, weeks)
+    return {"window_start": window_start, "window_end": window_end,
+            "dimension": dimension,
+            "entities": {eid: names.get(eid, str(eid)) for eid in shared},
+            "sources": vectors}
+
+
 if __name__ == "__main__":
     import os
     import sys

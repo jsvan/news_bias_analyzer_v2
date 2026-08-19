@@ -15,6 +15,10 @@ import { tokens, categoricalColor, monoNumber } from '../theme';
 import { similarityApi } from '../services/api';
 import SourceMapPanel from '../components/SourceMapPanel';
 import GlobalAgendaPanel from '../components/GlobalAgendaPanel';
+import SimilarityMatrixPanel from '../components/SimilarityMatrixPanel';
+import SourceTreePanel from '../components/SourceTreePanel';
+import SourceSpectrumStrip, { SpectrumRow } from '../components/SourceSpectrumStrip';
+import PairScatterDialog, { PairRef } from '../components/PairScatterDialog';
 
 // "Source space" - which sources see the world alike, from the data alone.
 // Backed by the weekly Pearson matrix over common entities
@@ -44,6 +48,10 @@ interface MatrixResponse {
   window_end: string | null;
   sources: MatrixSource[];
   pairs: MatrixPair[];
+  // Seriation from the backend: source_ids in optimal dendrogram-leaf order,
+  // plus the nested merge tree (see SimilarityMatrixPanel / SourceTreePanel).
+  order?: number[] | null;
+  tree?: any;
 }
 
 interface NeighborEntry {
@@ -98,6 +106,7 @@ const SourceSpacePage: React.FC = () => {
   const [selected, setSelected] = useState<MatrixSource | null>(null);
   const [neighbors, setNeighbors] = useState<NeighborsResponse | null>(null);
   const [neighborsLoading, setNeighborsLoading] = useState(false);
+  const [pair, setPair] = useState<{ a: PairRef; b: PairRef } | null>(null);
 
   useEffect(() => {
     similarityApi
@@ -146,6 +155,25 @@ const SourceSpacePage: React.FC = () => {
     });
     return { clusters: multi, unplaced: loners, countryOrder: order };
   }, [matrix]);
+
+  // Every comparable source relative to the picked one, for the spectrum strip.
+  const spectrumRows: SpectrumRow[] = useMemo(() => {
+    if (!selected || !matrix) return [];
+    const byId = new Map(matrix.sources.map((s) => [s.source_id, s]));
+    return matrix.pairs
+      .filter((p) => p.source_id_1 === selected.source_id || p.source_id_2 === selected.source_id)
+      .map((p) => {
+        const otherId = p.source_id_1 === selected.source_id ? p.source_id_2 : p.source_id_1;
+        const other = byId.get(otherId);
+        return {
+          source_id: otherId,
+          name: other?.name ?? String(otherId),
+          country: other?.country ?? null,
+          score: p.score,
+          common_entities: p.common_entities,
+        };
+      });
+  }, [selected, matrix]);
 
   return (
     <Box>
@@ -272,12 +300,24 @@ const SourceSpacePage: React.FC = () => {
                         <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
                           LEAST ALIKE
                         </Typography>
-                        <Box>
+                        <Box sx={{ mb: 2 }}>
                           {neighbors.farthest.map((n) => (
                             <NeighborRow key={`f-${n.source_id}`} entry={n} />
                           ))}
                         </Box>
                       </>
+                    )}
+                    {selected && spectrumRows.length > 0 && (
+                      <SourceSpectrumStrip
+                        rows={spectrumRows}
+                        countryOrder={countryOrder}
+                        onPick={(row) =>
+                          setPair({
+                            a: { source_id: selected.source_id, name: selected.name },
+                            b: { source_id: row.source_id, name: row.name },
+                          })
+                        }
+                      />
                     )}
                   </>
                 )}
@@ -294,22 +334,41 @@ const SourceSpacePage: React.FC = () => {
       )}
 
       <Box sx={{ mt: 3 }}>
+        <SimilarityMatrixPanel
+          matrix={matrix}
+          onPairClick={(a, b) =>
+            setPair({
+              a: { source_id: a.source_id, name: a.name },
+              b: { source_id: b.source_id, name: b.name },
+            })
+          }
+        />
+      </Box>
+
+      <Box sx={{ mt: 3 }}>
         <SourceMapPanel />
+      </Box>
+
+      <Box sx={{ mt: 3 }}>
+        <SourceTreePanel tree={matrix?.tree ?? null} countryOrder={countryOrder} />
       </Box>
 
       <Box sx={{ mt: 3 }}>
         <GlobalAgendaPanel />
       </Box>
 
+      <PairScatterDialog a={pair?.a ?? null} b={pair?.b ?? null} onClose={() => setPair(null)} />
+
       <Typography variant="caption" sx={{ display: 'block', mt: 3, color: tokens.inkMuted }}>
-        One geometry throughout. Method: Pearson correlation of per-entity mean moral scores
-        over entities both sources covered (minimum 10 shared; unknown pairs stay unknown,
-        never "dissimilar"). Constellations: average-linkage clustering on 1 − r, with r
-        confidence-weighted by shared-entity count so thin overlaps can't bridge groups.
-        The map: weighted MDS on the same 1 − r distances, computed over the internationally
-        shared agenda only (entities covered by 3+ countries) — so covering local topics
-        nobody else covers never moves a source, and narrow overlap positions it weakly
-        rather than wrongly.
+        One geometry, five drawings of it. Method: Pearson correlation of per-entity mean
+        moral scores over entities both sources covered (minimum 10 shared; unknown pairs
+        stay unknown, never "dissimilar"), with r confidence-weighted by shared-entity
+        count so thin overlaps can't bridge groups. Constellations cut the average-linkage
+        tree at weighted r = 0.5; the family tree is that hierarchy uncut; the matrix is
+        every pairwise r drawn losslessly in optimal leaf order; the map is weighted MDS on
+        the same 1 − r distances over the internationally shared agenda (entities covered
+        by 3+ countries); and the pair scatter is one correlation opened up into the
+        entities behind it.
       </Typography>
     </Box>
   );

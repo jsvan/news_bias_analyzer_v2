@@ -437,6 +437,19 @@ export const similarityApi = {
     const response = await api.get(`/similarity/sources/${sourceId}/neighbors`, { params });
     return response.data;
   },
+  // Why two sources correlate: their shared entities with each side's score
+  // (the pair-scatter drill-down). Static mode intersects the snapshotted
+  // per-source vectors client-side.
+  getPair: async (sourceA: number, sourceB: number) => {
+    if (isStaticMode()) return staticData.getSimilarityPair(sourceA, sourceB);
+    if (isApiUnavailable()) {
+      throw new Error('Pair detail requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/similarity/pair', {
+      params: { source_a: sourceA, source_b: sourceB },
+    });
+    return response.data;
+  },
 };
 
 // Export the base API instance

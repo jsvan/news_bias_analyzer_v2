@@ -49,6 +49,10 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   the only shape the panel requests).
     stats/global_agenda.json     entities ranked by country breadth (the shared
                                   international agenda panel).
+    stats/source_vectors.json    per-source entity score vectors over the matrix
+                                  window, entities covered by >= 2 sources - the
+                                  client intersects two sources' vectors to draw
+                                  any pair scatter without n-squared pair files.
 
 All floats are rounded to 4 decimals on write (scores live on a -2..2 scale and the
 UI shows 1-2 decimals; full float repr was pure bloat).
@@ -226,10 +230,13 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         print(f"  skip stats/contested.json: {ex}")
         counts["skipped"] += 1
 
-    # The Source Space page: constellations (stored weekly matrix), the MDS map,
-    # and the shared international agenda. Independent files - one failing (e.g.
-    # the weekly job hasn't populated the matrix yet) doesn't take the others.
-    for key in ("similarity_matrix", "source_map", "global_agenda"):
+    # The Source Space page: constellations + seriation (stored weekly matrix),
+    # the MDS map, the shared international agenda, and the per-source entity
+    # vectors the pair scatter intersects client-side. Independent files - one
+    # failing (e.g. the weekly job hasn't populated the matrix yet) doesn't
+    # take the others.
+    for key in ("similarity_matrix", "source_map", "global_agenda",
+                "source_vectors"):
         rel = f"stats/{key}.json"
         try:
             write_json(out_dir, rel, fetchers[key]())
@@ -285,6 +292,7 @@ def live_fetchers(session):
         get_contested_ranking, get_source_map, get_global_agenda,
     )
     from server.routers.similarity_endpoints import get_similarity_matrix
+    from clustering.source_similarity import compute_source_vectors
 
     def run(coro):
         return jsonable_encoder(asyncio.run(coro))
@@ -340,6 +348,7 @@ def live_fetchers(session):
             get_source_map(weeks=4, dimension="moral", session=session)),
         "global_agenda": lambda: run(
             get_global_agenda(weeks=4, limit=AGENDA_LIMIT, session=session)),
+        "source_vectors": lambda: compute_source_vectors(session),
         "most_recent_article_date": most_recent_article_date,
     }
 
@@ -410,6 +419,11 @@ def self_test():
             "pairs": [{"source_id_1": 5, "source_id_2": 6,
                        "score": 0.83333333, "common_entities": 41}]},
         "source_map": lambda: (_ for _ in ()).throw(ValueError("matrix empty")),
+        "source_vectors": lambda: {
+            "window_start": "2026-01-01", "window_end": "2026-01-28",
+            "dimension": "moral",
+            "entities": {"1": "Ada"},
+            "sources": {"5": {"1": [0.5, 3]}, "6": {"1": [-0.25, 2]}}},
         "global_agenda": lambda: {
             "window_start": "2026-01-01", "window_end": "2026-01-28", "weeks": 4,
             "total_entities": 100, "international_entities": 7,
@@ -485,13 +499,15 @@ def self_test():
             contested = json.load(f)
         assert contested["entities"][0]["divergence"] == 0.5556  # rounded
 
-        # Source space: matrix + agenda written, the raising map skipped.
-        assert counts["source_space_files"] == 2
+        # Source space: matrix + agenda + vectors written, the raising map skipped.
+        assert counts["source_space_files"] == 3
         with open(os.path.join(out, "stats", "similarity_matrix.json")) as f:
             assert json.load(f)["pairs"][0]["score"] == 0.8333  # rounded
         with open(os.path.join(out, "stats", "global_agenda.json")) as f:
             agenda = json.load(f)
         assert agenda["entities"][0]["mean_moral"] == 0.1235  # rounded
+        with open(os.path.join(out, "stats", "source_vectors.json")) as f:
+            assert json.load(f)["sources"]["5"]["1"] == [0.5, 3]
         assert not os.path.exists(os.path.join(out, "stats", "source_map.json"))
 
         with open(os.path.join(out, "meta.json")) as f:

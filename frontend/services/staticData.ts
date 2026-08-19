@@ -37,6 +37,9 @@
  *   snapshot regardless of params (the only shapes the panels request).
  * - getSourceNeighbors is derived client-side from the snapshotted matrix
  *   pairs — same math as the live endpoint, just precomputed data.
+ * - getSimilarityPair intersects the snapshotted per-source vectors
+ *   (stats/source_vectors.json, entities covered by >= 2 sources) and
+ *   recomputes r client-side; scores carry the snapshot's 2dp rounding.
  */
 
 // Snapshotted ranges — keep in sync with server/export_snapshots.py.
@@ -201,6 +204,66 @@ export const staticData = {
   getGlobalAgenda: async (params: any = {}) => {
     const data = await load('stats/global_agenda.json');
     return { ...data, entities: (data.entities ?? []).slice(0, params.limit ?? 100) };
+  },
+
+  // Mirrors similarity_endpoints.get_similarity_pair on the snapshotted
+  // per-source vectors: intersect the two sources' entity maps, recompute r
+  // over the shared scores (same math as pairwise_pearson, >= 10 shared and
+  // nonzero variance), order by the weaker side's mention count.
+  getSimilarityPair: async (sourceA: number, sourceB: number) => {
+    const [vectors, sources] = await Promise.all([
+      load('stats/source_vectors.json'),
+      load('sources.json'),
+    ]);
+    const bySource = new Map<number, any>(sources.map((s: any) => [s.id, s]));
+    const pairSource = (id: number) => ({
+      source_id: id,
+      name: bySource.get(id)?.name ?? String(id),
+      country: bySource.get(id)?.country ?? null,
+    });
+    const va = vectors.sources?.[String(sourceA)] ?? {};
+    const vb = vectors.sources?.[String(sourceB)] ?? {};
+    const entities = Object.keys(va)
+      .filter((eid) => eid in vb)
+      .map((eid) => ({
+        entity_id: Number(eid),
+        name: vectors.entities?.[eid] ?? eid,
+        type: null,
+        score_a: va[eid][0],
+        score_b: vb[eid][0],
+        n_a: va[eid][1],
+        n_b: vb[eid][1],
+      }))
+      .sort((x, y) => Math.min(y.n_a, y.n_b) - Math.min(x.n_a, x.n_b));
+
+    let r: number | null = null;
+    if (entities.length >= 10) {
+      const sa = entities.map((e) => e.score_a);
+      const sb = entities.map((e) => e.score_b);
+      const mean = (v: number[]) => v.reduce((s, x) => s + x, 0) / v.length;
+      const ma = mean(sa);
+      const mb = mean(sb);
+      let cov = 0;
+      let vara = 0;
+      let varb = 0;
+      for (let i = 0; i < sa.length; i++) {
+        cov += (sa[i] - ma) * (sb[i] - mb);
+        vara += (sa[i] - ma) ** 2;
+        varb += (sb[i] - mb) ** 2;
+      }
+      if (vara > 0 && varb > 0) r = cov / Math.sqrt(vara * varb);
+    }
+
+    return {
+      window_start: vectors.window_start ?? null,
+      window_end: vectors.window_end ?? null,
+      dimension: vectors.dimension ?? 'moral',
+      source_a: pairSource(sourceA),
+      source_b: pairSource(sourceB),
+      r,
+      common: entities.length,
+      entities,
+    };
   },
 
   // Mirrors similarity_endpoints.get_source_neighbors on the snapshotted pairs:
