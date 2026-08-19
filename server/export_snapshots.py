@@ -26,7 +26,10 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   and source_scatter: the fixed 4-week per-source
                                   scatter response (every source's reading of this
                                   entity, current + previous window) for the entity
-                                  page's per-source drift scatter.
+                                  page's per-source drift scatter, plus
+                                  source_scatter_all: the weeks=0 all-time variant
+                                  (averages only, empty previous window) — that
+                                  panel's no-drift default view.
     source/{id}.json             per-newspaper bundle for the source profile page:
                                   {format: 1, source, base_days, entities} where each
                                   entity row is the paper's trending row plus its
@@ -120,6 +123,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
               source_historical_country(id, days, country) -> the per-source
               response for that country (the countries=[C] endpoint branch),
               source_scatter(id) -> the per-source scatter response,
+              source_scatter_all(id) -> its weeks=0 all-time variant,
               most_recent_article_date() —
               each returns a JSON-serializable value or raises to skip
               (most_recent_article_date raising just omits the field).
@@ -127,6 +131,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
     counts = {"entities": 0, "entity_files": 0, "country_files": 0,
               "trending_files": 0, "source_trending_files": 0,
               "source_bundles": 0, "national_layers": 0, "source_scatters": 0,
+              "source_scatters_all": 0,
               "contested_files": 0, "source_space_files": 0, "skipped": 0}
 
     entities = fetchers["entities"](n_entities)
@@ -173,6 +178,12 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             counts["source_scatters"] += 1
         except Exception as ex:
             print(f"  entity {eid}: no source_scatter: {ex}")
+        # weeks=0 all-time variant: the panel's default averages-only view.
+        try:
+            bundle["source_scatter_all"] = fetchers["source_scatter_all"](eid)
+            counts["source_scatters_all"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no source_scatter_all: {ex}")
         write_json(out_dir, f"entity/{eid}.json", bundle)
         counts["entity_files"] += 1
 
@@ -369,6 +380,8 @@ def live_fetchers(session):
         # matches the frontend panel's only request shape.
         "source_scatter": lambda eid: run(
             get_entity_source_scatter(eid, weeks=4, session=session)),
+        "source_scatter_all": lambda eid: run(
+            get_entity_source_scatter(eid, weeks=0, session=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -494,6 +507,14 @@ def self_test():
                                      "moral_score": -0.5, "mention_count": 7}]},
             "previous": {"start": "2025-12-08", "end": "2026-01-04",
                          "sources": []}},
+        "source_scatter_all": lambda eid: {
+            "entity_id": eid, "entity_name": "Ada", "weeks": 0,
+            "current": {"start": "2025-06-02", "end": "2026-02-01",
+                        "sources": [{"source_id": 5, "source_name": "Src",
+                                     "country": "USA",
+                                     "power_score": 0.25,
+                                     "moral_score": -0.5, "mention_count": 30}]},
+            "previous": {"start": None, "end": None, "sources": []}},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
     }
 
@@ -511,7 +532,8 @@ def self_test():
             bundle = json.load(f)
         assert set(bundle) == {"format", "entity", "base_days", "distribution",
                                "historical", "source_historical",
-                               "national_distributions", "source_scatter"}
+                               "national_distributions", "source_scatter",
+                               "source_scatter_all"}
         assert bundle["format"] == 2 and bundle["base_days"] == max(HIST_DAYS)
         assert bundle["historical"]["days"] == max(HIST_DAYS)
         assert bundle["historical"]["daily_data"][0]["power_score"] == 1.2346  # rounded
@@ -522,6 +544,10 @@ def self_test():
         scatter = bundle["source_scatter"]
         assert scatter["current"]["sources"][0]["power_score"] == 0.1235  # rounded
         assert scatter["previous"]["sources"] == []
+        assert counts["source_scatters_all"] == 1
+        scatter_all = bundle["source_scatter_all"]
+        assert scatter_all["weeks"] == 0
+        assert scatter_all["previous"] == {"start": None, "end": None, "sources": []}
 
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30

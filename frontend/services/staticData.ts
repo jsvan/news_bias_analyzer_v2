@@ -35,9 +35,10 @@
  *   without a bundle return [].
  * - getSourceMap / getGlobalAgenda serve one fixed 4-week moral-dimension
  *   snapshot regardless of params (the only shapes the panels request).
- * - getEntitySourceScatter serves the bundle's one baked 4-week response
- *   (weeks param ignored); bundles from before the field existed throw, and
- *   the panel degrades to its empty state.
+ * - getEntitySourceScatter serves the bundle's baked all-time response
+ *   (weeks=0, the panel's averages-only default) or its one baked 4-week
+ *   drift response (any other weeks value); bundles from before the fields
+ *   existed throw, and the panel degrades to its empty state.
  * - getSourceNeighbors is derived client-side from the snapshotted matrix
  *   pairs — same math as the live endpoint, just precomputed data.
  * - getSimilarityPair intersects the snapshotted per-source vectors
@@ -341,13 +342,26 @@ export const staticData = {
     }
   },
 
-  // The single-entity per-source scatter: the bundle's baked 4-week window
-  // (plus the previous window's anchors). Throws on pre-scatter bundles so the
-  // panel shows its empty state instead of a broken chart.
-  getEntitySourceScatter: async (entityId: number) => {
+  // The single-entity per-source scatter. weeks=0 (the ALL_TIME sentinel,
+  // falsy) serves the baked all-time averages; anything else serves the one
+  // baked 4-week drift window (plus the previous window's anchors). Throws on
+  // pre-scatter bundles so the panel shows its empty state instead of a broken
+  // chart. Snapshots from before the all-time bake degrade to the drift
+  // window's current sources with the previous window emptied — honest dots,
+  // just a month's average instead of all time, until the next daily export.
+  getEntitySourceScatter: async (entityId: number, params: { weeks?: number } = {}) => {
     const bundle = await entityBundle(entityId);
     if (!bundle.source_scatter) {
       throw new Error('Snapshot predates source_scatter — re-run server/export_snapshots.py.');
+    }
+    if (!params.weeks) {
+      return (
+        bundle.source_scatter_all ?? {
+          ...bundle.source_scatter,
+          weeks: 0,
+          previous: { start: null, end: null, sources: [] },
+        }
+      );
     }
     return bundle.source_scatter;
   },

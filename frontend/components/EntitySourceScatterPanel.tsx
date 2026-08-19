@@ -16,9 +16,10 @@ import { tokens } from '../theme';
 // length, so the dashed connector shows which way each newsroom moved.
 
 const WINDOW_OPTIONS = [7, 14, 30, 60, 90];
-// Static snapshots bake exactly one drift window (4 weeks) — static mode stays
-// clamped there with the picker disabled, the same honesty pattern as the
-// static-mode country pickers. Only live mode gets the averages default.
+// Static snapshots bake exactly two responses: the all-time averages (the
+// default view) and one 4-week drift window — so the static picker clamps to
+// those two choices, the same honesty pattern as the static-mode country
+// pickers.
 const STATIC_WINDOW = 30;
 
 // Short window names for the info plate and copy: "Last month · Power …",
@@ -53,7 +54,7 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
   entityName,
 }) => {
   const staticMode = isStaticMode();
-  const [days, setDays] = useState(staticMode ? STATIC_WINDOW : ALL_TIME);
+  const [days, setDays] = useState(ALL_TIME);
   const [scatter, setScatter] = useState<EntitySourceScatter | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
@@ -129,9 +130,8 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
               value={days}
               onChange={setDays}
               options={staticMode ? [STATIC_WINDOW] : WINDOW_OPTIONS}
-              allowAllTime={!staticMode}
+              allowAllTime
               allTimeLabel="Average (all time)"
-              disabled={staticMode}
               label="Compare window"
             />
           </Box>
