@@ -257,7 +257,7 @@ const NewspaperSpreadPanel: React.FC<Props> = ({ country, entities, variant = 'd
                         <Link
                           component="button"
                           variant="caption"
-                          onClick={() => navigate(`/entities/${match.id}`)}
+                          onClick={() => navigate(`/portrayals/${match.id}`)}
                           sx={{ color: tokens.inkMuted, mt: 0.5 }}
                         >
                           Open {row.entity}'s full profile →
@@ -275,7 +275,7 @@ const NewspaperSpreadPanel: React.FC<Props> = ({ country, entities, variant = 'd
                   label={paper}
                   size="small"
                   variant="outlined"
-                  onClick={() => navigate(`/sources/${encodeURIComponent(paper)}`)}
+                  onClick={() => navigate(`/coverage/newspapers/${encodeURIComponent(paper)}`)}
                   sx={{
                     borderColor: categoricalColor(paper, paperOrder),
                     color: tokens.inkMuted,

@@ -110,7 +110,7 @@ const SourcesIndexPage: React.FC = () => {
               {list.map((source) => (
                 <Box
                   key={source.id}
-                  onClick={() => navigate(`/sources/${encodeURIComponent(source.name)}`)}
+                  onClick={() => navigate(`/coverage/newspapers/${encodeURIComponent(source.name)}`)}
                   sx={{
                     display: 'flex',
                     alignItems: 'center',

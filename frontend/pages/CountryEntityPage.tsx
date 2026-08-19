@@ -157,7 +157,7 @@ const CountryEntityPage: React.FC = () => {
                 label={newspaper}
                 size="small"
                 clickable
-                onClick={() => navigate(`/sources/${encodeURIComponent(newspaper)}`)}
+                onClick={() => navigate(`/coverage/newspapers/${encodeURIComponent(newspaper)}`)}
                 sx={{
                   cursor: 'pointer',
                   fontWeight: 500,

@@ -2,20 +2,20 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { tokens } from '../theme';
 
-const SECTIONS: { to: string; label: string; activeMatch?: string; end?: boolean }[] = [
+// One link per front-page doorway (Coverage / Portrayals / The Landscape) plus
+// the standing reads; each section's own views live in its SectionShell subnav.
+const SECTIONS: { to: string; label: string; end?: boolean }[] = [
   // end: exact match only — "/" is a prefix of every route, so without it the
   // Front Page link would read as active everywhere.
   { to: '/', label: 'Front Page', end: true },
-  { to: '/entities', label: 'Entities' },
-  { to: '/sources', label: 'Sources' },
-  { to: '/source-space', label: 'Source Space' },
-  { to: '/countries', label: 'Countries' },
-  { to: '/compare/entities', label: 'Compare', activeMatch: '/compare' },
+  { to: '/coverage', label: 'Coverage' },
+  { to: '/portrayals', label: 'Portrayals' },
+  { to: '/landscape', label: 'The Landscape' },
   { to: '/stories', label: 'Stories' },
-  { to: '/my-bubble', label: 'My Bubble' },
-  { to: '/methodology', label: 'How this works' },
-  { to: '/infrastructure', label: 'Infrastructure' },
 ];
+
+// About the instrument rather than a content section — set apart on the right.
+const META = { to: '/methodology', label: 'How this works' };
 
 const linkStyle = (isActive: boolean): React.CSSProperties => ({
   textDecoration: 'none',
@@ -40,17 +40,13 @@ const SectionNav: React.FC = () => (
     }}
   >
     {SECTIONS.map((section) => (
-      <NavLink
-        key={section.to}
-        to={section.to}
-        end={section.end}
-        style={({ isActive }) =>
-          linkStyle(section.activeMatch ? location.hash.includes(section.activeMatch) : isActive)
-        }
-      >
+      <NavLink key={section.to} to={section.to} end={section.end} style={({ isActive }) => linkStyle(isActive)}>
         {section.label}
       </NavLink>
     ))}
+    <NavLink to={META.to} style={({ isActive }) => ({ ...linkStyle(isActive), marginLeft: 'auto' })}>
+      {META.label}
+    </NavLink>
   </nav>
 );
 

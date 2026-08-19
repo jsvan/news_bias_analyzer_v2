@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -12,8 +12,6 @@ import {
   TextField,
   Chip,
   CircularProgress,
-  Tabs,
-  Tab,
 } from '@mui/material';
 import { useData } from '../context/DataContext';
 import { statsApi } from '../services/api';
@@ -89,13 +87,8 @@ const CompareEntitiesPage: React.FC = () => {
 
   return (
     <Box>
-      <Tabs value="entities" sx={{ mb: 3 }}>
-        <Tab label="Entities" value="entities" component={RouterLink} to="/compare/entities" />
-        <Tab label="Sources" value="sources" component={RouterLink} to="/compare/sources" />
-      </Tabs>
-
       <Typography component="h2" sx={{ fontFamily: '"Newsreader", Georgia, serif', fontStyle: 'italic', fontSize: '2rem', mb: 1 }}>
-        Compare Entities
+        Entities side by side
       </Typography>
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3 }}>
         Each selected entity gets its own chart, side by side, rather than everything overlaid on one axis.

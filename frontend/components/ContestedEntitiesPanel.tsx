@@ -67,7 +67,7 @@ const ContestedEntitiesPanel: React.FC = () => {
           return (
             <Box
               key={entry.entity_name}
-              onClick={() => match && navigate(`/entities/${match.id}`)}
+              onClick={() => match && navigate(`/portrayals/${match.id}`)}
               sx={{
                 display: 'flex',
                 alignItems: 'center',

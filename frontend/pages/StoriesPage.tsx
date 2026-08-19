@@ -140,7 +140,7 @@ const StoryCard: React.FC<{ story: Story }> = ({ story }) => (
             <Chip
               key={e.id}
               component={RouterLink}
-              to={`/entities/${e.id}`}
+              to={`/portrayals/${e.id}`}
               clickable
               size="small"
               variant="outlined"

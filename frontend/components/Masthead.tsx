@@ -28,9 +28,9 @@ const SearchBox: React.FC = () => {
   const options: SearchOption[] = useMemo(
     () => [
       ...entities.map((e) => ({
-        label: e.name, kind: 'Entity' as const, entityType: e.type, to: `/entities/${e.id}`,
+        label: e.name, kind: 'Entity' as const, entityType: e.type, to: `/portrayals/${e.id}`,
       })),
-      ...sources.map((s) => ({ label: s.name, kind: 'Source' as const, to: `/sources/${encodeURIComponent(s.name)}` })),
+      ...sources.map((s) => ({ label: s.name, kind: 'Source' as const, to: `/coverage/newspapers/${encodeURIComponent(s.name)}` })),
     ],
     [entities, sources]
   );

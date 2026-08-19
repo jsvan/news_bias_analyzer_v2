@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -12,8 +12,6 @@ import {
   TextField,
   Chip,
   CircularProgress,
-  Tabs,
-  Tab,
   ToggleButtonGroup,
   ToggleButton,
 } from '@mui/material';
@@ -114,7 +112,7 @@ const CompareSourcesPage: React.FC = () => {
   }, [selectedNames.join(',')]);
 
   // How similarly the selected pairs scored their shared coverage — the weekly
-  // Pearson matrix the Source Space page is built on, filtered to this picker.
+  // Pearson matrix the source map is built on, filtered to this picker.
   useEffect(() => {
     if (selectedNames.length < 2) {
       setPairScores(null);
@@ -189,13 +187,8 @@ const CompareSourcesPage: React.FC = () => {
 
   return (
     <Box>
-      <Tabs value="sources" sx={{ mb: 3 }}>
-        <Tab label="Entities" value="entities" component={RouterLink} to="/compare/entities" />
-        <Tab label="Sources" value="sources" component={RouterLink} to="/compare/sources" />
-      </Tabs>
-
       <Typography component="h2" sx={{ fontFamily: '"Newsreader", Georgia, serif', fontStyle: 'italic', fontSize: '2rem', mb: 1 }}>
-        Compare Sources
+        Compare reading diets
       </Typography>
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3 }}>
         Where the selected sources read the same entities differently, and what each covers that
@@ -291,7 +284,7 @@ const CompareSourcesPage: React.FC = () => {
                     label={s.name}
                     size="small"
                     variant="outlined"
-                    onClick={() => navigate(`/sources/${encodeURIComponent(s.name)}`)}
+                    onClick={() => navigate(`/coverage/newspapers/${encodeURIComponent(s.name)}`)}
                     sx={{ borderColor: sourceColor(idx), color: sourceColor(idx), cursor: 'pointer' }}
                   />
                 ))}

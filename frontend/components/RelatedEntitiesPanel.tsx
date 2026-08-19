@@ -94,7 +94,7 @@ const RelatedEntitiesPanel: React.FC<{ entityId: number }> = ({ entityId }) => {
         {neighbors?.map((n, i) => (
           <Box
             key={n.entity_id}
-            onClick={() => navigate(`/entities/${n.entity_id}`)}
+            onClick={() => navigate(`/portrayals/${n.entity_id}`)}
             sx={{
               display: 'flex',
               alignItems: 'center',

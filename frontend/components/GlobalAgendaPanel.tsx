@@ -100,7 +100,7 @@ const GlobalAgendaPanel: React.FC = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
                     <MuiLink
                       component={RouterLink}
-                      to={`/entities/${e.entity_id}`}
+                      to={`/portrayals/${e.entity_id}`}
                       sx={{
                         color: tokens.ink,
                         fontWeight: 500,

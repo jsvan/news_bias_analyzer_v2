@@ -79,7 +79,7 @@ const DriftFeedPanel: React.FC = () => {
           return (
             <Box
               key={`${e.entity_id}-${e.source_id ?? 'global'}`}
-              onClick={() => match && navigate(`/entities/${match.id}`)}
+              onClick={() => match && navigate(`/portrayals/${match.id}`)}
               sx={{
                 display: 'flex',
                 alignItems: 'center',

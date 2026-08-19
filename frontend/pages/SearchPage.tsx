@@ -46,7 +46,7 @@ const SearchPage: React.FC = () => {
             {matchedEntities.map((entity, i) => (
               <Box
                 key={entity.id}
-                onClick={() => navigate(`/entities/${entity.id}`)}
+                onClick={() => navigate(`/portrayals/${entity.id}`)}
                 sx={{
                   display: 'flex',
                   alignItems: 'center',
@@ -80,7 +80,7 @@ const SearchPage: React.FC = () => {
             {matchedSources.map((source, i) => (
               <Box
                 key={source.id}
-                onClick={() => navigate(`/sources/${encodeURIComponent(source.name)}`)}
+                onClick={() => navigate(`/coverage/newspapers/${encodeURIComponent(source.name)}`)}
                 sx={{
                   display: 'flex',
                   alignItems: 'center',

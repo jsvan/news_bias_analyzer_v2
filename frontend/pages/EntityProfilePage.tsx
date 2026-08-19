@@ -257,7 +257,7 @@ const EntityProfilePage: React.FC = () => {
       )}
 
       <Box sx={{ mt: 4 }}>
-        <RouterLink to="/entities" style={{ color: tokens.accent, fontSize: '0.875rem' }}>
+        <RouterLink to="/portrayals" style={{ color: tokens.accent, fontSize: '0.875rem' }}>
           &larr; Back to all entities
         </RouterLink>
       </Box>

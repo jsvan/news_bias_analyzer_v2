@@ -177,7 +177,7 @@ const SourceSpacePage: React.FC = () => {
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 0.5 }}>
-        Source Space
+        The source map
       </Typography>
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3, maxWidth: 720 }}>
         Which sources see the world alike. Every pair of sources is correlated on the moral

@@ -185,7 +185,7 @@ const EntityAnalysisPage: React.FC = () => {
               // Includes type so same-named entities of different types (e.g. two
               // "Washington") are distinguishable in the dropdown.
               getOptionLabel={(e) => `${e.name} (${e.type}, ${e.mention_count || 0} mentions)`}
-              onChange={(_, value) => value && navigate(`/entities/${value.id}`)}
+              onChange={(_, value) => value && navigate(`/portrayals/${value.id}`)}
               renderInput={(params) => (
                 <TextField {...params} label="Jump to an entity's profile" size="small" fullWidth />
               )}
@@ -322,7 +322,7 @@ const EntityAnalysisPage: React.FC = () => {
               {entities.slice(0, 60).map((entity, i) => (
                 <Box
                   key={entity.id}
-                  onClick={() => navigate(`/entities/${entity.id}`)}
+                  onClick={() => navigate(`/portrayals/${entity.id}`)}
                   sx={{
                     display: 'flex',
                     alignItems: 'center',

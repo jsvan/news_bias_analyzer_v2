@@ -512,7 +512,7 @@ const SourceProfilePage: React.FC = () => {
       )}
 
       <Box sx={{ mt: 4 }}>
-        <RouterLink to="/sources" style={{ color: tokens.accent, fontSize: '0.875rem' }}>
+        <RouterLink to="/coverage/newspapers" style={{ color: tokens.accent, fontSize: '0.875rem' }}>
           &larr; Back to all sources
         </RouterLink>
       </Box>

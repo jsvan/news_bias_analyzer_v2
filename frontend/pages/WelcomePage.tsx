@@ -253,7 +253,7 @@ const WelcomePage: React.FC = () => {
                   value=""
                   onChange={(e) => {
                     const country = e.target.value as string;
-                    if (country) navigate(`/countries?country=${encodeURIComponent(country)}`);
+                    if (country) navigate(`/coverage/countries?country=${encodeURIComponent(country)}`);
                   }}
                 >
                   {availableCountries.map((c) => (
@@ -272,7 +272,7 @@ const WelcomePage: React.FC = () => {
                 groupBy={(s: NewsSource) => s.country || 'Other'}
                 getOptionLabel={(s: NewsSource) => s.name}
                 onChange={(_, source) => {
-                  if (source) navigate(`/sources/${encodeURIComponent(source.name)}`);
+                  if (source) navigate(`/coverage/newspapers/${encodeURIComponent(source.name)}`);
                 }}
                 sx={{ width: { xs: '100%', sm: 260 } }}
                 renderInput={(params) => <TextField {...params} label="A single newspaper" />}
@@ -303,7 +303,7 @@ const WelcomePage: React.FC = () => {
                   </Box>
                 )}
                 onChange={(_, entity) => {
-                  if (entity) navigate(`/entities/${entity.id}`);
+                  if (entity) navigate(`/portrayals/${entity.id}`);
                 }}
                 sx={{ width: { xs: '100%', sm: 340 } }}
                 renderInput={(params) => <TextField {...params} label="A person, country, or organization" />}
@@ -316,7 +316,7 @@ const WelcomePage: React.FC = () => {
                       label={e.name}
                       size="small"
                       variant="outlined"
-                      onClick={() => navigate(`/entities/${e.id}`)}
+                      onClick={() => navigate(`/portrayals/${e.id}`)}
                     />
                   ))}
                 </Box>
@@ -329,10 +329,10 @@ const WelcomePage: React.FC = () => {
         </QuestionRow>
 
         <QuestionRow
-          question="Where does each newspaper stand?"
+          question="How do the newspapers compare?"
           control={
-            <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/source-space')}>
-              Open the source map
+            <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/landscape/map')}>
+              See the landscape
             </Button>
           }
         >
