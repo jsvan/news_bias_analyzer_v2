@@ -55,6 +55,12 @@ services:
       OPENAI_DAILY_LIMIT: ${OPENAI_DAILY_LIMIT:-50}
       # Code default is 5 (a dev safeguard); production wants the Mac's 500.
       SCRAPER_LIMIT_PER_FEED: ${SCRAPER_LIMIT_PER_FEED:-500}
+      # Wall-clock budget (seconds) for one scraper run; past it the scheduler
+      # sends SIGTERM (clean stop between batches) then SIGKILL. The old hard
+      # 1h limit truncated every run once daily volume passed ~2k articles.
+      SCRAPER_MAX_RUNTIME: ${SCRAPER_MAX_RUNTIME:-10800}
+      # Concurrent fetch/extract slots in the scraper's worker pool.
+      SCRAPER_WORKERS: ${SCRAPER_WORKERS:-16}
     volumes:
       # Logs and OpenAI batch files live on the host, not in the container.
       - ${LOGS_DIR:-/srv/news_bias/logs}:/app/logs

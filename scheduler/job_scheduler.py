@@ -55,6 +55,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("scheduler")
 
+# Wall-clock budget for one scraper run. On overrun the scraper gets SIGTERM
+# (it finishes its current batch and exits cleanly) and only then SIGKILL.
+# The old hard 1h SIGKILL truncated every run once daily volume crossed
+# ~2,000 articles (2026-08-17), silently dropping the same tail of feeds.
+SCRAPER_MAX_RUNTIME = int(os.getenv("SCRAPER_MAX_RUNTIME", 10800))
+
 # Global flag for graceful shutdown
 shutdown_requested = False
 
@@ -68,25 +74,36 @@ def signal_handler(sig, frame):
 
 def run_scraper():
     """Run the news scraper."""
-    logger.info("Starting news scraper job")
+    logger.info(f"Starting news scraper job (budget {SCRAPER_MAX_RUNTIME}s, output -> logs/scraper.log)")
     try:
-        # Run scraper with timeout
-        result = subprocess.run(
-            ["python", "-m", "scrapers.scrape_to_db"],
-            cwd=ROOT_DIR,
-            capture_output=True,
-            text=True,
-            timeout=3600  # 1 hour timeout
-        )
-        
-        if result.returncode == 0:
-            logger.info("Scraper completed successfully")
-        else:
-            logger.error(f"Scraper failed with code {result.returncode}")
-            logger.error(f"Error output: {result.stderr}")
-
-    except subprocess.TimeoutExpired:
-        logger.error("Scraper timed out after 1 hour")
+        # Stream output to a log file as it happens - capture_output buffered
+        # everything in memory and threw it away, so timed-out runs left no
+        # record of which feeds were ever reached.
+        with open(LOG_DIR / "scraper.log", "a") as scraper_log:
+            scraper_log.write(f"\n===== scraper run started {datetime.now().isoformat()} =====\n")
+            scraper_log.flush()
+            process = subprocess.Popen(
+                ["python", "-m", "scrapers.scrape_to_db"],
+                cwd=ROOT_DIR,
+                stdout=scraper_log,
+                stderr=subprocess.STDOUT,
+            )
+            try:
+                returncode = process.wait(timeout=SCRAPER_MAX_RUNTIME)
+                if returncode == 0:
+                    logger.info("Scraper completed successfully")
+                else:
+                    logger.error(f"Scraper failed with code {returncode} (see logs/scraper.log)")
+            except subprocess.TimeoutExpired:
+                logger.error(f"Scraper exceeded {SCRAPER_MAX_RUNTIME}s budget; sending SIGTERM")
+                process.terminate()
+                try:
+                    process.wait(timeout=120)
+                    logger.info("Scraper shut down cleanly after SIGTERM")
+                except subprocess.TimeoutExpired:
+                    logger.error("Scraper ignored SIGTERM; killing")
+                    process.kill()
+                    process.wait()
     except Exception as e:
         logger.error(f"Error running scraper: {e}")
 
@@ -98,21 +115,27 @@ def run_scraper():
 def check_analyzer_status():
     """Check if the batch analyzer daemon is running."""
     lock_file = ROOT_DIR / "analyzer" / "analyzer.lock"
-    if lock_file.exists():
-        # Check if process is actually running
-        try:
-            # Try to acquire lock to see if process is alive
-            import fcntl
-            with open(lock_file, 'w') as f:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                fcntl.flock(f, fcntl.LOCK_UN)
-            # If we got here, lock was available = process died
-            logger.warning("Analyzer lock file exists but process is dead")
-            lock_file.unlink()
-            return False
-        except IOError:
-            # Lock is held = process is running
-            return True
+    if not lock_file.exists():
+        return False
+    # Try to acquire the lock to see if the process is alive. Open read-only:
+    # mode 'w' truncated the daemon's lock file just to test it.
+    import fcntl
+    try:
+        with open(lock_file, 'r') as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except BlockingIOError:
+        # Lock is held = process is running
+        return True
+    except FileNotFoundError:
+        # Daemon exited and removed the file between the check and the open
+        return False
+    # Lock was available = process died
+    logger.warning("Analyzer lock file exists but process is dead")
+    try:
+        lock_file.unlink()
+    except FileNotFoundError:
+        pass
     return False
 
 

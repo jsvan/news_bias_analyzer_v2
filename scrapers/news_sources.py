@@ -76,12 +76,13 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "The Globe and Mail",
+            "name": "Globe and Mail",
             "country": "Canada",
             "language": "en",
             "rss_feeds": [
                 "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/politics/",
                 "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/world/",
+                "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/news/",
             ]
         },
         {
@@ -157,6 +158,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://www.spiegel.de/international/index.rss",
+                "https://www.spiegel.de/schlagzeilen/index.rss",
             ]
         },
         {
@@ -527,23 +529,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://www.foreignaffairs.com/rss.xml",
-            ]
-        },
-        {
-            "name": "Globe and Mail",
-            "country": "Canada",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/news/",
-            ]
-        },
-        {
-            "name": "Der Spiegel",
-            "country": "Germany",
-            "language": "de",
-            "rss_feeds": [
-                "https://www.spiegel.de/international/index.rss",
-                "https://www.spiegel.de/schlagzeilen/index.rss",
             ]
         },
         {
