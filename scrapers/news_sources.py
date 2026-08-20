@@ -23,18 +23,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
     # Define the comprehensive set of news sources from around the world
     news_sources = [
         {
-            "name": "CNN",
-            "country": "USA",
-            "language": "en",
-            "rss_feeds": [
-                "http://rss.cnn.com/rss/cnn_topstories.rss",
-                "http://rss.cnn.com/rss/cnn_world.rss",
-                "http://rss.cnn.com/rss/cnn_us.rss",
-                "http://rss.cnn.com/rss/money_latest.rss",
-                "http://rss.cnn.com/rss/cnn_allpolitics.rss",
-            ]
-        },
-        {
             "name": "Fox News",
             "country": "USA",
             "language": "en",
@@ -42,27 +30,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
                 "https://moxie.foxnews.com/google-publisher/latest.xml",
                 "https://moxie.foxnews.com/google-publisher/politics.xml",
                 "https://moxie.foxnews.com/google-publisher/world.xml",
-            ]
-        },
-        {
-            "name": "The New York Times",
-            "country": "USA",
-            "language": "en",
-            "rss_feeds": [
-                "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-                "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-                "https://rss.nytimes.com/services/xml/rss/nyt/US.xml",
-                "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
-            ]
-        },
-        {
-            "name": "NPR",
-            "country": "USA",
-            "language": "en",
-            "rss_feeds": [
-                "https://feeds.npr.org/1001/rss.xml",
-                "https://feeds.npr.org/1003/rss.xml",
-                "https://feeds.npr.org/1014/rss.xml",
             ]
         },
         {
@@ -91,15 +58,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://nationalpost.com/feed/",
-            ]
-        },
-        {
-            "name": "Toronto Star",
-            "country": "Canada",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.thestar.com/feeds/articles.rss",
-                "https://www.thestar.com/content/thestar/feed.RSSManagerServlet.topstories.rss",
             ]
         },
         {
@@ -190,7 +148,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "Russia",
             "language": "en",
             "rss_feeds": [
-                "https://sputniknews.com/export/rss2/world/index.xml",
+                "https://sputnikglobe.com/export/rss2/archive/index.xml",
             ]
         },
         {
@@ -222,15 +180,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "Israel",
             "language": "en",
             "rss_feeds": [
-                "https://www.jpost.com/rss/front-page",
-            ]
-        },
-        {
-            "name": "Haaretz",
-            "country": "Israel",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.haaretz.com/cmlink/1.4605045",
+                "https://rss.jpost.com/rss/rssfeedsfrontpage.aspx",
             ]
         },
         {
@@ -317,38 +267,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "China Daily",
-            "country": "China",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.chinadaily.com.cn/rss/world_rss.xml",
-            ]
-        },
-        {
-            "name": "Global Times",
-            "country": "China",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.globaltimes.cn/rss/world.xml",
-            ]
-        },
-        {
-            "name": "Xinhua News",
-            "country": "China",
-            "language": "en",
-            "rss_feeds": [
-                "http://www.xinhuanet.com/english/rss/worldrss.xml",
-            ]
-        },
-        {
-            "name": "People's Daily",
-            "country": "China",
-            "language": "en",
-            "rss_feeds": [
-                "http://en.people.cn/rss/World.xml",
-            ]
-        },
-        {
             "name": "CGTN",
             "country": "China",
             "language": "en",
@@ -381,14 +299,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "Kyodo News",
-            "country": "Japan",
-            "language": "en",
-            "rss_feeds": [
-                "https://english.kyodonews.net/rss/all.xml",
-            ]
-        },
-        {
             "name": "Asahi Shimbun",
             "country": "Japan",
             "language": "en",
@@ -402,14 +312,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "language": "en",
             "rss_feeds": [
                 "https://www.koreatimes.co.kr/www/rss/rss.xml",
-            ]
-        },
-        {
-            "name": "Korea Herald",
-            "country": "South Korea",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.koreaherald.com/rss_xml.php",
             ]
         },
         {
@@ -434,15 +336,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "South Africa",
             "language": "en",
             "rss_feeds": [
-                "https://www.news24.com/rss/feed",
-            ]
-        },
-        {
-            "name": "Mail & Guardian",
-            "country": "South Africa",
-            "language": "en",
-            "rss_feeds": [
-                "https://mg.co.za/feed/",
+                "https://feeds.capi24.com/v1/Search/articles/news24/TopStories/rss",
             ]
         },
         {
@@ -492,16 +386,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "New Zealand",
             "language": "en",
             "rss_feeds": [
-                "https://www.nzherald.co.nz/rss/world/",
-            ]
-        },
-        {
-            "name": "Politico",
-            "country": "USA",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.politico.com/rss/politics08.xml",
-                "https://www.politico.com/rss/world.xml",
+                "https://www.nzherald.co.nz/arc/outboundfeeds/rss/curated/78/?outputType=xml",
             ]
         },
         {
@@ -540,30 +425,12 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "Le Monde",
-            "country": "France",
-            "language": "fr",
-            "rss_feeds": [
-                "https://www.lemonde.fr/rss/une.xml",
-                "https://www.lemonde.fr/international/rss_full.xml",
-            ]
-        },
-        {
             "name": "Le Figaro",
             "country": "France",
             "language": "fr",
             "rss_feeds": [
                 "https://www.lefigaro.fr/rss/figaro_actualites.xml",
                 "https://www.lefigaro.fr/rss/figaro_international.xml",
-            ]
-        },
-        {
-            "name": "Corriere della Sera",
-            "country": "Italy",
-            "language": "it",
-            "rss_feeds": [
-                "https://xml2.corriereobjects.it/rss/homepage.xml",
-                "https://xml2.corriereobjects.it/rss/esteri.xml",
             ]
         },
         {
@@ -608,22 +475,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "O Globo",
-            "country": "Brazil",
-            "language": "pt",
-            "rss_feeds": [
-                "https://oglobo.globo.com/rss.xml",
-            ]
-        },
-        {
-            "name": "The Times",
-            "country": "UK",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.thetimes.co.uk/rss",
-            ]
-        },
-        {
             "name": "Financial Times",
             "country": "UK",
             "language": "en",
@@ -647,15 +498,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "rss_feeds": [
                 "https://www.welt.de/feeds/latest.rss",
                 "https://www.welt.de/feeds/topthemen.rss",
-            ]
-        },
-        {
-            "name": "Süddeutsche Zeitung",
-            "country": "Germany",
-            "language": "de",
-            "rss_feeds": [
-                "https://www.sueddeutsche.de/news/rss",
-                "https://www.sueddeutsche.de/politik/rss",
             ]
         },
         {
@@ -701,15 +543,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "ABC España",
-            "country": "Spain",
-            "language": "es",
-            "rss_feeds": [
-                "https://www.abc.es/rss/feeds/abcPortada.xml",
-                "https://www.abc.es/rss/feeds/abcInternacional.xml",
-            ]
-        },
-        {
             "name": "La Vanguardia",
             "country": "Spain",
             "language": "es",
@@ -743,35 +576,11 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "Yomiuri Shimbun",
-            "country": "Japan",
-            "language": "ja",
-            "rss_feeds": [
-                "https://www.yomiuri.co.jp/rss/",
-            ]
-        },
-        {
-            "name": "Chosun Ilbo",
-            "country": "South Korea",
-            "language": "ko",
-            "rss_feeds": [
-                "https://www.chosun.com/arc/outboundfeeds/rss/",
-            ]
-        },
-        {
             "name": "Hankyoreh",
             "country": "South Korea",
             "language": "ko",
             "rss_feeds": [
                 "https://www.hani.co.kr/rss/",
-            ]
-        },
-        {
-            "name": "Caixin",
-            "country": "China",
-            "language": "zh",
-            "rss_feeds": [
-                "https://www.caixin.com/rss/all.xml",
             ]
         },
         {
@@ -783,19 +592,11 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "La Jornada",
-            "country": "Mexico",
-            "language": "es",
-            "rss_feeds": [
-                "https://www.jornada.com.mx/rss/portada.xml",
-            ]
-        },
-        {
             "name": "Clarín",
             "country": "Argentina",
             "language": "es",
             "rss_feeds": [
-                "https://www.clarin.com/rss.xml",
+                "https://www.clarin.com/rss/lo-ultimo/",
             ]
         },
         {
@@ -803,15 +604,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "Argentina",
             "language": "es",
             "rss_feeds": [
-                "https://www.lanacion.com.ar/rss",
-            ]
-        },
-        {
-            "name": "El Mercurio",
-            "country": "Chile",
-            "language": "es",
-            "rss_feeds": [
-                "https://www.emol.com/rss/rss.asp?canal=1",
+                "https://www.lanacion.com.ar/arc/outboundfeeds/rss/?outputType=xml",
             ]
         },
         {
@@ -828,7 +621,7 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "Netherlands",
             "language": "nl",
             "rss_feeds": [
-                "https://www.volkskrant.nl/rss/voorpagina",
+                "https://www.volkskrant.nl/voorpagina/rss.xml",
             ]
         },
         {
@@ -928,14 +721,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             ]
         },
         {
-            "name": "Middle East Eye",
-            "country": "UK",
-            "language": "en",
-            "rss_feeds": [
-                "https://www.middleeasteye.net/rss.xml",
-            ]
-        },
-        {
             "name": "Fox Business",
             "country": "USA",
             "language": "en",
@@ -1028,12 +813,6 @@ def get_news_sources() -> List[Dict[str, Any]]:
             "country": "USA",
             "language": "en",
             "rss_feeds": ["https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"]
-        },
-        {
-            "name": "The Hill",
-            "country": "USA",
-            "language": "en",
-            "rss_feeds": ["https://thehill.com/feed/"]
         },
         {
             "name": "New Yorker",
