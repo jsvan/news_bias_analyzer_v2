@@ -20,8 +20,12 @@ export interface ReceiptsFilter {
   // Narrow to one paper (a clicked dot / the profiled paper) …
   sourceId?: number;
   sourceName?: string;
+  // … or to a specific set of papers (the pair page's two sides) …
+  sourceIds?: number[];
   // … or to one country's press (the distribution card's national layer).
   country?: string;
+  // Header label override when sourceIds is used (e.g. "BBC and RT").
+  scopeLabel?: string;
 }
 
 interface ReceiptRow extends EntityReceipt {
@@ -89,9 +93,11 @@ const ReceiptsDrawer: React.FC<{ filter: ReceiptsFilter | null; onClose: () => v
     if (!receipts || !filter) return [];
     const byId = new Map<number, NewsSource>(sources.map((s) => [s.id, s]));
     const all: ReceiptRow[] = [];
+    const wanted = filter.sourceIds ? new Set(filter.sourceIds) : null;
     for (const [sid, list] of Object.entries(receipts.sources)) {
       const sourceId = Number(sid);
       if (filter.sourceId != null && sourceId !== filter.sourceId) continue;
+      if (wanted && !wanted.has(sourceId)) continue;
       const src = byId.get(sourceId);
       if (filter.country && src?.country !== filter.country) continue;
       for (const r of list) {
@@ -108,11 +114,13 @@ const ReceiptsDrawer: React.FC<{ filter: ReceiptsFilter | null; onClose: () => v
     return all;
   }, [receipts, sources, filter]);
 
-  const scopeLabel = filter?.sourceName
-    ? filter.sourceName
-    : filter?.country
-      ? `${filter.country}'s press`
-      : 'all tracked papers';
+  const scopeLabel = filter?.scopeLabel
+    ? filter.scopeLabel
+    : filter?.sourceName
+      ? filter.sourceName
+      : filter?.country
+        ? `${filter.country}'s press`
+        : 'all tracked papers';
 
   return (
     <Drawer

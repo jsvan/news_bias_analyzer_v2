@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -18,7 +19,7 @@ import GlobalAgendaPanel from '../components/GlobalAgendaPanel';
 import SimilarityMatrixPanel from '../components/SimilarityMatrixPanel';
 import DividingLinesPanel from '../components/DividingLinesPanel';
 import SourceSpectrumStrip, { SpectrumRow } from '../components/SourceSpectrumStrip';
-import PairScatterDialog, { PairRef } from '../components/PairScatterDialog';
+import { pairPath } from './PairPage';
 
 // "Source space" - which sources see the world alike, from the data alone.
 // Backed by the weekly Pearson matrix over common entities
@@ -100,12 +101,12 @@ const NeighborRow: React.FC<{ entry: NeighborEntry }> = ({ entry }) => (
 );
 
 const SourceSpacePage: React.FC = () => {
+  const navigate = useNavigate();
   const [matrix, setMatrix] = useState<MatrixResponse | null>(null);
   const [matrixError, setMatrixError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MatrixSource | null>(null);
   const [neighbors, setNeighbors] = useState<NeighborsResponse | null>(null);
   const [neighborsLoading, setNeighborsLoading] = useState(false);
-  const [pair, setPair] = useState<{ a: PairRef; b: PairRef } | null>(null);
 
   useEffect(() => {
     similarityApi
@@ -310,12 +311,7 @@ const SourceSpacePage: React.FC = () => {
                       <SourceSpectrumStrip
                         rows={spectrumRows}
                         countryOrder={countryOrder}
-                        onPick={(row) =>
-                          setPair({
-                            a: { source_id: selected.source_id, name: selected.name },
-                            b: { source_id: row.source_id, name: row.name },
-                          })
-                        }
+                        onPick={(row) => navigate(pairPath(selected.name, row.name))}
                       />
                     )}
                   </>
@@ -335,12 +331,7 @@ const SourceSpacePage: React.FC = () => {
       <Box sx={{ mt: 3 }}>
         <SimilarityMatrixPanel
           matrix={matrix}
-          onPairClick={(a, b) =>
-            setPair({
-              a: { source_id: a.source_id, name: a.name },
-              b: { source_id: b.source_id, name: b.name },
-            })
-          }
+          onPairClick={(a, b) => navigate(pairPath(a.name, b.name))}
         />
       </Box>
 
@@ -355,8 +346,6 @@ const SourceSpacePage: React.FC = () => {
       <Box sx={{ mt: 3 }}>
         <GlobalAgendaPanel />
       </Box>
-
-      <PairScatterDialog a={pair?.a ?? null} b={pair?.b ?? null} onClose={() => setPair(null)} />
 
       <Typography variant="caption" sx={{ display: 'block', mt: 3, color: tokens.inkMuted }}>
         One geometry, five drawings of it. Method: Pearson correlation of per-entity mean

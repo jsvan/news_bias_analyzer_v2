@@ -26,6 +26,7 @@ const SECTIONS: Record<'coverage' | 'portrayals' | 'landscape', SectionConfig> =
     tabs: [
       { to: '/coverage/countries', label: 'By country' },
       { to: '/coverage/newspapers', label: 'By newspaper' },
+      { to: '/coverage/mirror', label: 'Mirror' },
     ],
   },
   portrayals: {

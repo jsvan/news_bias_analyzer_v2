@@ -14,6 +14,8 @@ import CompareEntitiesPage from './pages/CompareEntitiesPage';
 import CompareSourcesPage from './pages/CompareSourcesPage';
 import StoriesPage from './pages/StoriesPage';
 import ShiftsPage from './pages/ShiftsPage';
+import PairPage from './pages/PairPage';
+import MirrorPage from './pages/MirrorPage';
 import MyBubblePage from './pages/MyBubblePage';
 import SearchPage from './pages/SearchPage';
 import MethodologyPage from './pages/MethodologyPage';
@@ -40,6 +42,7 @@ const App: React.FC = () => (
             <Route path="countries" element={<CountryEntityPage />} />
             <Route path="newspapers" element={<SourcesIndexPage />} />
             <Route path="newspapers/:name" element={<SourceProfilePage />} />
+            <Route path="mirror" element={<MirrorPage />} />
           </Route>
 
           {/* How is one thing portrayed? */}
@@ -55,6 +58,8 @@ const App: React.FC = () => (
             <Route path="map" element={<SourceSpacePage />} />
             <Route path="diets" element={<CompareSourcesPage />} />
             <Route path="my-bubble" element={<MyBubblePage />} />
+            <Route path="pair" element={<PairPage />} />
+            <Route path="pair/:a/:b" element={<PairPage />} />
           </Route>
 
           {/* What changed this week? */}

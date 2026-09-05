@@ -250,6 +250,22 @@ export const staticData = {
       }))
       .sort((x, y) => Math.min(y.n_a, y.n_b) - Math.min(x.n_a, x.n_b));
 
+    // What only one side covers, from the vector key sets. Degradation vs the
+    // live endpoint: source_vectors only carries entities covered by >= 2
+    // sources anywhere, so an entity exactly one paper in the whole corpus
+    // covers is invisible here.
+    const onlySide = (mine: any, theirs: any) =>
+      Object.keys(mine)
+        .filter((eid) => !(eid in theirs) && mine[eid][1] >= 3)
+        .map((eid) => ({
+          entity_id: Number(eid),
+          name: vectors.entities?.[eid] ?? eid,
+          score: mine[eid][0],
+          n: mine[eid][1],
+        }))
+        .sort((x, y) => y.n - x.n)
+        .slice(0, 15);
+
     let r: number | null = null;
     if (entities.length >= 10) {
       const sa = entities.map((e) => e.score_a);
@@ -277,6 +293,8 @@ export const staticData = {
       r,
       common: entities.length,
       entities,
+      only_a: onlySide(va, vb),
+      only_b: onlySide(vb, va),
     };
   },
 

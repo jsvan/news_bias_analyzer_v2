@@ -249,6 +249,13 @@ class PairEntity(BaseModel):
     n_b: int
 
 
+class PairOnlyEntity(BaseModel):
+    entity_id: int
+    name: str
+    score: float
+    n: int
+
+
 class SimilarityPairResponse(BaseModel):
     window_start: Optional[str] = None
     window_end: Optional[str] = None
@@ -258,6 +265,16 @@ class SimilarityPairResponse(BaseModel):
     r: Optional[float] = None
     common: int
     entities: List[PairEntity]
+    # What only one side covers in the window (>= PAIR_ONLY_MIN_MENTIONS on
+    # the covering side, zero cells on the other) — the silence half of a
+    # pair comparison, measured by attention rather than tone.
+    only_a: List[PairOnlyEntity] = []
+    only_b: List[PairOnlyEntity] = []
+
+
+# Below this the "only one of them covers it" claim is noise, not silence.
+PAIR_ONLY_MIN_MENTIONS = 3
+PAIR_ONLY_LIMIT = 15
 
 
 @router.get("/pair", response_model=SimilarityPairResponse)
@@ -311,6 +328,32 @@ async def get_similarity_pair(
         if sa.std() > 0 and sb.std() > 0:
             r = round(float(np.corrcoef(sa, sb)[0, 1]), 4)
 
+    def only_side(cover_id: int, other_id: int) -> List[PairOnlyEntity]:
+        only_rows = session.execute(text(f"""
+            WITH cover AS (SELECT entity_id, SUM({col} * n) / SUM(n) AS score,
+                                  SUM(n) AS n
+                           FROM mv_source_entity_week
+                           WHERE source_id = :cover
+                             AND week_start BETWEEN :first AND :week
+                           GROUP BY entity_id),
+                 other AS (SELECT DISTINCT entity_id
+                           FROM mv_source_entity_week
+                           WHERE source_id = :other
+                             AND week_start BETWEEN :first AND :week)
+            SELECT c.entity_id, e.name, c.score, c.n
+            FROM cover c
+            LEFT JOIN other o USING (entity_id)
+            JOIN entities e ON e.id = c.entity_id
+            WHERE o.entity_id IS NULL AND c.n >= :min_n
+            ORDER BY c.n DESC, c.entity_id
+            LIMIT :lim
+        """), {"cover": cover_id, "other": other_id, "first": first_week,
+               "week": week, "min_n": PAIR_ONLY_MIN_MENTIONS,
+               "lim": PAIR_ONLY_LIMIT}).fetchall()
+        return [PairOnlyEntity(entity_id=x.entity_id, name=x.name,
+                               score=round(float(x.score), 3), n=int(x.n))
+                for x in only_rows]
+
     return SimilarityPairResponse(
         window_start=first_week.isoformat(),
         window_end=(week + timedelta(days=6)).isoformat(),
@@ -324,6 +367,8 @@ async def get_similarity_pair(
                              score_b=round(float(x.score_b), 3),
                              n_a=int(x.n_a), n_b=int(x.n_b))
                   for x in rows],
+        only_a=only_side(source_a, source_b),
+        only_b=only_side(source_b, source_a),
     )
 
 

@@ -13,19 +13,21 @@ import {
   Autocomplete,
   TextField,
   Button,
+  Link,
   ToggleButtonGroup,
   ToggleButton,
 } from '@mui/material';
 import { useData } from '../context/DataContext';
-import { entityApi, statsApi } from '../services/api';
+import { entityApi, statsApi, similarityApi } from '../services/api';
 import { isStaticMode } from '../services/config/environment';
+import { pairPath } from './PairPage';
 import SentimentChart from '../components/SentimentChart';
 import EntityInfoPlate, { ActiveEntityInfo } from '../components/EntityInfoPlate';
 import SentimentDistributionChart, { DistributionLayer } from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
 import ReceiptsDrawer, { ReceiptsFilter } from '../components/ReceiptsDrawer';
 import { EntitySentimentSummary, NewsSource, TrendPoint } from '../types';
-import { tokens } from '../theme';
+import { tokens, monoNumber } from '../theme';
 
 // All-time window: the corpus is a bounded snapshot, so a wall-clock lookback
 // can be empty long before the data is. 0 = ALL_TIME sentinel (omitted by api.ts).
@@ -67,6 +69,9 @@ const SourceProfilePage: React.FC = () => {
   const [distLayers, setDistLayers] = useState<DistributionLayer[]>([]);
   const [historySeries, setHistorySeries] = useState<Record<string, TrendPoint[]>>({});
   const [receiptsFor, setReceiptsFor] = useState<ReceiptsFilter | null>(null);
+  // "Reads the world most like / least like" — from the weekly similarity
+  // matrix; each name links to the head-to-head pair page.
+  const [kin, setKin] = useState<{ nearest: any[]; farthest: any[] } | null>(null);
 
   const [loadingTop, setLoadingTop] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -135,6 +140,23 @@ const SourceProfilePage: React.FC = () => {
       setCompareCountry(availableCountries.includes(source.country) ? source.country : null);
     }
   };
+
+  useEffect(() => {
+    if (!source) return;
+    let cancelled = false;
+    setKin(null);
+    similarityApi
+      .getSourceNeighbors(source.id, { limit: 3 })
+      .then((d: any) => {
+        if (!cancelled) setKin({ nearest: d.nearest ?? [], farthest: d.farthest ?? [] });
+      })
+      .catch(() => {
+        if (!cancelled) setKin(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source?.id]);
 
   // ---- The paper's top entities (the grid's subject set) -------------------
   useEffect(() => {
@@ -342,6 +364,44 @@ const SourceProfilePage: React.FC = () => {
         {source.country && <Chip label={source.country} size="small" variant="outlined" />}
         {source.language && <Chip label={source.language} size="small" variant="outlined" />}
       </Box>
+      {kin && kin.nearest.length > 0 && (
+        <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 1, maxWidth: 720 }}>
+          Reads the world most like{' '}
+          {kin.nearest.map((n, i) => (
+            <React.Fragment key={n.source_id}>
+              {i > 0 && ', '}
+              <Link
+                component={RouterLink}
+                to={pairPath(source.name, n.name)}
+                underline="hover"
+                sx={{ color: tokens.ink, fontWeight: 600 }}
+              >
+                {n.name}
+              </Link>{' '}
+              <Box component="span" sx={{ ...monoNumber }}>
+                ({n.score >= 0 ? '+' : ''}{n.score.toFixed(2)})
+              </Box>
+            </React.Fragment>
+          ))}
+          {kin.farthest.length > 0 && (
+            <>
+              {' '}— least like{' '}
+              <Link
+                component={RouterLink}
+                to={pairPath(source.name, kin.farthest[0].name)}
+                underline="hover"
+                sx={{ color: tokens.ink, fontWeight: 600 }}
+              >
+                {kin.farthest[0].name}
+              </Link>{' '}
+              <Box component="span" sx={{ ...monoNumber }}>
+                ({kin.farthest[0].score >= 0 ? '+' : ''}{kin.farthest[0].score.toFixed(2)})
+              </Box>
+            </>
+          )}
+          . Each link opens the head-to-head page.
+        </Typography>
+      )}
       <Typography variant="body2" sx={{ color: tokens.inkMuted, mb: 3, maxWidth: 720 }}>
         The entities this paper covers most, read against a baseline of your choice — the world,
         one country's press, or another newspaper. Distance is divergence, not a verdict. The
