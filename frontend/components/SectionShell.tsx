@@ -37,9 +37,12 @@ const SECTIONS: Record<'coverage' | 'portrayals' | 'landscape', SectionConfig> =
         to: '/portrayals',
         label: 'All entities',
         isActive: (pathname) =>
-          pathname.startsWith('/portrayals') && !pathname.startsWith('/portrayals/side-by-side'),
+          pathname.startsWith('/portrayals') &&
+          !pathname.startsWith('/portrayals/side-by-side') &&
+          !pathname.startsWith('/portrayals/symbols'),
       },
       { to: '/portrayals/side-by-side', label: 'Side by side' },
+      { to: '/portrayals/symbols', label: 'Symbols' },
     ],
   },
   landscape: {

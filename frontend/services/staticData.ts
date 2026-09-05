@@ -421,6 +421,9 @@ export const staticData = {
     return related;
   },
 
+  // The symbol watchlist ranked by contestation (the Symbols page).
+  getSymbols: async () => load('stats/symbols.json'),
+
   // The drift feed (Shifts page + "Significant shifts" panel): one file with
   // both dimensions at scope=all; scope filtering and limit happen here.
   getDriftFeed: async (params: any = {}) => {

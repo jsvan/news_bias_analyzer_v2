@@ -61,6 +61,11 @@ services:
       SCRAPER_MAX_RUNTIME: ${SCRAPER_MAX_RUNTIME:-10800}
       # Concurrent fetch/extract slots in the scraper's worker pool.
       SCRAPER_WORKERS: ${SCRAPER_WORKERS:-16}
+      # Symbol-watchlist injection (analyzer/entity_resolution.py
+      # SYMBOL_WATCHLIST): articles touching tracked political symbols get a
+      # prompt block so "The West"/"Sovereignty"/... are extracted as concept
+      # entities. Live since 2026-09-06; set 0 to disable.
+      SYMBOL_INJECTION: ${SYMBOL_INJECTION:-1}
     volumes:
       # Logs and OpenAI batch files live on the host, not in the container.
       - ${LOGS_DIR:-/srv/news_bias/logs}:/app/logs

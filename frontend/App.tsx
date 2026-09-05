@@ -16,6 +16,7 @@ import StoriesPage from './pages/StoriesPage';
 import ShiftsPage from './pages/ShiftsPage';
 import PairPage from './pages/PairPage';
 import MirrorPage from './pages/MirrorPage';
+import SymbolsPage from './pages/SymbolsPage';
 import MyBubblePage from './pages/MyBubblePage';
 import SearchPage from './pages/SearchPage';
 import MethodologyPage from './pages/MethodologyPage';
@@ -49,6 +50,7 @@ const App: React.FC = () => (
           <Route path="/portrayals" element={<SectionShell section="portrayals" />}>
             <Route index element={<EntityAnalysisPage />} />
             <Route path="side-by-side" element={<CompareEntitiesPage />} />
+            <Route path="symbols" element={<SymbolsPage />} />
             <Route path=":id" element={<EntityProfilePage />} />
           </Route>
 

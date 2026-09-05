@@ -713,6 +713,80 @@ def format_shortlist_block(names) -> str:
     )
 
 
+# --- Symbol watchlist (injection layer for CONCEPT entities) -----------------
+# Political symbols the press fights over — "the West", "sovereignty",
+# "democracy" — that the extraction prompt otherwise under-reports because they
+# are frames, not actors. Canonical display name -> lowercase match variants.
+# Variants are matched on word boundaries (unlike the substring shortlist:
+# "woke" must not fire on "awoke"). Injection went live 2026-09-06
+# (SYMBOL_INJECTION env, default on) — concept-mention volume before that date
+# is not comparable.
+SYMBOL_WATCHLIST = {
+    "The West": ["the west", "western world", "western civilization",
+                 "western values"],
+    "The Global South": ["global south"],
+    "Democracy": ["democracy", "democratic values"],
+    "Sovereignty": ["sovereignty"],
+    "Globalists": ["globalist", "globalists", "globalism"],
+    "The Deep State": ["deep state"],
+    "The Establishment": ["the establishment"],
+    "The Elites": ["elites", "the elite"],
+    "The Mainstream Media": ["mainstream media", "legacy media"],
+    "Disinformation": ["disinformation", "misinformation", "fake news"],
+    "Free Speech": ["free speech", "freedom of speech", "freedom of expression"],
+    "Human Rights": ["human rights"],
+    "The Rules-Based Order": ["rules-based order", "rules based order",
+                              "international order", "world order"],
+    "The International Community": ["international community"],
+    "Nationalism": ["nationalism", "nationalist", "nationalists"],
+    "Populism": ["populism", "populist", "populists"],
+    "Imperialism": ["imperialism", "imperialist"],
+    "Colonialism": ["colonialism", "colonial legacy", "decolonization"],
+    "Capitalism": ["capitalism"],
+    "Socialism": ["socialism"],
+    "Communism": ["communism"],
+    "Fascism": ["fascism", "fascist", "fascists"],
+    "Terrorism": ["terrorism", "terrorist", "terrorists"],
+    "Antisemitism": ["antisemitism", "anti-semitism"],
+    "Islamophobia": ["islamophobia"],
+    "Woke": ["woke", "wokeness", "woke ideology"],
+    "Traditional Values": ["traditional values", "family values"],
+    "Immigration": ["immigration", "mass migration", "illegal immigration"],
+    "Climate Change": ["climate change", "global warming", "climate crisis"],
+    "Multipolar World": ["multipolar", "multipolarity"],
+}
+
+_SYMBOL_PATTERNS = [
+    (canonical, re.compile(r"\b(?:" + "|".join(re.escape(v) for v in variants) + r")\b"))
+    for canonical, variants in SYMBOL_WATCHLIST.items()
+]
+
+# More hits than this in one article means the piece is a survey of everything;
+# hint only the first few so the block stays a nudge, not a checklist.
+MAX_SYMBOL_HITS = 8
+
+
+def symbol_watchlist_hits(article_text: str):
+    """Canonical symbol names whose variants appear (word-bounded) in the text."""
+    text = unicodedata.normalize("NFKC", article_text).lower()
+    hits = [canonical for canonical, pattern in _SYMBOL_PATTERNS
+            if pattern.search(text)]
+    return hits[:MAX_SYMBOL_HITS]
+
+
+def format_symbol_block(names) -> str:
+    """Prompt block appended when the article touches tracked symbols."""
+    if not names:
+        return ""
+    return (
+        "\n\nTRACKED SYMBOLS: This article may engage the following political "
+        "symbols. For each one the article MEANINGFULLY frames — argues about, "
+        "defends, blames, credits — include it as an entity with entity_type "
+        "\"concept\" under this exact name. Skip any that are only a passing "
+        "word match:\n- " + "\n- ".join(names)
+    )
+
+
 def self_test():
     # normalization: titles, unicode, aliases
     assert normalize_name("President Joe Biden", "person") == "Joe Biden"
@@ -791,6 +865,21 @@ def self_test():
     block = format_shortlist_block(hits)
     assert "canonical names" in block and "- Emmanuel Macron" in block
     assert format_shortlist_block([]) == ""
+
+    # symbol watchlist: word-bounded variant matching, canonical names out
+    sym = symbol_watchlist_hits(
+        "A defense of Western values: the WEST must protect its sovereignty, "
+        "critics of globalism say, as democracy erodes.")
+    assert "The West" in sym and "Sovereignty" in sym, sym
+    assert "Globalists" in sym and "Democracy" in sym
+    # word boundaries: "awoke" must not fire Woke, "capitalisms" not Capitalism
+    assert symbol_watchlist_hits("She awoke to news of capitalisms") == []
+    assert len(symbol_watchlist_hits(
+        "the west sovereignty democracy globalism deep state elites "
+        "mainstream media fake news free speech human rights")) == MAX_SYMBOL_HITS
+    sym_block = format_symbol_block(["The West"])
+    assert '"concept"' in sym_block and "- The West" in sym_block
+    assert format_symbol_block([]) == ""
 
     print("entity_resolution self-test OK")
 

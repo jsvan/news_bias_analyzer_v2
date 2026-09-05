@@ -42,7 +42,10 @@ from analyzer.config import get_config
 from analyzer.prompts import ENTITY_SENTIMENT_PROMPT, ENTITY_SENTIMENT_SCHEMA
 from analyzer.openai_integration import sampling_params, OpenAIProcessor
 from analyzer.hotelling_t2 import HotellingT2Calculator
-from analyzer.entity_resolution import known_entity_shortlist, format_shortlist_block
+from analyzer.entity_resolution import (
+    known_entity_shortlist, format_shortlist_block,
+    symbol_watchlist_hits, format_symbol_block,
+)
 
 # Setup directories
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -256,12 +259,16 @@ def get_known_entities(session: Session, limit: int = 2000) -> List[Tuple[str, i
         return []
 
 def prepare_batch_input(articles: List[NewsArticle], model: str,
-                        known_entities: Optional[List[Tuple[str, int]]] = None) -> Tuple[str, Dict[str, NewsArticle]]:
+                        known_entities: Optional[List[Tuple[str, int]]] = None,
+                        inject_symbols: bool = False) -> Tuple[str, Dict[str, NewsArticle]]:
     """Prepare batch input file content and article lookup mapping.
 
     If known_entities is provided, each article's prompt gets a shortlist of
     already-tracked entities matched in its text, so the model reuses canonical
     names (entity-resolution layer 0 — see docs/ROADMAP_IDEAS_2026.md §12).
+    If inject_symbols, articles whose text touches the symbol watchlist get a
+    TRACKED SYMBOLS block so contested political concepts ("The West",
+    "Sovereignty") are extracted as concept entities under stable names.
     """
     batch_lines = []
     article_lookup = {}  # Maps custom_id to article
@@ -287,7 +294,9 @@ def prepare_batch_input(articles: List[NewsArticle], model: str,
         if known_entities:
             shortlist = known_entity_shortlist(analysis_text, known_entities)
             analysis_text += format_shortlist_block(shortlist)
-        
+        if inject_symbols:
+            analysis_text += format_symbol_block(symbol_watchlist_hits(analysis_text))
+
         # Create batch request line. gpt-5-family models reject the temperature
         # param outright (every batch line would fail) - sampling_params knows
         # which knobs each model accepts.
@@ -764,12 +773,15 @@ def create_new_batch(session: Session) -> bool:
 
     logger.info(f"Found {len(articles)} unanalyzed articles for new batch (model: {model})")
 
-    # Prepare batch input (known-entity injection is opt-in until validated on a pilot)
+    # Prepare batch input (known-entity injection is opt-in until validated on a pilot;
+    # symbol injection defaults ON — live since 2026-09-06, SYMBOL_INJECTION=0 disables)
     known_entities = None
     if os.environ.get("KNOWN_ENTITY_INJECTION") == "1":
         known_entities = get_known_entities(session)
         logger.info(f"Known-entity injection on: {len(known_entities)} canonical names loaded")
-    batch_content, article_lookup = prepare_batch_input(articles, model, known_entities)
+    inject_symbols = os.environ.get("SYMBOL_INJECTION", "1") == "1"
+    batch_content, article_lookup = prepare_batch_input(articles, model, known_entities,
+                                                        inject_symbols=inject_symbols)
 
     # Daily spend cap (analyzer/config.py cost_limits, OPENAI_DAILY_LIMIT env
     # override). Checked before upload so nothing is spent past the cap.

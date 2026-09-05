@@ -397,6 +397,17 @@ export const narrativeApi = {
     const response = await api.get('/narrative/global-agenda', { params });
     return response.data;
   },
+  // The symbol watchlist ("The West", "Sovereignty", …) ranked by
+  // cross-country contestation — concept entities injected into the
+  // extraction prompt since 2026-09-06.
+  getSymbols: async () => {
+    if (isStaticMode()) return staticData.getSymbols();
+    if (isApiUnavailable()) {
+      throw new Error('The symbol ranking requires a live backend and is not available in this demo.');
+    }
+    const response = await api.get('/narrative/symbols');
+    return response.data;
+  },
   getSalienceAsymmetry: async (params: { country_a: string; country_b: string; days?: number; limit?: number }) => {
     if (isStaticMode() || isApiUnavailable()) {
       throw new Error('Salience asymmetry requires a live backend and is not available in this demo.');

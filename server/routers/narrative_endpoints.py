@@ -27,6 +27,7 @@ from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
     contested_ranking, archetype, trajectory, salience_asymmetry,
 )
+from analyzer.entity_resolution import SYMBOL_WATCHLIST
 from clustering.source_similarity import (
     compute_source_map, compute_global_agenda, latest_week,
 )
@@ -402,6 +403,99 @@ async def get_entity_receipts(
         ))
     return EntityReceiptsResponse(entity_id=entity.id, entity_name=entity.name,
                                   days=days, per_source=per_source, sources=sources)
+
+
+class SymbolRow(BaseModel):
+    name: str
+    entity_id: Optional[int] = None
+    mention_count: int = 0
+    countries: int = 0
+    mean_power: Optional[float] = None
+    mean_moral: Optional[float] = None
+    # Max pairwise JS divergence between countries' moral histograms — the
+    # same contestation measure as "the front line". None until at least two
+    # countries clear the per-sphere mention floor.
+    divergence: Optional[float] = None
+
+
+class SymbolsResponse(BaseModel):
+    tracked_since: str
+    days: int
+    symbols: List[SymbolRow]
+
+
+# The date the symbol watchlist went into the extraction prompt
+# (analyzer/entity_resolution.py SYMBOL_WATCHLIST, SYMBOL_INJECTION env).
+# Concept-mention volume before this date is incidental, not tracked.
+SYMBOLS_TRACKED_SINCE = "2026-09-06"
+
+
+@router.get("/narrative/symbols", response_model=SymbolsResponse)
+async def get_symbols(
+    days: int = Query(365, ge=7, le=730),
+    session: Session = Depends(get_session),
+):
+    """The symbol watchlist, ranked by contestation: concept entities the press
+    fights over ("The West", "Sovereignty", "Democracy"), each with its scored
+    mention volume, country breadth, mean scores, and cross-country divergence.
+    Every watchlist symbol is returned — including ones with no mentions yet —
+    so the page can show what is tracked, not just what has data.
+    """
+    start = most_recent_activity(session) - timedelta(days=days)
+    names = {n.lower(): n for n in SYMBOL_WATCHLIST}
+
+    rows = session.execute(text("""
+        SELECT lower(e_can.name) AS lname, e_can.id AS entity_id,
+               s.country, em.power_score, em.moral_score
+        FROM entity_mentions em
+        JOIN entities e ON e.id = em.entity_id
+        JOIN entities e_can ON e_can.id = COALESCE(e.canonical_id, e.id)
+        JOIN news_articles a ON a.id = em.article_id
+        JOIN news_sources s ON s.id = a.source_id
+        WHERE lower(e_can.name) IN :names
+          AND a.publish_date >= :start
+    """).bindparams(bindparam("names", expanding=True)),
+        {"names": list(names), "start": start}).fetchall()
+
+    stats: Dict[str, Dict[str, Any]] = {}
+    sphere_scores: Dict[str, Dict[str, List[float]]] = {}
+    for r in rows:
+        display = names[r.lname]
+        st = stats.setdefault(display, {"entity_id": r.entity_id, "n": 0,
+                                        "power": [], "moral": [],
+                                        "countries": set()})
+        st["n"] += 1
+        if r.power_score is not None:
+            st["power"].append(float(r.power_score))
+        if r.moral_score is not None:
+            st["moral"].append(float(r.moral_score))
+        if r.country:
+            st["countries"].add(r.country)
+            if r.moral_score is not None:
+                sphere_scores.setdefault(display, {}).setdefault(
+                    r.country, []).append(float(r.moral_score))
+
+    divergence = {name: round(div, 4) for name, div in
+                  contested_ranking(sphere_scores,
+                                    min_mentions=MIN_MENTIONS_PER_SPHERE)}
+
+    symbols = []
+    for display in SYMBOL_WATCHLIST:
+        st = stats.get(display)
+        mean = lambda v: round(sum(v) / len(v), 3) if v else None
+        symbols.append(SymbolRow(
+            name=display,
+            entity_id=st["entity_id"] if st else None,
+            mention_count=st["n"] if st else 0,
+            countries=len(st["countries"]) if st else 0,
+            mean_power=mean(st["power"]) if st else None,
+            mean_moral=mean(st["moral"]) if st else None,
+            divergence=divergence.get(display),
+        ))
+    symbols.sort(key=lambda s: (s.divergence is None, -(s.divergence or 0),
+                                -s.mention_count))
+    return SymbolsResponse(tracked_since=SYMBOLS_TRACKED_SINCE, days=days,
+                           symbols=symbols)
 
 
 class SourceMapPoint(BaseModel):

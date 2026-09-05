@@ -70,6 +70,9 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   the Shifts page's seismograph + table; the
                                   frontend filters scope and slices limit
                                   client-side.
+    stats/symbols.json           the symbol watchlist ranked by contestation
+                                  (the Symbols page) — every tracked symbol,
+                                  including ones with no mentions yet.
     stats/similarity_matrix.json the latest stored weekly source-similarity matrix +
                                   cluster assignments (the Source Space page's
                                   constellations; neighbors are derived client-side
@@ -189,7 +192,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
               "source_bundles": 0, "national_layers": 0, "source_scatters": 0,
               "source_scatters_all": 0, "archetypes": 0, "related": 0,
               "drifts": 0,
-              "contested_files": 0, "drift_feed_files": 0,
+              "contested_files": 0, "drift_feed_files": 0, "symbol_files": 0,
               "source_space_files": 0, "skipped": 0,
               "pruned": 0}
     # Every path written this run — the survivors' list prune_stale works from.
@@ -381,6 +384,14 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         print(f"  skip stats/drift_feed.json: {ex}")
         counts["skipped"] += 1
 
+    # The Symbols page: the watchlist ranked by contestation.
+    try:
+        emit("stats/symbols.json", fetchers["symbols"]())
+        counts["symbol_files"] = 1
+    except Exception as ex:
+        print(f"  skip stats/symbols.json: {ex}")
+        counts["skipped"] += 1
+
     # The Source Space page: constellations + seriation (stored weekly matrix),
     # the MDS map, the shared international agenda, and the per-source entity
     # vectors the pair scatter intersects client-side. Independent files - one
@@ -450,6 +461,7 @@ def live_fetchers(session):
     from server.routers.narrative_endpoints import (
         get_contested_ranking, get_source_map, get_global_agenda,
         get_entity_source_scatter, get_entity_receipts, get_entity_archetype,
+        get_symbols,
     )
     from server.routers.embeddings_endpoints import get_related_entities
     from server.routers.drift_endpoints import get_entity_drift, get_drift_feed
@@ -537,6 +549,7 @@ def live_fetchers(session):
         "drift_feed": lambda dimension: run(
             get_drift_feed(dimension=dimension, limit=100, scope="all",
                            session=session)),
+        "symbols": lambda: run(get_symbols(days=max(HIST_DAYS), session=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -704,6 +717,11 @@ def self_test():
                         "week_start": "2026-01-12", "statistic": 30.0,
                         "p_value": 0.00123456, "mean_before": 0.1,
                         "mean_after": -0.4}]},
+        "symbols": lambda: {
+            "tracked_since": "2026-09-06", "days": 365,
+            "symbols": [{"name": "The West", "entity_id": 7, "mention_count": 40,
+                         "countries": 6, "mean_power": 0.5, "mean_moral": -0.3,
+                         "divergence": 0.44444444}]},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
         "most_recent_analysis_date": lambda: "2025-12-30T00:00:00+00:00",
     }
@@ -810,6 +828,11 @@ def self_test():
             feed = json.load(f)
         assert set(feed) == {"moral", "power"}
         assert feed["power"]["events"][0]["p_value"] == 0.0012  # rounded
+
+        assert counts["symbol_files"] == 1
+        with open(os.path.join(out, "stats", "symbols.json")) as f:
+            syms = json.load(f)
+        assert syms["symbols"][0]["divergence"] == 0.4444  # rounded
 
         # Source space: matrix + agenda + vectors + dividing lines written,
         # the raising map skipped.
