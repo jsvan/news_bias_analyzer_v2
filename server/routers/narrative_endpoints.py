@@ -18,10 +18,11 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import bindparam, func, text
 from pydantic import BaseModel
 
 from server.deps import get_db as get_session  # per-request session, closed after each request
+from server.deps import first_solid_week, resolve_entity_group
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
     contested_ranking, archetype, trajectory, salience_asymmetry,
@@ -217,7 +218,6 @@ class EntitySourceScatterResponse(BaseModel):
 # ("fewer than 3 scored mentions") — change all three together or the UI lies.
 MIN_SOURCE_SCATTER_MENTIONS = 3
 
-
 @router.get("/narrative/entity/{entity_id}/source-scatter",
             response_model=EntitySourceScatterResponse)
 async def get_entity_source_scatter(
@@ -251,13 +251,12 @@ async def get_entity_source_scatter(
         )
 
     if weeks == 0:
-        # All time: window from the entity's first scored week. prev_first ==
-        # cur_first keeps the query below valid and puts every row in the
-        # is_current bucket (week_start >= cur_first is always true).
-        cur_first = session.execute(
-            text("SELECT MIN(week_start) FROM mv_source_entity_week WHERE entity_id = :entity_id"),
-            {"entity_id": entity.canonical_id or entity.id},
-        ).scalar() or week
+        # All time: window from the entity's first SOLID week (deps.py::
+        # first_solid_week — skips the junk-dated prefix that read "coverage
+        # since 2017"). prev_first == cur_first keeps the query below valid and
+        # puts every row in the is_current bucket (week_start >= cur_first is
+        # always true).
+        cur_first = first_solid_week(session, entity.canonical_id or entity.id) or week
         prev_first = cur_first
     else:
         cur_first = week - timedelta(weeks=weeks - 1)
@@ -295,6 +294,114 @@ async def get_entity_source_scatter(
         previous=(window(prev_first, cur_first - timedelta(days=1), buckets[False])
                   if weeks else window(None, None, [])),
     )
+
+
+class ReceiptRow(BaseModel):
+    title: Optional[str]
+    url: str
+    date: Optional[str]  # publish date (YYYY-MM-DD)
+    power_score: Optional[float]
+    moral_score: Optional[float]
+    # Matched sentence from the article, present only for mentions ingested
+    # before the 2026-08-14 schema change dropped quote extraction.
+    sentence: Optional[str] = None
+
+
+class EntityReceiptsResponse(BaseModel):
+    entity_id: int
+    entity_name: str
+    days: int
+    per_source: int
+    sources: Dict[int, List[ReceiptRow]]
+
+
+# A quote longer than this is a paragraph the model pasted, not a sentence —
+# truncate so one receipt can't dominate the payload.
+MAX_RECEIPT_SENTENCE = 300
+
+
+def _first_quote(mentions_json) -> Optional[str]:
+    """First non-empty matched sentence from a mention's quote array.
+
+    Pre-2026-08-14 rows carry [{text, context}, ...]; later rows carry [].
+    Some stored strings contain literal NUL escapes (they break ::jsonb casts
+    and would trip Postgres if ever written back) — strip them here.
+    """
+    for m in mentions_json or []:
+        quote = (m.get("text") or "") if isinstance(m, dict) else ""
+        quote = quote.replace("\x00", "").strip()
+        if quote:
+            if len(quote) > MAX_RECEIPT_SENTENCE:
+                quote = quote[:MAX_RECEIPT_SENTENCE - 1].rstrip() + "…"
+            return quote
+    return None
+
+
+@router.get("/narrative/entity/{entity_id}/receipts",
+            response_model=EntityReceiptsResponse)
+async def get_entity_receipts(
+    entity_id: int,
+    days: int = Query(365, ge=7, le=730),
+    per_source: int = Query(5, ge=1, le=20),
+    session: Session = Depends(get_session),
+):
+    """The evidence behind the dots: each source's most recent scored mentions
+    of ONE entity — headline, link, publish date, both scores, and the matched
+    sentence when the ingestion-era schema captured one. Keyed by source_id so
+    the frontend can open a receipts drawer for any dot (or flatten across
+    sources for an unfiltered "recent examples" view). Raw entity_mentions,
+    not mv_source_entity_week — receipts are rows, not aggregates — so the
+    alias group must be resolved here (the MV pre-resolves, this table doesn't).
+    Windowed on publish_date (not EntityMention.created_at: backfilled or
+    re-analyzed articles would otherwise surface as "recent").
+    """
+    entity, group_ids = resolve_entity_group(session, entity_id)
+    if not entity:
+        return EntityReceiptsResponse(entity_id=entity_id, entity_name="unknown",
+                                      days=days, per_source=per_source, sources={})
+    start = most_recent_activity(session) - timedelta(days=days)
+
+    # DISTINCT ON collapses alias rows: one article mentioning two spellings of
+    # the same canonical entity is one receipt, not two.
+    rows = session.execute(text("""
+        SELECT source_id, title, url, publish_date, power_score, moral_score, mentions
+        FROM (
+            SELECT a.source_id, a.title, a.url, a.publish_date,
+                   em.power_score, em.moral_score, em.mentions,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY a.source_id
+                       ORDER BY a.publish_date DESC, em.id DESC
+                   ) AS rn
+            FROM (
+                SELECT DISTINCT ON (article_id)
+                       article_id, id, power_score, moral_score, mentions
+                FROM entity_mentions
+                WHERE entity_id IN :group_ids
+                ORDER BY article_id, id
+            ) em
+            JOIN news_articles a ON a.id = em.article_id
+            WHERE a.publish_date >= :start
+              AND a.source_id IS NOT NULL
+              AND (em.power_score IS NOT NULL OR em.moral_score IS NOT NULL)
+        ) ranked
+        WHERE rn <= :per_source
+        ORDER BY source_id, rn
+    """).bindparams(bindparam("group_ids", expanding=True)),
+        {"group_ids": group_ids, "start": start, "per_source": per_source},
+    ).fetchall()
+
+    sources: Dict[int, List[ReceiptRow]] = {}
+    for r in rows:
+        sources.setdefault(r.source_id, []).append(ReceiptRow(
+            title=r.title,
+            url=r.url,
+            date=r.publish_date.date().isoformat() if r.publish_date else None,
+            power_score=round(float(r.power_score), 3) if r.power_score is not None else None,
+            moral_score=round(float(r.moral_score), 3) if r.moral_score is not None else None,
+            sentence=_first_quote(r.mentions),
+        ))
+    return EntityReceiptsResponse(entity_id=entity.id, entity_name=entity.name,
+                                  days=days, per_source=per_source, sources=sources)
 
 
 class SourceMapPoint(BaseModel):

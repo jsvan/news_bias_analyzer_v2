@@ -11,6 +11,7 @@ const SECTIONS: { to: string; label: string; end?: boolean }[] = [
   { to: '/coverage', label: 'Coverage' },
   { to: '/portrayals', label: 'Portrayals' },
   { to: '/landscape', label: 'The Landscape' },
+  { to: '/shifts', label: 'Shifts' },
   { to: '/stories', label: 'Stories' },
 ];
 

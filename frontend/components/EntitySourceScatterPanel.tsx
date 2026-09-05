@@ -4,6 +4,7 @@ import { narrativeApi } from '../services/api';
 import { isStaticMode } from '../services/config/environment';
 import SentimentChart from './SentimentChart';
 import EntityInfoPlate, { ActiveEntityInfo } from './EntityInfoPlate';
+import ReceiptsDrawer, { ReceiptsFilter } from './ReceiptsDrawer';
 import TimeRangeSelect, { ALL_TIME } from './TimeRangeSelect';
 import { EntitySentimentSummary, EntitySourceScatter, EntitySourceScatterPoint } from '../types';
 import { tokens } from '../theme';
@@ -58,6 +59,7 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
   const [scatter, setScatter] = useState<EntitySourceScatter | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
+  const [receiptsFor, setReceiptsFor] = useState<ReceiptsFilter | null>(null);
 
   const drift = days !== ALL_TIME;
 
@@ -168,10 +170,18 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
               height={520}
               showLabels
               onActiveChange={setActiveInfo}
+              onEntityClick={(p) => {
+                // Dots here are sources (toSummary), so id is the source_id.
+                if (p.id != null) {
+                  setReceiptsFor({
+                    entityId, entityName, sourceId: p.id, sourceName: p.entity,
+                  });
+                }
+              }}
             />
             <Typography variant="caption" sx={{ display: 'block', color: tokens.inkMuted, px: 2 }}>
-              Hover a dot to read that newspaper's scoring in the plate above; click to pin,
-              click anywhere to release.{' '}
+              Hover a dot to read that newspaper's scoring in the plate above; click it to
+              open the receipts — the actual headlines behind that average.{' '}
               {drift ? (
                 <>
                   Dot color = drift direction since the previous {noun}-window (green toward
@@ -190,6 +200,7 @@ const EntitySourceScatterPanel: React.FC<{ entityId: number; entityName: string 
           </>
         )}
       </CardContent>
+      <ReceiptsDrawer filter={receiptsFor} onClose={() => setReceiptsFor(null)} />
     </Card>
   );
 };

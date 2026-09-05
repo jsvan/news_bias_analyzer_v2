@@ -18,6 +18,8 @@ interface EntityDriftResponse {
   entity_id: number;
   entity_name: string;
   dimension: string;
+  // Scored weeks in the corpus for this entity; Pettitt's test needs 8.
+  weeks_observed?: number;
   global_shift: DriftPoint | null;
   source_shifts: DriftPoint[];
 }
@@ -114,8 +116,18 @@ const EntityDriftPanel: React.FC<{ entityId: number }> = ({ entityId }) => {
         {!error && data && !hasAnyShift && (
           <Box sx={{ px: 2, py: 3 }}>
             <Typography variant="body2" sx={{ color: tokens.inkMuted }}>
-              No statistically significant shift detected for this entity yet - either
-              coverage has stayed stable, or there isn't enough weekly history to test.
+              {(data.weeks_observed ?? 0) < 8 ? (
+                <>
+                  Changepoint detection needs eight weeks of scored coverage; this
+                  entity has {data.weeks_observed ?? 0}. The corpus began July 13,
+                  2026 — check back as weeks accrue.
+                </>
+              ) : (
+                <>
+                  No statistically significant shift detected — coverage of this
+                  entity has stayed stable across {data.weeks_observed} scored weeks.
+                </>
+              )}
             </Typography>
           </Box>
         )}

@@ -12,6 +12,7 @@ import {
   CardContent,
   Autocomplete,
   TextField,
+  Button,
   ToggleButtonGroup,
   ToggleButton,
 } from '@mui/material';
@@ -22,6 +23,7 @@ import SentimentChart from '../components/SentimentChart';
 import EntityInfoPlate, { ActiveEntityInfo } from '../components/EntityInfoPlate';
 import SentimentDistributionChart, { DistributionLayer } from '../components/SentimentDistributionChart';
 import MultiSourceTrendChart from '../components/MultiSourceTrendChart';
+import ReceiptsDrawer, { ReceiptsFilter } from '../components/ReceiptsDrawer';
 import { EntitySentimentSummary, NewsSource, TrendPoint } from '../types';
 import { tokens } from '../theme';
 
@@ -64,6 +66,7 @@ const SourceProfilePage: React.FC = () => {
   const [activeInfo, setActiveInfo] = useState<ActiveEntityInfo | null>(null);
   const [distLayers, setDistLayers] = useState<DistributionLayer[]>([]);
   const [historySeries, setHistorySeries] = useState<Record<string, TrendPoint[]>>({});
+  const [receiptsFor, setReceiptsFor] = useState<ReceiptsFilter | null>(null);
 
   const [loadingTop, setLoadingTop] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -524,6 +527,24 @@ const SourceProfilePage: React.FC = () => {
                   <CardHeader
                     title="Reporting history"
                     subheader={`${source.name}'s daily average on ${selected.entity} against ${baselineLabel}`}
+                    action={
+                      selected.id != null ? (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            selected.id != null &&
+                            setReceiptsFor({
+                              entityId: selected.id,
+                              entityName: selected.entity,
+                              sourceId: source.id,
+                              sourceName: source.name,
+                            })
+                          }
+                        >
+                          Receipts
+                        </Button>
+                      ) : undefined
+                    }
                   />
                   <CardContent>
                     {loadingDetail ? (
@@ -557,6 +578,8 @@ const SourceProfilePage: React.FC = () => {
           &larr; Back to all sources
         </RouterLink>
       </Box>
+
+      <ReceiptsDrawer filter={receiptsFor} onClose={() => setReceiptsFor(null)} />
     </Box>
   );
 };

@@ -336,9 +336,9 @@ export const statsApi = {
 };
 
 // Narrative statistics (server/routers/narrative_endpoints.py) - wires
-// analyzer/narrative_metrics.py's kernels into real cross-source queries. The contested
-// ranking, source map, and global agenda are part of the static-snapshot export
-// (server/export_snapshots.py); the rest is live-API only for now.
+// analyzer/narrative_metrics.py's kernels into real cross-source queries. All of
+// these are part of the static-snapshot export (server/export_snapshots.py)
+// except salience asymmetry, which stays live-API only for now.
 export const narrativeApi = {
   getContestedRanking: async (params: { days?: number; dimension?: 'power' | 'moral'; limit?: number } = {}) => {
     if (isStaticMode()) return staticData.getContestedRanking(params);
@@ -360,8 +360,20 @@ export const narrativeApi = {
     const response = await api.get(`/narrative/entity/${entityId}/source-scatter`, { params });
     return response.data;
   },
+  // The evidence behind the dots: each paper's most recent scored mentions of
+  // one entity (headline, link, publish date, both scores, matched sentence
+  // where the pre-2026-08-14 schema captured one). Feeds the receipts drawer.
+  getEntityReceipts: async (entityId: number) => {
+    if (isStaticMode()) return staticData.getEntityReceipts(entityId);
+    if (isApiUnavailable()) {
+      throw new Error('Receipts require a live backend and are not available in this demo.');
+    }
+    const response = await api.get(`/narrative/entity/${entityId}/receipts`);
+    return response.data;
+  },
   getArchetype: async (entityId: number, params: { weeks?: number; country?: string } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getArchetype(entityId, params);
+    if (isApiUnavailable()) {
       throw new Error('The archetype trajectory requires a live backend and is not available in this demo.');
     }
     const response = await api.get(`/narrative/archetype/${entityId}`, { params });
@@ -400,7 +412,8 @@ export const narrativeApi = {
 // what gets talked about the same way by the same sources). Live-API only for now.
 export const embeddingsApi = {
   getRelated: async (entityId: number, params: { vector?: 'cooccurrence' | 'sentiment'; limit?: number } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getRelated(entityId, params.vector);
+    if (isApiUnavailable()) {
       throw new Error('Related-entity lookups require a live backend and are not available in this demo.');
     }
     const response = await api.get(`/narrative/related/${entityId}`, { params });
@@ -415,14 +428,16 @@ export const embeddingsApi = {
 // trend - the actually-interesting editorial-stance signal). Live-API only for now.
 export const driftApi = {
   getEntityDrift: async (entityId: number, params: { dimension?: 'power' | 'moral' } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getEntityDrift(entityId, params.dimension);
+    if (isApiUnavailable()) {
       throw new Error('Drift detection requires a live backend and is not available in this demo.');
     }
     const response = await api.get(`/narrative/drift/${entityId}`, { params });
     return response.data;
   },
   getDriftFeed: async (params: { dimension?: 'power' | 'moral'; limit?: number; scope?: 'all' | 'global' | 'source' } = {}) => {
-    if (isStaticMode() || isApiUnavailable()) {
+    if (isStaticMode()) return staticData.getDriftFeed(params);
+    if (isApiUnavailable()) {
       throw new Error('Drift feed requires a live backend and is not available in this demo.');
     }
     const response = await api.get('/narrative/drift-feed', { params });

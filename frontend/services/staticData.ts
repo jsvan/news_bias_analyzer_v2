@@ -39,6 +39,10 @@
  *   (weeks=0, the panel's averages-only default) or its one baked 4-week
  *   drift response (any other weeks value); bundles from before the fields
  *   existed throw, and the panel degrades to its empty state.
+ * - getArchetype / getRelated / getEntityDrift serve the bundle's baked
+ *   responses: the weeks=12 trajectory (country overlays only for snapshotted
+ *   countries with a path), both related vectors at limit 10, and both drift
+ *   dimensions — other parameterizations are clamped to those.
  * - getSourceNeighbors is derived client-side from the snapshotted matrix
  *   pairs — same math as the live endpoint, just precomputed data.
  * - getSimilarityPair intersects the snapshotted per-source vectors
@@ -364,6 +368,63 @@ export const staticData = {
       );
     }
     return bundle.source_scatter;
+  },
+
+  // Per-entity receipts (the evidence drawer): each paper's most recent scored
+  // mentions with headline/url/date/scores. A separate lazily-fetched file so
+  // it never weighs down the entity bundle.
+  getEntityReceipts: async (entityId: number) => load(`receipts/${entityId}.json`),
+
+  // Archetype trajectory: the bundle bakes the panel's one request shape
+  // (weeks=12) — global plus each snapshotted country that had a path. A
+  // country absent from the bake throws, which the panel's overlay catch
+  // renders as "(no scored coverage: X)", same as the live endpoint's
+  // empty-trajectory case.
+  getArchetype: async (entityId: number, params: { weeks?: number; country?: string } = {}) => {
+    const bundle = await entityBundle(entityId);
+    if (!bundle.archetype) {
+      throw new Error('Snapshot predates the archetype bake — re-run server/export_snapshots.py.');
+    }
+    if (params.country) {
+      const overlay = bundle.archetype.countries?.[params.country];
+      if (!overlay) throw new Error(`No scored coverage from ${params.country} in the window.`);
+      return overlay;
+    }
+    return bundle.archetype.global;
+  },
+
+  // Related entities: both vectors' neighbor lists are baked per bundle.
+  getRelated: async (entityId: number, vector: string = 'cooccurrence') => {
+    const bundle = await entityBundle(entityId);
+    const related = bundle.related?.[vector];
+    if (!related) {
+      throw new Error('Snapshot predates the related-entities bake — re-run server/export_snapshots.py.');
+    }
+    return related;
+  },
+
+  // The drift feed (Shifts page + "Significant shifts" panel): one file with
+  // both dimensions at scope=all; scope filtering and limit happen here.
+  getDriftFeed: async (params: any = {}) => {
+    const data = await load('stats/drift_feed.json');
+    const feed = data[params.dimension === 'power' ? 'power' : 'moral'];
+    if (!feed) {
+      throw new Error('Snapshot predates the drift-feed bake — re-run server/export_snapshots.py.');
+    }
+    let events = feed.events ?? [];
+    if (params.scope === 'global') events = events.filter((e: any) => e.source_id == null);
+    if (params.scope === 'source') events = events.filter((e: any) => e.source_id != null);
+    return { ...feed, events: events.slice(0, params.limit ?? 20) };
+  },
+
+  // Statistical surprise: both dimensions' changepoint responses are baked.
+  getEntityDrift: async (entityId: number, dimension: string = 'moral') => {
+    const bundle = await entityBundle(entityId);
+    const drift = bundle.drift?.[dimension];
+    if (!drift) {
+      throw new Error('Snapshot predates the drift bake — re-run server/export_snapshots.py.');
+    }
+    return drift;
   },
 
   getHistoricalSentiment: async (entityId: number, params: any = {}) => {

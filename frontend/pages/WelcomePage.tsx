@@ -339,6 +339,19 @@ const WelcomePage: React.FC = () => {
           Newspapers that cast the same entities the same way sit close together on the map.
           Distance is disagreement — and the entities doing the dividing are named.
         </QuestionRow>
+
+        <QuestionRow
+          question="What changed this week?"
+          control={
+            <Button variant="outlined" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/shifts')}>
+              See the shifts
+            </Button>
+          }
+        >
+          Portrayals move. Every entity's weekly series is tested for statistically significant
+          breaks — the whole world moving together is an event; one paper moving alone is an
+          editorial decision showing itself.
+        </QuestionRow>
       </Box>
 
       {/* ————— The measurement idea: explanation, not controls, so it sits on

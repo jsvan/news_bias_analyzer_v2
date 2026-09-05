@@ -33,7 +33,20 @@ Output layout (under --out, default frontend/public/snapshots/):
                                   page's per-source drift scatter, plus
                                   source_scatter_all: the weeks=0 all-time variant
                                   (averages only, empty previous window) — that
-                                  panel's no-drift default view.
+                                  panel's no-drift default view. Bundles also
+                                  carry archetype ({global, countries:{C:...}} —
+                                  the weeks=12 trajectory responses), related
+                                  ({cooccurrence, sentiment} neighbor lists),
+                                  and drift ({moral, power} changepoint
+                                  responses) — the three entity-page panels
+                                  that used to be live-API only.
+    receipts/{id}.json           per-entity receipts (the evidence drawer): each
+                                  source's most recent scored mentions of the
+                                  entity — headline, url, publish date, both
+                                  scores, matched sentence when the
+                                  pre-2026-08-14 schema captured one. Fetched
+                                  lazily when a drawer opens, never part of the
+                                  initial page payload.
     source/{id}.json             per-newspaper bundle for the source profile page:
                                   {format: 1, source, base_days, entities} where each
                                   entity row is the paper's trending row plus its
@@ -52,6 +65,11 @@ Output layout (under --out, default frontend/public/snapshots/):
     stats/contested.json         cross-country contested ranking ("The front line"
                                   panel). One fixed 30-day moral-dimension file - the
                                   only shape the page requests.
+    stats/drift_feed.json        {moral, power}: the precomputed drift feed
+                                  (entity_drift_events, scope=all, limit 100) for
+                                  the Shifts page's seismograph + table; the
+                                  frontend filters scope and slices limit
+                                  client-side.
     stats/similarity_matrix.json the latest stored weekly source-similarity matrix +
                                   cluster assignments (the Source Space page's
                                   constellations; neighbors are derived client-side
@@ -70,6 +88,13 @@ Output layout (under --out, default frontend/public/snapshots/):
 
 All floats are rounded to 4 decimals on write (scores live on a -2..2 scale and the
 UI shows 1-2 decimals; full float repr was pure bloat).
+
+After a successful export, .json files under the managed subdirs (entity/,
+receipts/, source/, country/, stats/) that this run did NOT write are deleted:
+--out is reused across runs, so an entity that falls out of the top-N or a
+paper that drops below the trending floor would otherwise keep serving a
+snapshot that silently ages forever (rsync --delete in the daily cron then
+propagates the removal to Pages).
 
 Run on the machine with the database:
     python -m server.export_snapshots --entities 200
@@ -104,6 +129,10 @@ SOURCE_BUNDLE_ENTITIES = 20
 MIN_NATIONAL_MENTIONS = 5
 # ContestedEntitiesPanel shows 8; same headroom reasoning.
 CONTESTED_LIMIT = 20
+# Receipts: the drawer shows each paper's most recent scored mentions. 5 per
+# paper keeps a 99-source entity's file under ~100KB; the window matches
+# base_days so a receipt always falls inside the charts it's evidence for.
+RECEIPTS_PER_SOURCE = 5
 # GlobalAgendaPanel shows 15; same headroom reasoning.
 AGENDA_LIMIT = 100
 
@@ -112,8 +141,30 @@ def write_json(out_dir: str, rel_path: str, data) -> str:
     path = os.path.join(out_dir, rel_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
-        json.dump(round_floats(data), f, separators=(",", ":"), default=str)
+        # ensure_ascii=False: \uXXXX-escaping non-Latin text (Arabic/Japanese
+        # headlines in receipts, accented names) inflated files ~6x for those
+        # strings; JSON is UTF-8 by spec and fetch()/res.json() handle it.
+        json.dump(round_floats(data), f, separators=(",", ":"), default=str,
+                  ensure_ascii=False)
     return path
+
+
+# Subdirs the exporter owns outright — prune_stale never looks anywhere else,
+# so a hand-placed file at the snapshot root (or a new unmanaged dir) survives.
+MANAGED_SUBDIRS = ("entity", "receipts", "source", "country", "stats")
+
+
+def prune_stale(out_dir: str, written: set) -> int:
+    """Delete managed .json files this run didn't write. See module docstring."""
+    removed = 0
+    for sub in MANAGED_SUBDIRS:
+        for dirpath, _dirs, files in os.walk(os.path.join(out_dir, sub)):
+            for name in files:
+                path = os.path.join(dirpath, name)
+                if name.endswith(".json") and path not in written:
+                    os.remove(path)
+                    removed += 1
+    return removed
 
 
 def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
@@ -132,16 +183,25 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
               each returns a JSON-serializable value or raises to skip
               (most_recent_article_date raising just omits the field).
     """
-    counts = {"entities": 0, "entity_files": 0, "country_files": 0,
+    counts = {"entities": 0, "entity_files": 0, "receipt_files": 0,
+              "country_files": 0,
               "trending_files": 0, "source_trending_files": 0,
               "source_bundles": 0, "national_layers": 0, "source_scatters": 0,
-              "source_scatters_all": 0,
-              "contested_files": 0, "source_space_files": 0, "skipped": 0}
+              "source_scatters_all": 0, "archetypes": 0, "related": 0,
+              "drifts": 0,
+              "contested_files": 0, "drift_feed_files": 0,
+              "source_space_files": 0, "skipped": 0,
+              "pruned": 0}
+    # Every path written this run — the survivors' list prune_stale works from.
+    written: set = set()
+
+    def emit(rel_path: str, data):
+        written.add(write_json(out_dir, rel_path, data))
 
     entities = fetchers["entities"](n_entities)
-    write_json(out_dir, "entities.json", entities)
+    emit("entities.json", entities)
     sources = fetchers["sources"]()
-    write_json(out_dir, "sources.json", sources)
+    emit("sources.json", sources)
     counts["entities"] = len(entities)
 
     base_days = max(HIST_DAYS)
@@ -188,15 +248,62 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             counts["source_scatters_all"] += 1
         except Exception as ex:
             print(f"  entity {eid}: no source_scatter_all: {ex}")
-        write_json(out_dir, f"entity/{eid}.json", bundle)
+        # Archetype trajectory: the panel's one request shape (weeks=12),
+        # global plus each snapshotted country that has a path to draw (an
+        # absent country reads as "no scored coverage" in the panel, same as
+        # the live endpoint's empty trajectory).
+        try:
+            arch = {"global": fetchers["archetype"](eid, None)}
+            arch_countries = {}
+            for country in COUNTRIES:
+                try:
+                    c = fetchers["archetype"](eid, country)
+                except Exception:
+                    continue
+                if c.get("trajectory"):
+                    arch_countries[country] = c
+            if arch_countries:
+                arch["countries"] = arch_countries
+            bundle["archetype"] = arch
+            counts["archetypes"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no archetype: {ex}")
+        # Related entities: both vectors' neighbor lists. Baked even when empty
+        # (the panel's "not enough mention volume" state needs the response).
+        try:
+            bundle["related"] = {
+                "cooccurrence": fetchers["related"](eid, "cooccurrence"),
+                "sentiment": fetchers["related"](eid, "sentiment"),
+            }
+            counts["related"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no related: {ex}")
+        # Statistical surprise: both dimensions' changepoint responses.
+        try:
+            bundle["drift"] = {
+                "moral": fetchers["entity_drift"](eid, "moral"),
+                "power": fetchers["entity_drift"](eid, "power"),
+            }
+            counts["drifts"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no drift: {ex}")
+        emit(f"entity/{eid}.json", bundle)
         counts["entity_files"] += 1
+        # Receipts (the evidence drawer) live in their own lazily-fetched file
+        # so they never weigh down the bundle; a failure degrades to the
+        # drawer's own "no receipts snapshot" state, not a missing bundle.
+        try:
+            emit(f"receipts/{eid}.json", fetchers["receipts"](eid))
+            counts["receipt_files"] += 1
+        except Exception as ex:
+            print(f"  entity {eid}: no receipts: {ex}")
 
     # All-time trending (the entity scatter): one global file plus one per
     # snapshotted country. No days variants — the page only asks for all-time.
     for country in [None] + COUNTRIES:
         rel = f"stats/trending_{country or 'global'}.json"
         try:
-            write_json(out_dir, rel, fetchers["trending"](TRENDING_LIMIT, country))
+            emit(rel, fetchers["trending"](TRENDING_LIMIT, country))
             counts["trending_files"] += 1
         except Exception as ex:
             print(f"  skip {rel}: {ex}")
@@ -221,7 +328,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             continue
         if len(rows) < MIN_SOURCE_TRENDING:
             continue
-        write_json(out_dir, f"stats/trending_source_{sid}.json", rows)
+        emit(f"stats/trending_source_{sid}.json", rows)
         trending_source_ids.append(sid)
         counts["source_trending_files"] += 1
 
@@ -250,16 +357,28 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
             if daily:
                 ent["daily"] = daily
             bundle_entities.append(ent)
-        write_json(out_dir, f"source/{sid}.json",
-                   {"format": 1, "source": s, "base_days": base_days,
-                    "entities": bundle_entities})
+        emit(f"source/{sid}.json",
+             {"format": 1, "source": s, "base_days": base_days,
+              "entities": bundle_entities})
         counts["source_bundles"] += 1
 
     try:
-        write_json(out_dir, "stats/contested.json", fetchers["contested"]())
+        emit("stats/contested.json", fetchers["contested"]())
         counts["contested_files"] = 1
     except Exception as ex:
         print(f"  skip stats/contested.json: {ex}")
+        counts["skipped"] += 1
+
+    # The Shifts page: both dimensions of the precomputed drift feed in one
+    # file. Near-empty until ~8 corpus weeks accrue — the page owns that copy.
+    try:
+        emit("stats/drift_feed.json", {
+            "moral": fetchers["drift_feed"]("moral"),
+            "power": fetchers["drift_feed"]("power"),
+        })
+        counts["drift_feed_files"] = 1
+    except Exception as ex:
+        print(f"  skip stats/drift_feed.json: {ex}")
         counts["skipped"] += 1
 
     # The Source Space page: constellations + seriation (stored weekly matrix),
@@ -271,7 +390,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
                 "source_vectors", "dividing_lines"):
         rel = f"stats/{key}.json"
         try:
-            write_json(out_dir, rel, fetchers[key]())
+            emit(rel, fetchers[key]())
             counts["source_space_files"] += 1
         except Exception as ex:
             print(f"  skip {rel}: {ex}")
@@ -285,7 +404,7 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
                 print(f"  skip country {country}/{days}d: {ex}")
                 counts["skipped"] += 1
                 continue
-            write_json(out_dir, f"country/{country}_{days}.json", data)
+            emit(f"country/{country}_{days}.json", data)
             counts["country_files"] += 1
 
     meta = {
@@ -311,7 +430,8 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         meta["most_recent_analysis_date"] = fetchers["most_recent_analysis_date"]()
     except Exception as ex:
         print(f"  skip most_recent_analysis_date: {ex}")
-    write_json(out_dir, "meta.json", meta)
+    emit("meta.json", meta)
+    counts["pruned"] = prune_stale(out_dir, written)
     return counts
 
 
@@ -329,8 +449,10 @@ def live_fetchers(session):
     from server.routers.statistical_endpoints import get_country_top_entities
     from server.routers.narrative_endpoints import (
         get_contested_ranking, get_source_map, get_global_agenda,
-        get_entity_source_scatter,
+        get_entity_source_scatter, get_entity_receipts, get_entity_archetype,
     )
+    from server.routers.embeddings_endpoints import get_related_entities
+    from server.routers.drift_endpoints import get_entity_drift, get_drift_feed
     from server.routers.similarity_endpoints import (
         get_similarity_matrix, get_dividing_lines,
     )
@@ -398,6 +520,23 @@ def live_fetchers(session):
             get_entity_source_scatter(eid, weeks=4, session=session)),
         "source_scatter_all": lambda eid: run(
             get_entity_source_scatter(eid, weeks=0, session=session)),
+        # days matches base_days — all args explicit (Query-default trap).
+        "receipts": lambda eid: run(
+            get_entity_receipts(eid, days=max(HIST_DAYS),
+                                per_source=RECEIPTS_PER_SOURCE, session=session)),
+        # weeks=12 matches ArchetypeQuadrantPanel's only request shape.
+        "archetype": lambda eid, country: run(
+            get_entity_archetype(eid, weeks=12, country=country, session=session)),
+        # limit=10 matches RelatedEntitiesPanel's only request shape.
+        "related": lambda eid, vector: run(
+            get_related_entities(eid, vector=vector, limit=10, session=session)),
+        "entity_drift": lambda eid, dimension: run(
+            get_entity_drift(eid, dimension=dimension, session=session)),
+        # limit=100: the Shifts page shows everything; scope filtering is
+        # client-side. All args explicit — the Query-default trap.
+        "drift_feed": lambda dimension: run(
+            get_drift_feed(dimension=dimension, limit=100, scope="all",
+                           session=session)),
         "contested": lambda: run(
             get_contested_ranking(days=30, dimension="moral",
                                   limit=CONTESTED_LIMIT, session=session)),
@@ -532,11 +671,53 @@ def self_test():
                                      "power_score": 0.25,
                                      "moral_score": -0.5, "mention_count": 30}]},
             "previous": {"start": None, "end": None, "sources": []}},
+        "receipts": lambda eid: {
+            "entity_id": eid, "entity_name": "Ada", "days": 365, "per_source": 5,
+            "sources": {"5": [{"title": "Ada wins", "url": "https://x/a",
+                               "date": "2026-01-01", "power_score": 1.23456789,
+                               "moral_score": 0.5, "sentence": "Ada won."}]}},
+        # Global + USA have a path, UK has none (pruned), the rest raise
+        # (swallowed — thin coverage is expected, not an export error).
+        "archetype": lambda eid, country: (
+            {"entity_id": eid, "entity_name": "Ada", "current_archetype": "hero",
+             "power": 0.5, "moral": 0.5,
+             "trajectory": [{"window_index": 0, "power": 0.5, "moral": 0.55555555}]}
+            if country in (None, "USA") else
+            {"entity_id": eid, "entity_name": "Ada", "current_archetype": "neutral",
+             "power": 0.0, "moral": 0.0, "trajectory": None}
+            if country == "UK" else (_ for _ in ()).throw(ValueError("thin"))),
+        "related": lambda eid, vector: {
+            "entity_id": eid, "entity_name": "Ada", "vector": vector,
+            "neighbors": [{"entity_id": 2, "entity_name": "Borg",
+                           "similarity": 0.98765432}]},
+        "entity_drift": lambda eid, dimension: {
+            "entity_id": eid, "entity_name": "Ada", "dimension": dimension,
+            "weeks_observed": 9, "global_shift": None,
+            "source_shifts": [{"source_id": 5, "source_name": "Src",
+                               "week_start": "2026-01-12", "statistic": 30.0,
+                               "p_value": 0.01234567, "mean_before": 0.1,
+                               "mean_after": -0.4}]},
+        "drift_feed": lambda dimension: {
+            "dimension": dimension,
+            "events": [{"entity_id": 1, "entity_name": "Ada", "source_id": 5,
+                        "source_name": "Src", "dimension": dimension,
+                        "week_start": "2026-01-12", "statistic": 30.0,
+                        "p_value": 0.00123456, "mean_before": 0.1,
+                        "mean_after": -0.4}]},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
         "most_recent_analysis_date": lambda: "2025-12-30T00:00:00+00:00",
     }
 
     with tempfile.TemporaryDirectory() as out:
+        # Leftovers from a previous run into the same --out: managed .json
+        # files must be pruned; a non-json file and root-level files survive.
+        for stale in ("entity/999.json", "receipts/999.json",
+                      "stats/trending_source_9.json"):
+            write_json(out, stale, {"stale": True})
+        write_json(out, "root_extra.json", {"unmanaged": True})
+        with open(os.path.join(out, "entity", "notes.txt"), "w") as f:
+            f.write("keep")
+
         counts = export_all(out, 10, fetchers)
         assert counts["entities"] == 2
         assert counts["entity_files"] == 1          # entity 2 fails -> skipped whole bundle
@@ -551,7 +732,8 @@ def self_test():
         assert set(bundle) == {"format", "entity", "base_days", "distribution",
                                "historical", "source_historical",
                                "national_distributions", "source_scatter",
-                               "source_scatter_all"}
+                               "source_scatter_all", "archetype", "related",
+                               "drift"}
         assert bundle["format"] == 2 and bundle["base_days"] == max(HIST_DAYS)
         assert bundle["historical"]["days"] == max(HIST_DAYS)
         assert bundle["historical"]["daily_data"][0]["power_score"] == 1.2346  # rounded
@@ -566,6 +748,32 @@ def self_test():
         scatter_all = bundle["source_scatter_all"]
         assert scatter_all["weeks"] == 0
         assert scatter_all["previous"] == {"start": None, "end": None, "sources": []}
+
+        # The three baked panels: global archetype + USA overlay (UK pruned,
+        # the rest raised), both related vectors, both drift dimensions.
+        assert counts["archetypes"] == 1 and counts["related"] == 1
+        assert counts["drifts"] == 1
+        assert set(bundle["archetype"]) == {"global", "countries"}
+        assert set(bundle["archetype"]["countries"]) == {"USA"}
+        assert bundle["archetype"]["global"]["trajectory"][0]["moral"] == 0.5556
+        assert bundle["related"]["sentiment"]["neighbors"][0]["similarity"] == 0.9877
+        assert bundle["drift"]["power"]["source_shifts"][0]["p_value"] == 0.0123
+        assert bundle["drift"]["moral"]["weeks_observed"] == 9
+
+        # Receipts: entity 1 only (entity 2's whole bundle was skipped first).
+        assert counts["receipt_files"] == 1
+        with open(os.path.join(out, "receipts", "1.json")) as f:
+            receipts = json.load(f)
+        assert receipts["sources"]["5"][0]["power_score"] == 1.2346  # rounded
+        assert not os.path.exists(os.path.join(out, "receipts", "2.json"))
+
+        # Stale managed files pruned; the .txt and the root file untouched.
+        assert counts["pruned"] == 3
+        assert not os.path.exists(os.path.join(out, "entity", "999.json"))
+        assert not os.path.exists(os.path.join(out, "receipts", "999.json"))
+        assert not os.path.exists(os.path.join(out, "stats", "trending_source_9.json"))
+        assert os.path.exists(os.path.join(out, "entity", "notes.txt"))
+        assert os.path.exists(os.path.join(out, "root_extra.json"))
 
         with open(os.path.join(out, "country", "USA_30.json")) as f:
             assert json.load(f)["time_period_days"] == 30
@@ -596,6 +804,12 @@ def self_test():
         with open(os.path.join(out, "stats", "contested.json")) as f:
             contested = json.load(f)
         assert contested["entities"][0]["divergence"] == 0.5556  # rounded
+
+        assert counts["drift_feed_files"] == 1
+        with open(os.path.join(out, "stats", "drift_feed.json")) as f:
+            feed = json.load(f)
+        assert set(feed) == {"moral", "power"}
+        assert feed["power"]["events"][0]["p_value"] == 0.0012  # rounded
 
         # Source space: matrix + agenda + vectors + dividing lines written,
         # the raising map skipped.

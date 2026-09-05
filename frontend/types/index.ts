@@ -157,6 +157,48 @@ export interface EntitySourceScatter {
   previous: EntitySourceScatterWindow;
 }
 
+// GET /narrative/entity/{id}/receipts — the evidence behind the dots: each
+// source's most recent scored mentions of one entity. `sentence` exists only
+// for mentions ingested before the 2026-08-14 schema change dropped quotes.
+export interface EntityReceipt {
+  title: string | null;
+  url: string;
+  date: string | null;
+  power_score: number | null;
+  moral_score: number | null;
+  sentence?: string | null;
+}
+
+export interface EntityReceipts {
+  entity_id: number;
+  entity_name: string;
+  days: number;
+  per_source: number;
+  // Keyed by source_id (JSON object keys are strings).
+  sources: Record<string, EntityReceipt[]>;
+}
+
+// GET /narrative/drift-feed — precomputed Pettitt changepoints across the
+// corpus (entity_drift_events). source_id null = the whole corpus moved
+// together; set = one paper moved alone beyond the global trend.
+export interface DriftFeedEntry {
+  entity_id: number;
+  entity_name: string;
+  source_id: number | null;
+  source_name: string | null;
+  dimension: string;
+  week_start: string;
+  statistic: number;
+  p_value: number;
+  mean_before: number;
+  mean_after: number;
+}
+
+export interface DriftFeedResponse {
+  dimension: string;
+  events: DriftFeedEntry[];
+}
+
 // Trend Types
 export interface TrendPoint {
   date: string;

@@ -13,6 +13,7 @@ import CountryEntityPage from './pages/CountryEntityPage';
 import CompareEntitiesPage from './pages/CompareEntitiesPage';
 import CompareSourcesPage from './pages/CompareSourcesPage';
 import StoriesPage from './pages/StoriesPage';
+import ShiftsPage from './pages/ShiftsPage';
 import MyBubblePage from './pages/MyBubblePage';
 import SearchPage from './pages/SearchPage';
 import MethodologyPage from './pages/MethodologyPage';
@@ -55,6 +56,9 @@ const App: React.FC = () => (
             <Route path="diets" element={<CompareSourcesPage />} />
             <Route path="my-bubble" element={<MyBubblePage />} />
           </Route>
+
+          {/* What changed this week? */}
+          <Route path="/shifts" element={<ShiftsPage />} />
 
           <Route path="/stories" element={<StoriesPage />} />
           <Route path="/search" element={<SearchPage />} />

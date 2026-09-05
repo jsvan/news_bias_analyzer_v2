@@ -25,6 +25,7 @@ from sqlalchemy import text
 from pydantic import BaseModel
 
 from server.deps import get_db as get_session  # per-request session, closed after each request
+from server.deps import first_solid_week
 from database.models import Entity, NewsSource
 from analyzer.narrative_metrics import pettitt_test, residual_series
 
@@ -87,6 +88,9 @@ class EntityDriftResponse(BaseModel):
     entity_id: int
     entity_name: str
     dimension: str
+    # Scored weeks in the corpus for this entity. Pettitt needs 8; the frontend
+    # uses this to say "not enough history yet" instead of implying stability.
+    weeks_observed: int = 0
     global_shift: Optional[DriftPoint]
     source_shifts: List[DriftPoint]  # only significant (p < 0.05), sorted by p_value asc
 
@@ -106,6 +110,14 @@ async def get_entity_drift(
     canonical_id = entity.canonical_id or entity.id
 
     weeks, global_values = _global_series(session, canonical_id, dimension)
+    # Trim the junk-dated prefix (bogus pre-corpus publish dates put stray
+    # phantom weeks in the MV): without this, weeks_observed overcounts and
+    # Pettitt runs over a series that starts with isolated junk points.
+    anchor = first_solid_week(session, canonical_id)
+    if anchor is not None:
+        keep = [i for i, w in enumerate(weeks) if w >= anchor]
+        weeks = [weeks[i] for i in keep]
+        global_values = [global_values[i] for i in keep]
 
     global_shift = None
     if len(global_values) >= 8:
@@ -155,6 +167,7 @@ async def get_entity_drift(
         entity_id=canonical_id,
         entity_name=entity.name,
         dimension=dimension,
+        weeks_observed=len(global_values),
         global_shift=global_shift,
         source_shifts=source_shifts,
     )

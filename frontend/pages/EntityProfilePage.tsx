@@ -10,6 +10,7 @@ import {
   Paper,
   Autocomplete,
   TextField,
+  Button,
   Chip,
   CircularProgress,
 } from '@mui/material';
@@ -22,6 +23,7 @@ import EntitySourceScatterPanel from '../components/EntitySourceScatterPanel';
 import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
+import ReceiptsDrawer, { ReceiptsFilter } from '../components/ReceiptsDrawer';
 import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
 import { NewsSource, SentimentDistributions, TrendPoint } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
@@ -43,6 +45,7 @@ const EntityProfilePage: React.FC = () => {
   // one source against the always-global baseline.
   const [distCountry, setDistCountry] = useState<string | null>(null);
   const [distSource, setDistSource] = useState<NewsSource | null>(null);
+  const [receiptsFor, setReceiptsFor] = useState<ReceiptsFilter | null>(null);
 
   useEffect(() => {
     if (!entity) return;
@@ -184,7 +187,30 @@ const EntityProfilePage: React.FC = () => {
 
           <Grid item xs={12} md={5}>
             <Card>
-              <CardHeader title="Distribution" subheader="Global, national, and source-level spread" />
+              <CardHeader
+                title="Distribution"
+                subheader="Global, national, and source-level spread"
+                action={
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      // The narrowest active comparison scopes the receipts:
+                      // a picked source wins over a picked country.
+                      setReceiptsFor({
+                        entityId: entity.id,
+                        entityName: entity.name,
+                        ...(distSource
+                          ? { sourceId: distSource.id, sourceName: distSource.name }
+                          : distCountry
+                            ? { country: distCountry }
+                            : {}),
+                      })
+                    }
+                  >
+                    Receipts
+                  </Button>
+                }
+              />
               <CardContent>
                 <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
                   <Grid item xs={12} sm={6}>
@@ -281,6 +307,8 @@ const EntityProfilePage: React.FC = () => {
           &larr; Back to all entities
         </RouterLink>
       </Box>
+
+      <ReceiptsDrawer filter={receiptsFor} onClose={() => setReceiptsFor(null)} />
     </Box>
   );
 };
