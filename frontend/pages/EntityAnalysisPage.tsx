@@ -34,6 +34,8 @@ const EntityAnalysisPage: React.FC = () => {
   const navigate = useNavigate();
   const [selectedArchetypes, setSelectedArchetypes] = useState<ArchetypeLabel[]>([]);
   const [highlightedEntities, setHighlightedEntities] = useState<EntitySentimentSummary[]>([]);
+  // Browse-list type filter; null = all types. 'concept' renders as "Symbols".
+  const [browseType, setBrowseType] = useState<string | null>(null);
 
   // Two flavors of the same comparison, as tabs: a country's sphere against the
   // global baseline, or a single newspaper against its country (or the globe).
@@ -317,34 +319,77 @@ const EntityAnalysisPage: React.FC = () => {
           </Card>
 
           <Card sx={{ mt: 3 }}>
-            <CardHeader title="Browse all entities" subheader={`${entities.length} tracked, sorted by mention count`} />
+            <CardHeader
+              title="Browse all entities"
+              subheader={`${entities.length} tracked, sorted by mention count · mentions and papers covering at right`}
+            />
+            <CardContent sx={{ pt: 0, pb: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {[
+                  { value: null, label: 'All' },
+                  { value: 'country', label: 'Countries' },
+                  { value: 'person', label: 'People' },
+                  { value: 'organization', label: 'Organizations' },
+                  { value: 'business', label: 'Businesses' },
+                  { value: 'event', label: 'Events' },
+                  { value: 'concept', label: 'Symbols' },
+                ].map((t) => (
+                  <Chip
+                    key={t.label}
+                    label={t.label}
+                    size="small"
+                    onClick={() => setBrowseType(t.value)}
+                    variant={browseType === t.value ? 'filled' : 'outlined'}
+                    sx={{
+                      bgcolor: browseType === t.value ? tokens.accent : 'transparent',
+                      color: browseType === t.value ? '#fff' : tokens.inkMuted,
+                      borderColor: tokens.border,
+                    }}
+                  />
+                ))}
+              </Box>
+            </CardContent>
             <CardContent sx={{ p: 0, '&:last-child': { pb: 0 }, maxHeight: 480, overflowY: 'auto' }}>
-              {entities.slice(0, 60).map((entity, i) => (
-                <Box
-                  key={entity.id}
-                  onClick={() => navigate(`/portrayals/${entity.id}`)}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    px: 2,
-                    py: 1,
-                    cursor: 'pointer',
-                    borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}`,
-                    '&:hover': { bgcolor: tokens.surfaceSunken },
-                  }}
-                >
-                  <Typography variant="body2" sx={{ flex: 1 }}>
-                    {entity.name}
+              {(browseType ? entities.filter((e) => e.type === browseType) : entities)
+                .slice(0, 60)
+                .map((entity, i) => (
+                  <Box
+                    key={entity.id}
+                    onClick={() => navigate(`/portrayals/${entity.id}`)}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
+                      px: 2,
+                      py: 1,
+                      cursor: 'pointer',
+                      borderTop: i === 0 ? 'none' : `1px solid ${tokens.border}`,
+                      '&:hover': { bgcolor: tokens.surfaceSunken },
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ flex: 1 }}>
+                      {entity.name}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
+                      {entity.type === 'concept' ? 'symbol' : entity.type}
+                    </Typography>
+                    {entity.source_count != null && (
+                      <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 68, textAlign: 'right' }}>
+                        {entity.source_count} papers
+                      </Typography>
+                    )}
+                    <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 60, textAlign: 'right' }}>
+                      {(entity.mention_count || 0).toLocaleString()}
+                    </Typography>
+                  </Box>
+                ))}
+              {browseType === 'concept' &&
+                entities.filter((e) => e.type === 'concept').length === 0 && (
+                  <Typography variant="body2" sx={{ color: tokens.inkMuted, px: 2, py: 3 }}>
+                    No symbols in the top tracked entities yet — symbol tracking began
+                    Sep 6, 2026. The full watchlist lives on the Symbols tab.
                   </Typography>
-                  <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
-                    {entity.type}
-                  </Typography>
-                  <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 60, textAlign: 'right' }}>
-                    {(entity.mention_count || 0).toLocaleString()}
-                  </Typography>
-                </Box>
-              ))}
+                )}
             </CardContent>
           </Card>
         </Grid>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Skeleton, Typography } from '@mui/material';
 import { statsApi } from '../services/api';
 import { tokens, archetypeColor, fontSans } from '../theme';
@@ -8,6 +8,12 @@ import { EntitySentimentSummary } from '../types';
 // placed by the world press's average reading. Illustration, not instrument —
 // no zoom, no picker; the real chart lives on the Entities page. At hero scale
 // (limit≈100, labelTop>0) it plays the role of the front page's photograph.
+//
+// Default view centers the crossing on the PRESS AVERAGE, not on zero: the
+// press's mean reading is well off neutral (news skews negative), so a
+// zero-centered cross casts most of the world as villains. "Relative" asks the
+// honest question — who does the press treat better or worse than it treats
+// everyone — while the Raw toggle keeps the absolute scale inspectable.
 
 interface QuadrantMiniatureProps {
   limit?: number;
@@ -45,6 +51,7 @@ const QuadrantMiniature: React.FC<QuadrantMiniatureProps> = ({
   maxWidth = 400,
 }) => {
   const [data, setData] = useState<EntitySentimentSummary[] | null>(null);
+  const [mode, setMode] = useState<'relative' | 'raw'>('relative');
 
   useEffect(() => {
     let cancelled = false;
@@ -62,9 +69,33 @@ const QuadrantMiniature: React.FC<QuadrantMiniatureProps> = ({
     };
   }, [limit]);
 
+  // Mention-weighted press average — where the crossing sits in relative mode.
+  const avg = useMemo(() => {
+    if (!data?.length) return { power: 0, moral: 0 };
+    let n = 0;
+    let p = 0;
+    let m = 0;
+    for (const e of data) {
+      const w = e.mention_count ?? 1;
+      n += w;
+      p += e.power_score * w;
+      m += e.moral_score * w;
+    }
+    return { power: p / n, moral: m / n };
+  }, [data]);
+
   if (data === null) {
     return <Skeleton variant="rounded" sx={{ width: '100%', maxWidth }} height={300} />;
   }
+
+  const relative = mode === 'relative';
+  const cross = relative ? { x: sx(avg.power), y: sy(avg.moral) } : { x: CX, y: CY };
+  // Quadrant membership (and so dot color) is judged against the crossing:
+  // relative mode asks "better or worse than the press's average reading".
+  const dotColor = (e: EntitySentimentSummary) =>
+    relative
+      ? archetypeColor(e.power_score - avg.power, e.moral_score - avg.moral)
+      : archetypeColor(e.power_score, e.moral_score);
 
   // Greedy label placement, biggest entities first: skip any label that would
   // sit on top of one already placed. Deterministic and collision-free enough
@@ -90,9 +121,28 @@ const QuadrantMiniature: React.FC<QuadrantMiniatureProps> = ({
       >
         <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={10} fill={tokens.surface} stroke={tokens.border} />
 
-        {/* The quadrants only mean something relative to neutral — the cross is the chart. */}
-        <line x1={LEFT} x2={RIGHT} y1={CY} y2={CY} stroke={tokens.inkMuted} strokeOpacity={0.45} />
-        <line x1={CX} x2={CX} y1={TOP} y2={BOTTOM} stroke={tokens.inkMuted} strokeOpacity={0.45} />
+        {/* The quadrants only mean something relative to a reference — the
+            cross IS the chart, and where it sits is the raw/relative choice. */}
+        <line x1={LEFT} x2={RIGHT} y1={cross.y} y2={cross.y} stroke={tokens.inkMuted} strokeOpacity={0.45} />
+        <line x1={cross.x} x2={cross.x} y1={TOP} y2={BOTTOM} stroke={tokens.inkMuted} strokeOpacity={0.45} />
+        {relative && (
+          <text
+            x={cross.x + 5}
+            y={cross.y - 5}
+            style={{
+              fontFamily: fontSans,
+              fontSize: 8.5,
+              letterSpacing: '0.06em',
+              fill: tokens.inkMuted,
+              paintOrder: 'stroke',
+              stroke: tokens.surface,
+              strokeWidth: 3,
+              strokeLinejoin: 'round',
+            } as React.CSSProperties}
+          >
+            PRESS AVERAGE
+          </text>
+        )}
 
         {/* Sorted by mentions descending, so big dots draw first and small ones stay on top. */}
         {data.map((e) => (
@@ -101,9 +151,9 @@ const QuadrantMiniature: React.FC<QuadrantMiniatureProps> = ({
             cx={sx(e.power_score)}
             cy={sy(e.moral_score)}
             r={Math.min(7, 2.2 + Math.sqrt(e.mention_count ?? 1) * 0.055)}
-            fill={archetypeColor(e.power_score, e.moral_score)}
+            fill={dotColor(e)}
             fillOpacity={0.55}
-            stroke={archetypeColor(e.power_score, e.moral_score)}
+            stroke={dotColor(e)}
             strokeOpacity={0.9}
             strokeWidth={0.75}
           >
@@ -135,19 +185,48 @@ const QuadrantMiniature: React.FC<QuadrantMiniatureProps> = ({
 
         <text x={CX} y={15} textAnchor="middle" style={axisWord}>MORAL</text>
         <text x={CX} y={H - 9} textAnchor="middle" style={axisWord}>IMMORAL</text>
-        <text x={16} y={CY - 6} textAnchor="start" style={axisWord}>WEAK</text>
-        <text x={W - 16} y={CY - 6} textAnchor="end" style={axisWord}>POWERFUL</text>
+        <text x={16} y={cross.y - 6} textAnchor="start" style={axisWord}>WEAK</text>
+        <text x={W - 16} y={cross.y - 6} textAnchor="end" style={axisWord}>POWERFUL</text>
 
         <text x={16} y={42} textAnchor="start" style={{ ...cornerWord, fill: tokens.victim }}>VICTIM</text>
         <text x={W - 16} y={42} textAnchor="end" style={{ ...cornerWord, fill: tokens.hero }}>HERO</text>
         <text x={16} y={BOTTOM - 12} textAnchor="start" style={{ ...cornerWord, fill: wretchText }}>WRETCH</text>
         <text x={W - 16} y={BOTTOM - 12} textAnchor="end" style={{ ...cornerWord, fill: tokens.villain }}>VILLAIN</text>
       </svg>
-      <Typography variant="caption" sx={{ display: 'block', mt: 1, color: tokens.inkMuted, maxWidth: '52ch' }}>
-        {data.length > 0
-          ? `The ${data.length} most-mentioned entities, placed by the world press's average reading of each. Bigger dots get more coverage.`
-          : 'How the two axes lay out the four castings.'}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+        <Typography variant="caption" sx={{ color: tokens.inkMuted, maxWidth: '46ch' }}>
+          {data.length > 0
+            ? relative
+              ? `The ${data.length} most-mentioned entities, colored by their casting relative to the press's average reading. Bigger dots get more coverage.`
+              : `The ${data.length} most-mentioned entities on the absolute scale — the press average sits at power ${avg.power.toFixed(2)}, moral ${avg.moral.toFixed(2)}, not at zero.`
+            : 'How the two axes lay out the four castings.'}
+        </Typography>
+        {data.length > 0 && (
+          <Box component="span" sx={{ ml: 'auto', whiteSpace: 'nowrap' }}>
+            {(['relative', 'raw'] as const).map((m) => (
+              <Box
+                key={m}
+                component="button"
+                onClick={() => setMode(m)}
+                sx={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  p: 0,
+                  ml: 1.25,
+                  fontFamily: fontSans,
+                  fontSize: '0.72rem',
+                  color: mode === m ? tokens.ink : tokens.inkMuted,
+                  fontWeight: mode === m ? 600 : 400,
+                  borderBottom: `1px solid ${mode === m ? tokens.ink : 'transparent'}`,
+                }}
+              >
+                {m === 'relative' ? 'Relative' : 'Raw'}
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
       {credit && (
         <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: tokens.inkMuted }}>
           {credit}

@@ -6,7 +6,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Label,
   ReferenceLine,
   Customized
 } from 'recharts';
@@ -173,6 +172,12 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
     onEntityClick?.(p);
   };
 
+  // Thin readings recede: under five scored mentions a mean is an anecdote,
+  // so the dot renders at half its layer's opacity (it stays clickable — the
+  // receipts are how a reader checks an anecdote).
+  const thinFactor = (p: SentimentDataPoint) =>
+    p.mention_count != null && p.mention_count < 5 ? 0.5 : 1;
+
   const raiseHandlers = (entityName: string) => ({
     onMouseEnter: () => setHoverEntity(entityName),
     // Functional clear: with overlapping dots, enter-B can fire before
@@ -278,6 +283,32 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             {k.name}
           </text>
         ))}
+      </g>
+    );
+  };
+
+  // Axis words on the central cross (the QuadrantMiniature idiom): the scales
+  // only mean something relative to the crossing, so the words live there
+  // instead of on detached edge captions.
+  const renderAxisWords = (props: any) => {
+    const xScale = (Object.values(props.xAxisMap ?? {})[0] as any)?.scale;
+    const yScale = (Object.values(props.yAxisMap ?? {})[0] as any)?.scale;
+    if (!xScale || !yScale) return <g />;
+    const word = {
+      fontSize: 10,
+      letterSpacing: '0.08em',
+      fill: tokens.inkMuted,
+      paintOrder: 'stroke',
+      stroke: tokens.surface,
+      strokeWidth: 3,
+      strokeLinejoin: 'round',
+    } as React.CSSProperties;
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        <text x={xScale(-2) + 4} y={yScale(0) - 5} textAnchor="start" style={word}>WEAK</text>
+        <text x={xScale(2) - 4} y={yScale(0) - 5} textAnchor="end" style={word}>POWERFUL</text>
+        <text x={xScale(0) + 5} y={yScale(2) + 10} textAnchor="start" style={word}>MORAL</text>
+        <text x={xScale(0) + 5} y={yScale(-2) - 4} textAnchor="start" style={word}>IMMORAL</text>
       </g>
     );
   };
@@ -408,6 +439,9 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
           {/* The quadrants only mean something relative to neutral - draw the cross. */}
           <ReferenceLine x={0} stroke={tokens.inkMuted} />
           <ReferenceLine y={0} stroke={tokens.inkMuted} />
+          {/* Numeric ticks stay on the edges for scale-reading; the axis WORDS
+              live on the central cross (renderAxisWords) where they mean
+              something. */}
           <XAxis
             type="number"
             dataKey="power_score"
@@ -415,9 +449,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             tickCount={9}
             name="Power"
             tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
-          >
-            <Label value="Power Dimension" position="bottom" offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
-          </XAxis>
+          />
           <YAxis
             type="number"
             dataKey="moral_score"
@@ -425,9 +457,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             tickCount={9}
             name="Morality"
             tick={{ fill: tokens.inkMuted, fontSize: 11, fontFamily: 'monospace' }}
-          >
-            <Label value="Moral Dimension" position="left" angle={-90} offset={10} style={{ fill: tokens.inkMuted, fontSize: 12 }} />
-          </YAxis>
+          />
 
           {/* Render background quadrant labels */}
           {quadrantLabels.map((label, index) => (
@@ -445,6 +475,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
             />
           ))}
 
+          <Customized component={renderAxisWords} />
           {hasOverlay && <Customized component={renderPairLinks} />}
 
           {/* Baseline layer: archetype-colored when it is the subject, receding
@@ -472,7 +503,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                     cy={cy}
                     r={r}
                     fill={hasOverlay ? tokens.inkMuted : archetypeColor(payload.power_score, payload.moral_score)}
-                    fillOpacity={hasOverlay ? 0.55 : 0.85}
+                    fillOpacity={(hasOverlay ? 0.55 : 0.85) * thinFactor(payload)}
                     stroke={tokens.surface}
                     strokeWidth={1.5}
                   />
@@ -504,7 +535,7 @@ const SentimentChart: React.FC<SentimentChartProps> = ({
                       cy={cy}
                       r={payload?.size ?? 9}
                       fill={overlayFill(payload)}
-                      fillOpacity={0.9}
+                      fillOpacity={0.9 * thinFactor(payload)}
                       stroke={tokens.surface}
                       strokeWidth={1.5}
                     />

@@ -126,6 +126,14 @@ const WelcomePage: React.FC = () => {
   const navigate = useNavigate();
   const { entities, sources, availableCountries, meta } = useData();
 
+  // The counted claim: distinct source countries, NOT availableCountries —
+  // static mode clamps the latter to the snapshotted-country pickers (10),
+  // while the corpus itself spans every source country.
+  const sourceCountryCount = useMemo(
+    () => new Set(sources.map((s) => s.country).filter(Boolean)).size,
+    [sources]
+  );
+
   // Autocomplete groups need their options pre-sorted by group.
   const newspaperOptions = useMemo(
     () =>
@@ -196,10 +204,14 @@ const WelcomePage: React.FC = () => {
                 },
               } as any}
             >
-              We read the world's newspapers by machine, measure how each one portrays the people,
-              countries, and organizations in the news, and set every outlet against the global
-              average. A news bubble is hard to see from inside it; comparing your sources against
-              the world's press is a way to find its walls.
+              We read{' '}
+              <Link component={RouterLink} to="/coverage/newspapers" sx={{ fontWeight: 600 }}>
+                {sources.length > 0 ? `${sources.length} newspapers across ${sourceCountryCount} countries` : 'newspapers across the world'}
+              </Link>{' '}
+              by machine, measure how each one portrays the people, countries, and organizations
+              in the news, and set every outlet against the global average. A news bubble is hard
+              to see from inside it; comparing your sources against the rest is a way to find its
+              walls.
             </Typography>
             <Typography sx={{ color: tokens.inkMuted, maxWidth: '68ch', textWrap: 'pretty' } as any}>
               Ideology, measured this way, is a warping of sentiment: a political slant shows up as
@@ -214,12 +226,12 @@ const WelcomePage: React.FC = () => {
               maxWidth={520}
               credit={
                 <>
-                  <Mono>{sources.length}</Mono> newspapers · <Mono>{availableCountries.length}</Mono>{' '}
-                  countries
+                  <Mono>{sources.length}</Mono> newspapers · <Mono>{sourceCountryCount}</Mono>{' '}
+                  countries · scored coverage since <Mono>Jul 13, 2026</Mono>
                   {latestArticle && (
                     <>
                       {' '}
-                      · latest articles <Mono>{latestArticle}</Mono>
+                      · latest <Mono>{latestArticle}</Mono>
                     </>
                   )}
                 </>

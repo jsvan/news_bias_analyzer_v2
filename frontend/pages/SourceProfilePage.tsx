@@ -198,23 +198,31 @@ const SourceProfilePage: React.FC = () => {
     // entity's baseline layer (cheap since the layers param skips the global
     // KDE). null = the sphere genuinely has too little on it — the grid then
     // shows the paper's point without an anchor, which is itself the finding.
+    // A gap-filled baseline below this many mentions is an anecdote, not a
+    // reading — one or two ±2 mentions used to gap-fill (2, −2) artifact
+    // anchors onto the drift scatter. Matches the trending endpoints' floor.
+    const MIN_FILL_MENTIONS = 3;
     const fillOne = async (e: EntitySentimentSummary): Promise<EntitySentimentSummary | null> => {
       if (e.id == null) return null;
       try {
         if (compareMode === 'global') {
           const hist = await statsApi.getHistoricalSentiment(e.id, { days: DAYS });
           const s = hist?.summary;
-          if (s && s.total_mentions > 0) {
+          if (s && s.total_mentions >= MIN_FILL_MENTIONS) {
             return { ...e, power_score: s.avg_power_score, moral_score: s.avg_moral_score, mention_count: s.total_mentions };
           }
         } else if (compareMode === 'country' && compareCountry) {
           const res = await entityApi.getEntityDistribution(e.id, compareCountry, undefined, undefined, 'national');
           const n = res?.distributions?.national;
-          if (n) return { ...e, power_score: n.power.mean, moral_score: n.moral.mean, mention_count: n.power.count };
+          if (n && (n.power.count ?? 0) >= MIN_FILL_MENTIONS) {
+            return { ...e, power_score: n.power.mean, moral_score: n.moral.mean, mention_count: n.power.count };
+          }
         } else if (compareMode === 'source' && compareSource) {
           const res = await entityApi.getEntityDistribution(e.id, undefined, compareSource.id, undefined, 'source');
           const s = res?.distributions?.source;
-          if (s) return { ...e, power_score: s.power.mean, moral_score: s.moral.mean, mention_count: s.power.count };
+          if (s && (s.power.count ?? 0) >= MIN_FILL_MENTIONS) {
+            return { ...e, power_score: s.power.mean, moral_score: s.moral.mean, mention_count: s.power.count };
+          }
         }
       } catch {
         // no baseline reading for this entity

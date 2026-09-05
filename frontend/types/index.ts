@@ -4,6 +4,9 @@ export interface Entity {
   name: string;
   type: EntityType;
   mention_count?: number;
+  // Distinct papers with scored mentions (whole alias group) — the browse
+  // list's "papers covering" column. Absent in pre-2026-09 snapshots.
+  source_count?: number;
   // Variant names merged into this canonical entity (Entity.canonical_id on the
   // server) - present only for merged groups; search matches against these too.
   aliases?: string[];

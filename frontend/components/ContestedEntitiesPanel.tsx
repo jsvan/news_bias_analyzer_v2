@@ -6,10 +6,54 @@ import { tokens, monoNumber } from '../theme';
 import { useData } from '../context/DataContext';
 import { narrativeApi } from '../services/api';
 
+interface ContestedSphere {
+  country: string;
+  n: number;
+  hist: number[];
+}
+
 interface ContestedEntity {
   entity_name: string;
   divergence: number;
+  // The two countries whose histograms produced the (max-pairwise) divergence;
+  // sphere_a is the friendlier reading. Absent in pre-2026-09 snapshots.
+  sphere_a?: ContestedSphere | null;
+  sphere_b?: ContestedSphere | null;
 }
+
+// Paired sentiment histograms as a sparkline: sphere_a in hero green,
+// sphere_b in villain red, overlaid bar-for-bar across the 8 bins (-2 left,
+// +2 right). Where the colors separate is where the two presses live in
+// different stories.
+const PairedHistogram: React.FC<{ a: ContestedSphere; b: ContestedSphere }> = ({ a, b }) => {
+  const W = 84;
+  const H = 24;
+  const bins = Math.max(a.hist.length, b.hist.length);
+  const bw = W / bins;
+  const peak = Math.max(...a.hist, ...b.hist, 0.01);
+  const bar = (hist: number[], color: string) =>
+    hist.map((v, i) => {
+      const h = (v / peak) * (H - 2);
+      return (
+        <rect
+          key={i}
+          x={i * bw + 0.5}
+          y={H - h}
+          width={bw - 1}
+          height={h}
+          fill={color}
+          fillOpacity={0.55}
+        />
+      );
+    });
+  return (
+    <svg width={W} height={H} style={{ flexShrink: 0 }} aria-hidden>
+      <line x1={W / 2} x2={W / 2} y1={0} y2={H} stroke={tokens.border} />
+      {bar(a.hist, tokens.hero)}
+      {bar(b.hist, tokens.villain)}
+    </svg>
+  );
+};
 
 // "The front line": entities with the sharpest cross-country sentiment disagreement
 // (server/routers/narrative_endpoints.py::get_contested_ranking, backed by
@@ -64,6 +108,8 @@ const ContestedEntitiesPanel: React.FC = () => {
         )}
         {ranked?.map((entry, i) => {
           const match = entities.find((e) => e.name === entry.entity_name);
+          const a = entry.sphere_a;
+          const b = entry.sphere_b;
           return (
             <Box
               key={entry.entity_name}
@@ -82,9 +128,23 @@ const ContestedEntitiesPanel: React.FC = () => {
               <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, minWidth: 20 }}>
                 {i + 1}
               </Typography>
-              <Typography variant="body2" sx={{ flex: 1, fontWeight: 500 }}>
-                {entry.entity_name}
-              </Typography>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {entry.entity_name}
+                </Typography>
+                {a && b && (
+                  <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
+                    <Box component="span" sx={{ color: tokens.hero, fontWeight: 600 }}>
+                      {a.country}
+                    </Box>
+                    {' vs '}
+                    <Box component="span" sx={{ color: tokens.villain, fontWeight: 600 }}>
+                      {b.country}
+                    </Box>
+                  </Typography>
+                )}
+              </Box>
+              {a && b && <PairedHistogram a={a} b={b} />}
               <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted }}>
                 JSD {entry.divergence.toFixed(2)}
               </Typography>

@@ -366,12 +366,30 @@ def get_entities(
             bucket = aliases_by_canonical.setdefault(canonical_id, set())
             bucket.add(alias_name)
 
+    # Distinct papers covering each canonical entity (whole alias group) —
+    # the browse list's "papers covering" column.
+    source_counts = {}
+    if entities:
+        resolved = func.coalesce(Entity.canonical_id, Entity.id)
+        count_rows = db.query(
+            resolved.label("resolved_id"),
+            func.count(func.distinct(NewsArticle.source_id)).label("papers"),
+        ).join(
+            EntityMention, EntityMention.entity_id == Entity.id
+        ).join(
+            NewsArticle, NewsArticle.id == EntityMention.article_id
+        ).filter(
+            resolved.in_([e.id for e in entities])
+        ).group_by(resolved).all()
+        source_counts = {r.resolved_id: r.papers for r in count_rows}
+
     return [
         {
             "id": entity.id,
             "name": entity.name,
             "type": entity.entity_type,
             "mention_count": entity.mention_count or 0,
+            "source_count": source_counts.get(entity.id, 0),
             **({"aliases": sorted(aliases_by_canonical[entity.id])}
                if entity.id in aliases_by_canonical else {})
         }

@@ -26,6 +26,7 @@ from server.deps import first_solid_week, resolve_entity_group
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
 from analyzer.narrative_metrics import (
     contested_ranking, archetype, trajectory, salience_asymmetry,
+    sentiment_histogram, js_divergence,
 )
 from analyzer.entity_resolution import SYMBOL_WATCHLIST
 from clustering.source_similarity import (
@@ -94,9 +95,22 @@ def get_sphere_scores(session: Session, days: int, dimension: str,
     return sphere_scores
 
 
+class ContestedSphere(BaseModel):
+    country: str
+    n: int
+    # 8-bin probability histogram over the clipped -2..2 score range —
+    # the paired sparkline the front line draws per row.
+    hist: List[float]
+
+
 class ContestedEntity(BaseModel):
     entity_name: str
     divergence: float
+    # The two spheres whose histograms produced the divergence (it's a MAX
+    # pairwise JSD — naming the pair is the row's whole story). sphere_a is
+    # the friendlier reading (higher mean score).
+    sphere_a: Optional[ContestedSphere] = None
+    sphere_b: Optional[ContestedSphere] = None
 
 
 class ContestedRankingResponse(BaseModel):
@@ -119,12 +133,41 @@ async def get_contested_ranking(
     """
     sphere_scores = get_sphere_scores(session, days, dimension)
     ranked = contested_ranking(sphere_scores, min_mentions=MIN_MENTIONS_PER_SPHERE)
-    return ContestedRankingResponse(
-        days=days,
-        dimension=dimension,
-        entities=[ContestedEntity(entity_name=name, divergence=round(div, 4))
-                  for name, div in ranked[:limit]],
-    )
+
+    def worst_pair(name: str):
+        """Re-find the argmax country pair behind the kernel's max-JSD number.
+
+        A bare divergence tells the reader nothing about WHO disagrees — the
+        row wants "USA vs Russia" and both histograms. Same bins and floor as
+        the kernel, so the pair always reproduces the ranked divergence.
+        """
+        spheres = {c: s for c, s in sphere_scores.get(name, {}).items()
+                   if len(s) >= MIN_MENTIONS_PER_SPHERE}
+        if len(spheres) < 2:
+            return None, None
+        hists = {c: sentiment_histogram(s) for c, s in spheres.items()}
+        countries = list(hists)
+        best = None
+        for i, ca in enumerate(countries):
+            for cb in countries[i + 1:]:
+                d = js_divergence(hists[ca], hists[cb])
+                if best is None or d > best[0]:
+                    best = (d, ca, cb)
+        _, ca, cb = best
+        # sphere_a = the friendlier reading, so rows read "a likes it, b doesn't".
+        if sum(spheres[ca]) / len(spheres[ca]) < sum(spheres[cb]) / len(spheres[cb]):
+            ca, cb = cb, ca
+        mk = lambda c: ContestedSphere(country=c, n=len(spheres[c]),
+                                       hist=[round(float(h), 4) for h in hists[c]])
+        return mk(ca), mk(cb)
+
+    entities = []
+    for name, div in ranked[:limit]:
+        sphere_a, sphere_b = worst_pair(name)
+        entities.append(ContestedEntity(entity_name=name, divergence=round(div, 4),
+                                        sphere_a=sphere_a, sphere_b=sphere_b))
+    return ContestedRankingResponse(days=days, dimension=dimension,
+                                    entities=entities)
 
 
 class ArchetypePoint(BaseModel):
