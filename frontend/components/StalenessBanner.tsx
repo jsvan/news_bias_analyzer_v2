@@ -32,6 +32,22 @@ const StalenessBanner: React.FC = () => {
     );
   }
 
+  // Scraping and analysis stall independently: during the Aug 27–Sep 2 2026
+  // OpenAI batch outage articles kept arriving (so the check above stayed
+  // quiet) while every sentiment reading flatlined for six days.
+  const analysisDate = meta.most_recent_analysis_date;
+  if (analysisDate) {
+    const analysisHoursOld = (Date.now() - new Date(analysisDate).getTime()) / (1000 * 60 * 60);
+    if (analysisHoursOld > STALE_THRESHOLD_HOURS) {
+      return (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Articles are still being collected, but sentiment analysis has been stalled
+          since {formatAsOf(analysisDate)} — sentiment figures after that date are incomplete.
+        </Alert>
+      );
+    }
+  }
+
   return (
     <Typography variant="caption" sx={{ color: tokens.inkMuted, display: 'block', mb: 2 }}>
       Data current as of {asOf}

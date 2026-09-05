@@ -7,10 +7,14 @@ API shapes, with nothing duplicated.
 
 Output layout (under --out, default frontend/public/snapshots/):
     meta.json                    {format, generated_at, most_recent_article_date,
-                                  entity_count, hist_days, countries} — generated_at is
-                                  snapshot build time; most_recent_article_date is the
-                                  honest freshness signal (the two can diverge a lot if
-                                  scraping stalls)
+                                  most_recent_analysis_date, entity_count, hist_days,
+                                  countries} — generated_at is snapshot build time;
+                                  most_recent_article_date is the honest freshness signal
+                                  (the two can diverge a lot if scraping stalls);
+                                  most_recent_analysis_date is the newest COMPLETED
+                                  article (scraping can be fine while analysis stalls —
+                                  the Aug 27–Sep 2 2026 OpenAI outage was invisible to
+                                  the article date)
     entities.json                top-N entities (dashboard list + client-side search)
     sources.json                 all sources
     entity/{id}.json             format 2: {format: 2, entity, distribution, base_days,
@@ -300,6 +304,13 @@ def export_all(out_dir: str, n_entities: int, fetchers: dict) -> dict:
         meta["most_recent_article_date"] = fetchers["most_recent_article_date"]()
     except Exception as ex:
         print(f"  skip most_recent_article_date: {ex}")
+    try:
+        # Scraping and analysis fail independently: articles kept arriving all
+        # through the Aug 27-Sep 2 2026 OpenAI batch outage while sentiment data
+        # flatlined. This is the signal the staleness banner needs for that case.
+        meta["most_recent_analysis_date"] = fetchers["most_recent_analysis_date"]()
+    except Exception as ex:
+        print(f"  skip most_recent_analysis_date: {ex}")
     write_json(out_dir, "meta.json", meta)
     return counts
 
@@ -330,6 +341,11 @@ def live_fetchers(session):
 
     def most_recent_article_date():
         ts = session.query(func.max(NewsArticle.scraped_at)).scalar()
+        return ts.isoformat() if ts else None
+
+    def most_recent_analysis_date():
+        ts = (session.query(func.max(NewsArticle.scraped_at))
+              .filter(NewsArticle.analysis_status == 'completed').scalar())
         return ts.isoformat() if ts else None
 
     return {
@@ -396,6 +412,7 @@ def live_fetchers(session):
             get_dividing_lines(weeks=4, dimension="moral", limit=20,
                                session=session)),
         "most_recent_article_date": most_recent_article_date,
+        "most_recent_analysis_date": most_recent_analysis_date,
     }
 
 
@@ -516,6 +533,7 @@ def self_test():
                                      "moral_score": -0.5, "mention_count": 30}]},
             "previous": {"start": None, "end": None, "sources": []}},
         "most_recent_article_date": lambda: "2026-01-01T00:00:00+00:00",
+        "most_recent_analysis_date": lambda: "2025-12-30T00:00:00+00:00",
     }
 
     with tempfile.TemporaryDirectory() as out:
@@ -598,6 +616,7 @@ def self_test():
         assert meta["format"] == 2
         assert meta["trending_sources"] == [5]
         assert meta["most_recent_article_date"] == "2026-01-01T00:00:00+00:00"
+        assert meta["most_recent_analysis_date"] == "2025-12-30T00:00:00+00:00"
 
     print("export_snapshots self-test OK")
 

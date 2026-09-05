@@ -401,10 +401,23 @@ def check_batch_status(client: OpenAI, batch_id: str) -> Dict[str, Any]:
             "output_file_id": batch.output_file_id,
             "error_file_id": batch.error_file_id,
             "request_counts": batch.request_counts,
+            "errors": getattr(batch, "errors", None),
         }
     except Exception as e:
         logger.error(f"Error checking batch status: {e}")
         return None
+
+def summarize_batch_errors(errors) -> str:
+    """Flatten a batch's error list into one line for the openai_batches.error
+    column. Storing only the word 'failed' turned the Aug 27-Sep 2 2026 OpenAI
+    outage into an API archaeology session - the real message was only on the
+    remote batch object."""
+    try:
+        data = getattr(errors, "data", None) or []
+        msgs = [f"{getattr(e, 'code', '?')}: {getattr(e, 'message', '')}" for e in data]
+        return "; ".join(m for m in msgs if m)[:2000]
+    except Exception:
+        return ""
 
 def download_batch_output(client: OpenAI, file_id: str) -> str:
     """Download batch output file and return content."""
@@ -657,14 +670,24 @@ def _requeue_or_retire(article: NewsArticle) -> bool:
     article.batch_id = None
     return True
 
-def reset_failed_articles(session: Session, batch_id: str):
+def reset_failed_articles(session: Session, batch_id: str, refund_attempt: bool = False):
     """Requeue articles that a specific batch left unfinished (in_progress means
-    the batch never returned a result for them, failed means the result was bad)."""
+    the batch never returned a result for them, failed means the result was bad).
+
+    refund_attempt: the batch itself never ran (validation failure, vendor
+    outage), so the submission cost nothing - give the attempt back. Counting
+    those attempts let the Aug 27-Sep 2 2026 OpenAI outage retire 16.8k
+    articles through MAX_ANALYSIS_ATTEMPTS in hours."""
     try:
         articles = session.query(NewsArticle).filter(
             NewsArticle.batch_id == batch_id,
             NewsArticle.analysis_status.in_(["in_progress", "failed"])
         ).all()
+
+        if refund_attempt:
+            for a in articles:
+                if a.analysis_status == "in_progress" and (a.analysis_attempts or 0) > 0:
+                    a.analysis_attempts -= 1
 
         requeued = sum(1 for a in articles if _requeue_or_retire(a))
         retired = len(articles) - requeued
@@ -789,7 +812,9 @@ def create_new_batch(session: Session) -> bool:
         _register_creation_failure(error_text or "batch creation failed")
         return False
 
-    _reset_creation_backoff()
+    # Backoff clears on successful INGESTION (ingest_batch_output), not here: a
+    # submission can succeed and the batch still fail to run (Aug 27-Sep 2 2026
+    # outage), and clearing on submission would defeat the escalation.
 
     # Update article status (also increments analysis_attempts)
     update_articles_status(session, articles, "in_progress", batch_id)
@@ -861,6 +886,9 @@ def ingest_batch_output(session: Session, client: OpenAI, row: OpenAIBatch) -> b
     row.collected = True
     session.commit()
 
+    # A batch made it through OpenAI end-to-end - the pipeline is healthy again
+    _reset_creation_backoff()
+
     # OpenAI storage hygiene: inputs rebuild from our DB, outputs are ingested -
     # leaving them accumulates hundreds of MB of dead files on the account
     delete_remote_file(client, row.input_file_id)
@@ -896,11 +924,20 @@ def check_active_batches(session: Session):
                 except Exception as e:
                     logger.error(f"Error processing batch {row.batch_id}: {e}", exc_info=True)
             elif row.status in ['failed', 'cancelled', 'expired']:
-                logger.warning(f"Batch {row.batch_id} is {row.status}. Requeuing its articles...")
-                row.error = row.status
+                detail = summarize_batch_errors(batch_status.get("errors"))
+                logger.warning(f"Batch {row.batch_id} is {row.status} ({detail or 'no error detail'}). Requeuing its articles...")
+                row.error = f"{row.status}: {detail}" if detail else row.status
                 row.collected = True
-                reset_failed_articles(session, row.batch_id)
+                # failed/cancelled never ran, so the attempt was free; expired
+                # batches partially ran and are conservatively left counted
+                reset_failed_articles(session, row.batch_id,
+                                      refund_attempt=row.status in ('failed', 'cancelled'))
                 delete_remote_file(client, row.input_file_id)
+                # Escalating backoff: a batch that fails after successful
+                # submission (the Aug 27-Sep 2 2026 file-visibility outage) must
+                # not trigger an immediate resubmit every 5-minute cycle
+                _register_creation_failure(f"batch {row.batch_id} {row.status}"
+                                           + (f" - {detail}" if detail else ""))
 
             session.commit()
 
@@ -975,7 +1012,8 @@ def reconcile_with_openai(session: Session, client: OpenAI):
         else:
             # failed/cancelled/expired and unknown to us: just record it as resolved
             row.collected = True
-            row.error = rb.status
+            detail = summarize_batch_errors(getattr(rb, "errors", None))
+            row.error = f"{rb.status}: {detail}" if detail else rb.status
             session.commit()
 
     logger.info(f"Reconciliation: {adopted} in-flight batches adopted, {ingested} completed batches ingested")

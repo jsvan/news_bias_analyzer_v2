@@ -24,6 +24,10 @@ export type EntityType = 'country' | 'person' | 'business' | 'organization' | 'e
 export interface SnapshotMeta {
   generated_at: string;
   most_recent_article_date: string | null;
+  // Newest COMPLETED article: scraping and analysis fail independently (the
+  // Aug 27-Sep 2 2026 OpenAI outage kept collecting articles while sentiment
+  // data flatlined). Absent in older snapshots.
+  most_recent_analysis_date?: string | null;
   entity_count: number;
   hist_days: number[];
   country_days: number[];
