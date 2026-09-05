@@ -171,7 +171,8 @@ def delete_remote_file(client: OpenAI, file_id: Optional[str]):
         logger.warning(f"Could not delete OpenAI file {file_id}: {e}")
 
 def _register_creation_failure(error_text: str):
-    """Back off after a failed submission instead of retrying every cycle."""
+    """Back off after a failed submission, or a batch that failed to run after
+    a clean submission, instead of retrying every cycle."""
     _creation_backoff["failures"] += 1
     if "billing" in error_text.lower() or "quota" in error_text.lower():
         # Billing walls don't clear in minutes; retry hourly.
@@ -179,7 +180,7 @@ def _register_creation_failure(error_text: str):
     else:
         delay = min(3600, POLL_INTERVAL_SECONDS * (2 ** _creation_backoff["failures"]))
     _creation_backoff["until"] = time.time() + delay
-    logger.error(f"Batch submission failed ({error_text}); backing off {delay}s "
+    logger.error(f"OpenAI batch failure ({error_text}); backing off {delay}s "
                  f"(consecutive failures: {_creation_backoff['failures']})")
 
 def _reset_creation_backoff():
