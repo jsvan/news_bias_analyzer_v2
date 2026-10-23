@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardHeader, CardContent, Box, Typography, IconButton, Tooltip, Chip } from '@mui/material';
-import InfoIcon from '@mui/icons-material/Info';
+import { Card, CardHeader, CardContent, Box, Typography, Chip } from '@mui/material';
 import { tokens, monoNumber } from '../theme';
 import { embeddingsApi } from '../services/api';
 
@@ -19,8 +18,8 @@ const VECTOR_LABEL: Record<VectorKind, string> = {
 };
 
 const VECTOR_HELP: Record<VectorKind, string> = {
-  cooccurrence: 'Entities that get mentioned in the same articles most often - a topical/associative signal learned from co-occurrence, not asserted.',
-  sentiment: 'Entities that get talked about the same way, by the same sources, in the same weeks - a rhetorical signal, distinct from topical co-occurrence.',
+  cooccurrence: 'Entities most often mentioned in the same articles',
+  sentiment: 'Entities portrayed the same way, by the same sources, in the same weeks',
 };
 
 // "Related entities" - analyzer/entity_embeddings.py's learned relatedness (PPMI +
@@ -46,14 +45,7 @@ const RelatedEntitiesPanel: React.FC<{ entityId: number }> = ({ entityId }) => {
     <Card>
       <CardHeader
         title="Related entities"
-        subheader="Learned from the corpus, not asserted"
-        action={
-          <Tooltip title={VECTOR_HELP[vector]}>
-            <IconButton>
-              <InfoIcon />
-            </IconButton>
-          </Tooltip>
-        }
+        subheader={VECTOR_HELP[vector]}
       />
       <CardContent sx={{ pt: 0 }}>
         <Box sx={{ display: 'flex', gap: 1, mb: 1.5 }}>

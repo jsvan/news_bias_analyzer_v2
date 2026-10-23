@@ -13,7 +13,6 @@ import CountryEntityPage from './pages/CountryEntityPage';
 import CompareEntitiesPage from './pages/CompareEntitiesPage';
 import CompareSourcesPage from './pages/CompareSourcesPage';
 import StoriesPage from './pages/StoriesPage';
-import ShiftsPage from './pages/ShiftsPage';
 import PairPage from './pages/PairPage';
 import MirrorPage from './pages/MirrorPage';
 import SymbolsPage from './pages/SymbolsPage';
@@ -63,9 +62,6 @@ const App: React.FC = () => (
             <Route path="pair" element={<PairPage />} />
             <Route path="pair/:a/:b" element={<PairPage />} />
           </Route>
-
-          {/* What changed this week? */}
-          <Route path="/shifts" element={<ShiftsPage />} />
 
           <Route path="/stories" element={<StoriesPage />} />
           <Route path="/search" element={<SearchPage />} />

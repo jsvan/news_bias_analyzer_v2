@@ -84,6 +84,11 @@ class DriftPoint(BaseModel):
     mean_after: float
 
 
+class PettittScore(BaseModel):
+    statistic: float
+    p_value: float
+
+
 class EntityDriftResponse(BaseModel):
     entity_id: int
     entity_name: str
@@ -91,6 +96,9 @@ class EntityDriftResponse(BaseModel):
     # Scored weeks in the corpus for this entity. Pettitt needs 8; the frontend
     # uses this to say "not enough history yet" instead of implying stability.
     weeks_observed: int = 0
+    # The global series' Pettitt result whether or not it clears SIGNIFICANCE,
+    # so "no shift" can show the score behind it. None under 8 weeks.
+    global_test: Optional[PettittScore] = None
     global_shift: Optional[DriftPoint]
     source_shifts: List[DriftPoint]  # only significant (p < 0.05), sorted by p_value asc
 
@@ -120,8 +128,14 @@ async def get_entity_drift(
         global_values = [global_values[i] for i in keep]
 
     global_shift = None
+    global_test = None
     if len(global_values) >= 8:
         g_result = pettitt_test(global_values)
+        if g_result is not None:
+            global_test = PettittScore(
+                statistic=round(g_result["statistic"], 4),
+                p_value=round(g_result["p_value"], 6),
+            )
         if g_result is not None and g_result["p_value"] < SIGNIFICANCE:
             after_idx = g_result["changepoint_index"] + 1
             if after_idx < len(weeks):
@@ -168,6 +182,7 @@ async def get_entity_drift(
         entity_name=entity.name,
         dimension=dimension,
         weeks_observed=len(global_values),
+        global_test=global_test,
         global_shift=global_shift,
         source_shifts=source_shifts,
     )

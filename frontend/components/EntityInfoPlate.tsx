@@ -41,11 +41,7 @@ const EntityInfoPlate: React.FC<{ info: ActiveEntityInfo | null; sx?: object }> 
         ...sx,
       }}
     >
-      {!info || !subject ? (
-        <Typography variant="caption" sx={{ color: tokens.inkMuted }}>
-          Hover a dot to read it here — click to pin, click anywhere to release.
-        </Typography>
-      ) : (
+      {!info || !subject ? null : (
         <>
           <Typography variant="body2" sx={{ fontWeight: 600, color: tokens.ink }}>
             {info.entity}

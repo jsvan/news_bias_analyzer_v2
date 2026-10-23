@@ -20,9 +20,14 @@ interface EntityDriftResponse {
   dimension: string;
   // Scored weeks in the corpus for this entity; Pettitt's test needs 8.
   weeks_observed?: number;
+  // The global series' Pettitt result even when not significant; absent from
+  // older servers and snapshots.
+  global_test?: { statistic: number; p_value: number } | null;
   global_shift: DriftPoint | null;
   source_shifts: DriftPoint[];
 }
+
+const formatP = (p: number) => (p < 0.001 ? '<0.001' : p.toFixed(3));
 
 const DriftRow: React.FC<{ label: string; point: DriftPoint; first: boolean }> = ({ label, point, first }) => {
   const color = point.mean_after >= point.mean_before ? tokens.hero : tokens.villain;
@@ -45,7 +50,7 @@ const DriftRow: React.FC<{ label: string; point: DriftPoint; first: boolean }> =
         </Typography>
       </Box>
       <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, textAlign: 'right' }}>
-        p={point.p_value < 0.001 ? '<0.001' : point.p_value.toFixed(3)}
+        p={formatP(point.p_value)}
       </Typography>
     </Box>
   );
@@ -75,7 +80,7 @@ const EntityDriftPanel: React.FC<{ entityId: number }> = ({ entityId }) => {
     <Card>
       <CardHeader
         title="Statistical surprise"
-        subheader="Significant shifts (Pettitt's changepoint test), not eyeballed"
+        subheader="Significant shifts (Pettitt's changepoint test)"
         action={
           <Tooltip title="A GLOBAL shift means the whole corpus's average moved - an expected event. A source-specific shift means that one outlet moved on its own, after subtracting out the global trend - that's the editorial-stance surprise.">
             <IconButton>
@@ -123,12 +128,14 @@ const EntityDriftPanel: React.FC<{ entityId: number }> = ({ entityId }) => {
                   2026 — check back as weeks accrue.
                 </>
               ) : (
-                <>
-                  No statistically significant shift detected — coverage of this
-                  entity has stayed stable across {data.weeks_observed} scored weeks.
-                </>
+                <>No significant shift detected across {data.weeks_observed} scored weeks.</>
               )}
             </Typography>
+            {(data.weeks_observed ?? 0) >= 8 && data.global_test && (
+              <Typography variant="caption" sx={{ ...monoNumber, color: tokens.inkMuted, display: 'block', mt: 0.5 }}>
+                K={data.global_test.statistic.toFixed(0)} · p={formatP(data.global_test.p_value)} (significant below p=0.05)
+              </Typography>
+            )}
           </Box>
         )}
         {data?.global_shift && (

@@ -24,7 +24,7 @@ import RelatedEntitiesPanel from '../components/RelatedEntitiesPanel';
 import ArchetypeQuadrantPanel from '../components/ArchetypeQuadrantPanel';
 import EntityDriftPanel from '../components/EntityDriftPanel';
 import ReceiptsDrawer, { ReceiptsFilter } from '../components/ReceiptsDrawer';
-import TimeRangeSelect, { ALL_TIME, describeTimeRange } from '../components/TimeRangeSelect';
+import TimeRangeSelect, { ALL_TIME } from '../components/TimeRangeSelect';
 import { NewsSource, SentimentDistributions, TrendPoint } from '../types';
 import { tokens, archetypeColor, monoNumber } from '../theme';
 
@@ -176,7 +176,7 @@ const EntityProfilePage: React.FC = () => {
         <Grid container spacing={4}>
           <Grid item xs={12} md={7}>
             <Card>
-              <CardHeader title="Sentiment Over Time" subheader={`Tracking ${entity.name}'s own trajectory`} />
+              <CardHeader title="Global Sentiment" />
               <CardContent>
                 <Box sx={{ height: 400 }}>
                   <EntityTrendChart entityName={entity.name} data={trends} height={400} />
@@ -219,7 +219,7 @@ const EntityProfilePage: React.FC = () => {
                       options={availableCountries}
                       value={distCountry}
                       onChange={(_, v) => setDistCountry(v)}
-                      renderInput={(params) => <TextField {...params} label="Compare a country" />}
+                      renderInput={(params) => <TextField {...params} label="Seen from another country" />}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -230,7 +230,7 @@ const EntityProfilePage: React.FC = () => {
                       getOptionLabel={(s) => s.name}
                       isOptionEqualToValue={(a, b) => a.id === b.id}
                       onChange={(_, v) => setDistSource(v)}
-                      renderInput={(params) => <TextField {...params} label="Compare a source" />}
+                      renderInput={(params) => <TextField {...params} label="Seen from a source" />}
                     />
                   </Grid>
                 </Grid>
@@ -255,7 +255,6 @@ const EntityProfilePage: React.FC = () => {
             <Card>
               <CardHeader
                 title={`How Different Sources Portray ${entity.name}`}
-                subheader={`Compare ${Object.keys(sourcesTrends).length} news sources over ${describeTimeRange(selectedTimeRange)}`}
               />
               <CardContent>
                 {Object.keys(sourcesTrends).length > 0 ? (

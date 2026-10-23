@@ -46,6 +46,7 @@ export function layersFromDistributions(d: SentimentDistributions | null | undef
 }
 
 interface SentimentDistributionChartProps {
+  // Omit when the surrounding card already carries the heading.
   title?: string;
   entityName: string;
   layers: DistributionLayer[];
@@ -59,7 +60,7 @@ interface SentimentDistributionChartProps {
 }
 
 const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
-  title = 'Sentiment Distribution',
+  title,
   entityName,
   layers,
   height = 400,
@@ -70,7 +71,11 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
   const dimension = controlledDimension ?? internalDimension;
 
   // Layer visibility is real state: the chips are working toggles.
+  // A lone curve has nothing to toggle against: no chip, and never hidden (so a
+  // curve hidden during a comparison comes back once the comparison is cleared).
   const [hidden, setHidden] = useState<Set<string>>(new Set(initiallyHidden));
+  const togglable = layers.length > 1;
+  const isHidden = (key: string) => togglable && hidden.has(key);
   const toggleLayer = (key: string) =>
     setHidden((prev) => {
       const next = new Set(prev);
@@ -79,7 +84,7 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
     });
 
   const layersWithData = layers.filter((l) => (l[dimension]?.pdf?.x?.length ?? 0) > 0);
-  const visibleLayers = layersWithData.filter((l) => !hidden.has(l.key));
+  const visibleLayers = layersWithData.filter((l) => !isHidden(l.key));
 
   // Merge all visible curves onto a shared x-axis. The backend emits every
   // layer on one fixed grid, so this is index alignment in practice; a map by
@@ -106,33 +111,37 @@ const SentimentDistributionChart: React.FC<SentimentDistributionChartProps> = ({
 
   return (
     <Box sx={{ width: '100%', height: height, padding: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
-        <Box>
-          <Typography variant="h6" sx={{ color: tokens.ink }}>
-            {title}: {entityName}
-          </Typography>
-          <Typography variant="subtitle2" sx={{ color: tokens.inkMuted }}>
-            {dimension === 'power' ? 'Power Dimension' : 'Moral Dimension'} Distribution
-          </Typography>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: title ? 'space-between' : 'flex-end', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+        {title && (
+          <Box>
+            <Typography variant="h6" sx={{ color: tokens.ink }}>
+              {title}: {entityName}
+            </Typography>
+            <Typography variant="subtitle2" sx={{ color: tokens.inkMuted }}>
+              {dimension === 'power' ? 'Power Dimension' : 'Moral Dimension'} Distribution
+            </Typography>
+          </Box>
+        )}
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {/* Toggle which curves to show */}
-          <Box>
-            {layers.map((l) => (
-              <Chip
-                key={l.key}
-                label={l.label}
-                sx={{
-                  mx: 0.5,
-                  bgcolor: !hidden.has(l.key) ? l.color : 'transparent',
-                  color: !hidden.has(l.key) ? '#FFFFFF' : tokens.inkMuted,
-                  border: `1px solid ${!hidden.has(l.key) ? l.color : tokens.border}`,
-                }}
-                onClick={() => toggleLayer(l.key)}
-              />
-            ))}
-          </Box>
+          {togglable && (
+            <Box>
+              {layers.map((l) => (
+                <Chip
+                  key={l.key}
+                  label={l.label}
+                  sx={{
+                    mx: 0.5,
+                    bgcolor: !isHidden(l.key) ? l.color : 'transparent',
+                    color: !isHidden(l.key) ? '#FFFFFF' : tokens.inkMuted,
+                    border: `1px solid ${!isHidden(l.key) ? l.color : tokens.border}`,
+                  }}
+                  onClick={() => toggleLayer(l.key)}
+                />
+              ))}
+            </Box>
+          )}
 
           {/* Dimension toggle — only in uncontrolled mode; pages with a
               page-wide dimension control pass `dimension` instead. */}

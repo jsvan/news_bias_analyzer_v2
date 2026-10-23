@@ -17,9 +17,7 @@ import {
   ToggleButtonGroup, 
   ToggleButton, 
   Paper,
-  Tooltip as MuiTooltip
 } from '@mui/material';
-import InfoIcon from '@mui/icons-material/Info';
 import { tokens, monoNumber } from '../theme';
 
 // Define interfaces
@@ -96,15 +94,7 @@ const EntityTrendChart: React.FC<EntityTrendChartProps> = ({
 
   return (
     <Box sx={{ width: '100%', height: height }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Typography variant="subtitle1" sx={{ mr: 1 }}>
-            {entityName} Sentiment Trend
-          </Typography>
-          <MuiTooltip title="Shows how sentiment towards this entity has changed over time. Higher values indicate more positive portrayal.">
-            <InfoIcon fontSize="small" color="action" />
-          </MuiTooltip>
-        </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 2 }}>
         <ToggleButtonGroup
           size="small"
           value={dimension}
