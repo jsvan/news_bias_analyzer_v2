@@ -87,7 +87,7 @@ class LeadLagResponse(BaseModel):
 
 @router.get("/narrative/lead-lag", response_model=LeadLagResponse)
 async def get_lead_lag(
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     weeks: int = Query(52, ge=10, le=104),
     max_lag: int = Query(4, ge=1, le=8),
     session: Session = Depends(get_session),
@@ -145,7 +145,7 @@ class SynchronyResponse(BaseModel):
 
 @router.get("/narrative/synchrony", response_model=SynchronyResponse)
 async def get_synchrony(
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     weeks: int = Query(52, ge=10, le=104),
     session: Session = Depends(get_session),
 ):

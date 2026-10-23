@@ -95,7 +95,7 @@ class BaseAnalyzer:
             LEFT JOIN entity_mentions em ON na.id = em.article_id
             WHERE 
                 na.publish_date BETWEEN :start_date AND :end_date
-                AND (:country IS NULL OR ns.country = :country)
+                AND (CAST(:country AS TEXT) IS NULL OR ns.country = :country)
             GROUP BY ns.id, ns.name, ns.country
             HAVING COUNT(DISTINCT na.id) >= :min_articles
             ORDER BY COUNT(DISTINCT na.id) DESC

@@ -55,7 +55,7 @@ def _cosine_similarities(target: np.ndarray, others: np.ndarray) -> np.ndarray:
 @router.get("/narrative/related/{entity_id}", response_model=RelatedEntitiesResponse)
 async def get_related_entities(
     entity_id: int,
-    vector: str = Query("cooccurrence", regex="^(cooccurrence|sentiment)$"),
+    vector: str = Query("cooccurrence", pattern="^(cooccurrence|sentiment)$"),
     limit: int = Query(10, ge=1, le=50),
     session: Session = Depends(get_session),
 ):

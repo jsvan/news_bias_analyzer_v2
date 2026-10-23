@@ -219,7 +219,7 @@ class DividingLinesResponse(BaseModel):
 @router.get("/dividing-lines", response_model=DividingLinesResponse)
 async def get_dividing_lines(
     weeks: int = Query(4, ge=2, le=52),
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     limit: int = Query(20, ge=1, le=100),
     session: Session = Depends(get_session),
 ):
@@ -282,7 +282,7 @@ async def get_similarity_pair(
     source_a: int,
     source_b: int,
     weeks: int = Query(4, ge=2, le=52),
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     session: Session = Depends(get_session),
 ):
     """Why two sources correlate: their shared entities with each side's mean score.

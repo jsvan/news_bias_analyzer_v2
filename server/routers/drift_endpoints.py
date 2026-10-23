@@ -98,7 +98,7 @@ class EntityDriftResponse(BaseModel):
 @router.get("/narrative/drift/{entity_id}", response_model=EntityDriftResponse)
 async def get_entity_drift(
     entity_id: int,
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     session: Session = Depends(get_session),
 ):
     """Live changepoint detection for one entity: is there a global shift, and which
@@ -193,9 +193,9 @@ class DriftFeedResponse(BaseModel):
 
 @router.get("/narrative/drift-feed", response_model=DriftFeedResponse)
 async def get_drift_feed(
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     limit: int = Query(20, ge=1, le=100),
-    scope: str = Query("all", regex="^(all|global|source)$"),
+    scope: str = Query("all", pattern="^(all|global|source)$"),
     session: Session = Depends(get_session),
 ):
     """Precomputed drift feed (analyzer/drift_detection.py's weekly job output),

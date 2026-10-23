@@ -122,7 +122,7 @@ class ContestedRankingResponse(BaseModel):
 @router.get("/narrative/contested", response_model=ContestedRankingResponse)
 async def get_contested_ranking(
     days: int = Query(30, ge=7, le=365),
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     limit: int = Query(20, ge=1, le=100),
     session: Session = Depends(get_session),
 ):
@@ -577,7 +577,7 @@ class SourceMapResponse(BaseModel):
 @router.get("/narrative/source-map", response_model=SourceMapResponse)
 async def get_source_map(
     weeks: int = Query(4, ge=2, le=52),
-    dimension: str = Query("moral", regex="^(power|moral)$"),
+    dimension: str = Query("moral", pattern="^(power|moral)$"),
     session: Session = Depends(get_session),
 ):
     """Empirical "beyond left-right" source map: weighted MDS on the pairwise-complete

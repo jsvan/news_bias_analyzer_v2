@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, literal_column
 
 from server.deps import get_db, resolve_entity_group
 from database.models import Entity, EntityMention, NewsArticle, NewsSource
@@ -218,7 +218,7 @@ def get_source_sentiment(
         start_date = end_date - timedelta(days=90)
 
     timeseries_query = db.query(
-        func.date_trunc('day', NewsArticle.publish_date).label("date"),
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date).label("date"),
         func.avg(EntityMention.power_score).label("avg_power"),
         func.avg(EntityMention.moral_score).label("avg_moral")
     ).join(
@@ -227,9 +227,9 @@ def get_source_sentiment(
         NewsArticle.source_id == source_id,
         NewsArticle.publish_date.between(start_date, end_date)
     ).group_by(
-        func.date_trunc('day', NewsArticle.publish_date)
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date)
     ).order_by(
-        func.date_trunc('day', NewsArticle.publish_date)
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date)
     )
 
     timeseries = [{

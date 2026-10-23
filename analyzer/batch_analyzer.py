@@ -566,12 +566,14 @@ def process_batch_output(session: Session, output_content: str, article_lookup: 
                 
                 if 'entities' in analysis_result and analysis_result['entities']:
                     try:
-                        # Process all entities for this article
-                        entity_results = db_service.entities.process_article_entities(
-                            article_id=article.id,
-                            entity_data_list=analysis_result['entities'],
-                            article_date=article.publish_date or article.scraped_at
-                        )
+                        # Process all entities for this article inside a savepoint so a
+                        # failed flush only discards this article, not the session
+                        with session.begin_nested():
+                            entity_results = db_service.entities.process_article_entities(
+                                article_id=article.id,
+                                entity_data_list=analysis_result['entities'],
+                                article_date=article.publish_date or article.scraped_at
+                            )
                         
                         # Collect data for T² calculation
                         article_entities = [
@@ -920,7 +922,8 @@ def check_active_batches(session: Session):
             return
 
         for row in batches:
-            batch_status = check_batch_status(client, row.batch_id)
+            batch_id = row.batch_id  # row expires on rollback; keep the id for logging
+            batch_status = check_batch_status(client, batch_id)
 
             if not batch_status:
                 logger.error(f"Failed to get status for batch {row.batch_id}")
@@ -935,7 +938,8 @@ def check_active_batches(session: Session):
                 try:
                     ingest_batch_output(session, client, row)
                 except Exception as e:
-                    logger.error(f"Error processing batch {row.batch_id}: {e}", exc_info=True)
+                    session.rollback()
+                    logger.error(f"Error processing batch {batch_id}: {e}", exc_info=True)
             elif row.status in ['failed', 'cancelled', 'expired']:
                 detail = summarize_batch_errors(batch_status.get("errors"))
                 logger.warning(f"Batch {row.batch_id} is {row.status} ({detail or 'no error detail'}). Requeuing its articles...")

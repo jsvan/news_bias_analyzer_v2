@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func, cast, Float, text
+from sqlalchemy import func, cast, Float, text, literal_column
 import requests
 from urllib.parse import urlparse
 import re
@@ -530,7 +530,7 @@ def get_sentiment_trends(
         Entity.entity_type,
         func.avg(EntityMention.power_score).label("avg_power"),
         func.avg(EntityMention.moral_score).label("avg_moral"),
-        func.date_trunc('day', NewsArticle.publish_date).label("date")
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date).label("date")
     ).join(
         EntityMention, Entity.id == EntityMention.entity_id
     ).join(
@@ -551,10 +551,10 @@ def get_sentiment_trends(
         Entity.id,
         Entity.name,
         Entity.entity_type,
-        func.date_trunc('day', NewsArticle.publish_date)
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date)
     ).order_by(
         Entity.name,
-        func.date_trunc('day', NewsArticle.publish_date)
+        func.date_trunc(literal_column("'day'"), NewsArticle.publish_date)
     )
     
     # Execute query

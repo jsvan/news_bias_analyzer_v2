@@ -119,7 +119,13 @@ class EntityService:
             if not entity_name or not entity_type:
                 logger.warning(f"Skipping invalid entity data: {entity_data}")
                 continue
-            
+
+            # The model occasionally returns its reasoning instead of a name;
+            # anything that overflows the columns is junk, not an entity
+            if len(entity_name) > Entity.name.type.length or len(entity_type) > Entity.entity_type.type.length:
+                logger.warning(f"Skipping oversized entity: {entity_name[:80]!r}... ({entity_type[:50]!r})")
+                continue
+
             # Create or get entity
             entity = self.get_or_create_entity(entity_name, entity_type)
             

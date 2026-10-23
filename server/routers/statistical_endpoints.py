@@ -86,7 +86,7 @@ class AvailableCountriesResponse(BaseModel):
 @router.get("/sentiment/distribution", response_model=SentimentDistributionResponse)
 async def get_sentiment_distribution(
     entity_name: str,
-    dimension: str = Query("power", regex="^(power|moral)$"),
+    dimension: str = Query("power", pattern="^(power|moral)$"),
     country: Optional[str] = None,
     source_id: Optional[int] = None,
     half_life_days: float = Query(14.0, ge=1.0, le=365.0, description="Half-life for temporal weighting in days"),
@@ -554,8 +554,8 @@ class TopicClusterResponse(BaseModel):
 @router.get("/topics/cluster", response_model=TopicClusterResponse)
 async def get_topic_clusters(
     article_url: Optional[str] = None,
-    view_type: str = Query("topics", regex="^(topics|entities)$"),
-    threshold: str = Query("medium", regex="^(weak|medium|strong)$"),
+    view_type: str = Query("topics", pattern="^(topics|entities)$"),
+    threshold: str = Query("medium", pattern="^(weak|medium|strong)$"),
     session: Session = Depends(get_session)
 ):
     """
@@ -679,7 +679,7 @@ def calculate_sliding_window_average(mentions, start_date, end_date, window_size
 @router.get("/entity/available-countries", response_model=AvailableCountriesResponse)
 async def get_available_countries_for_entity(
     entity_name: str,
-    dimension: str = Query("power", regex="^(power|moral)$"),
+    dimension: str = Query("power", pattern="^(power|moral)$"),
     min_mentions: int = Query(3, ge=1),
     session: Session = Depends(get_session)
 ):

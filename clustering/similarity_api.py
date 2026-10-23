@@ -241,7 +241,7 @@ class SimilarityAPI(BaseAnalyzer):
                 JOIN news_sources ns ON sc.source_id = ns.id
                 WHERE 
                     sc.assigned_date <= :date
-                    AND (:country IS NULL OR ns.country = :country)
+                    AND (CAST(:country AS TEXT) IS NULL OR ns.country = :country)
                 ORDER BY sc.source_id, sc.assigned_date DESC
             )
             SELECT 
